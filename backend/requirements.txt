@@ -1,0 +1,11 @@
+Django==5.0.6
+djangorestframework==3.17.1
+django-fsm==3.0.1
+django-simple-history==3.12.0
+psycopg2-binary==2.9.12
+celery==5.4.0
+redis==5.0.4
+django-auth-adfs==1.16.0
+python-dotenv==1.0.1
+pyotp==2.9.0
+boto3==1.34.144

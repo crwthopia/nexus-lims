@@ -1,0 +1,136 @@
+erDiagram
+    %% Supporting subsystems: accounts/RBAC, documents, equipment, training, billing, audit
+
+    ROLE {
+        bigint id PK
+        string name
+        json permission_set
+    }
+    STAFF_USER {
+        bigint id PK
+        string entra_oid
+        string display_name
+        string email
+    }
+    CUSTOMER_USER {
+        bigint id PK
+        string email
+    }
+    ESIGNATURE {
+        bigint id PK
+        bigint signer_id FK
+        string meaning
+        datetime signed_at
+        string hash
+    }
+    DOCUMENT {
+        bigint id PK
+        string title
+        string doc_type
+        bigint current_version_id FK
+    }
+    DOCUMENT_VERSION {
+        bigint id PK
+        bigint document_id FK
+        int version_number
+        bigint approved_by_id FK
+    }
+    STANDARD_REAGENT {
+        bigint id PK
+        string name
+        string lot_number
+        date expiry_date
+    }
+    INSTRUMENT {
+        bigint id PK
+        string name
+        string asset_tag
+        bigint parent_instrument_id FK
+        bigint custodian_id FK
+    }
+    CALIBRATION_RECORD {
+        bigint id PK
+        bigint instrument_id FK
+        bigint performed_by_id FK
+        date calibration_date
+        date next_due_date
+    }
+    TRAINING_COURSE {
+        bigint id PK
+        string title
+        decimal cpd_units
+        decimal price
+    }
+    TRAINING_SESSION {
+        bigint id PK
+        bigint course_id FK
+        bigint instructor_id FK
+        datetime start_date
+        int min_capacity
+        string status
+    }
+    ENROLLMENT {
+        bigint id PK
+        bigint session_id FK
+        bigint customer_id FK
+        string status
+        string payment_status
+    }
+    CREDIT_NOTE {
+        bigint id PK
+        bigint customer_id FK
+        bigint source_enrollment_id FK
+        bigint applied_to_enrollment_id FK
+        decimal amount
+    }
+    INVOICE {
+        bigint id PK
+        bigint order_id FK
+        bigint enrollment_id FK
+        decimal total_amount
+        string status
+    }
+    PAYMENT {
+        bigint id PK
+        bigint invoice_id FK
+        bigint recorded_by_id FK
+        decimal amount
+        string method
+    }
+    AUDIT_LOG_ENTRY {
+        bigint id PK
+        bigint actor_id
+        string entity_type
+        bigint entity_id
+        datetime timestamp
+    }
+    RETENTION_POLICY {
+        bigint id PK
+        string record_type
+        int retention_days
+        string action_after_expiry
+    }
+
+    ROLE }o--o{ STAFF_USER : "roles (M2M)"
+    STAFF_USER ||--o{ ESIGNATURE : signs
+    ESIGNATURE ||--o{ AUDIT_LOG_ENTRY : signs
+
+    DOCUMENT ||--o{ DOCUMENT_VERSION : has
+    STAFF_USER ||--o{ DOCUMENT_VERSION : approves
+
+    INSTRUMENT ||--o{ INSTRUMENT : "parent (self-FK)"
+    STAFF_USER ||--o{ INSTRUMENT : "custodian of"
+    INSTRUMENT ||--o{ CALIBRATION_RECORD : "calibrated via"
+    STAFF_USER ||--o{ CALIBRATION_RECORD : performs
+
+    TRAINING_COURSE ||--o{ TRAINING_SESSION : "scheduled as"
+    STAFF_USER ||--o{ TRAINING_SESSION : instructs
+    TRAINING_SESSION ||--o{ ENROLLMENT : "enrolled in"
+    CUSTOMER_USER ||--o{ ENROLLMENT : enrolls
+    ENROLLMENT ||--o{ CREDIT_NOTE : "source of"
+    CREDIT_NOTE ||--o{ ENROLLMENT : "applied to"
+    CUSTOMER_USER ||--o{ CREDIT_NOTE : owns
+
+    ENROLLMENT ||--o| INVOICE : "billed as"
+    INVOICE ||--o{ PAYMENT : "paid via"
+    STAFF_USER ||--o{ PAYMENT : records

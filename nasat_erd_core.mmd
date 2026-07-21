@@ -1,0 +1,110 @@
+erDiagram
+    %% Core sample-to-report workflow (accounts, samples, testing, review, reporting, investigations)
+
+    STAFF_USER {
+        bigint id PK
+        string display_name
+        string email
+        string prc_license_number
+    }
+    CUSTOMER_USER {
+        bigint id PK
+        string email
+        string prc_license_number
+    }
+    ORDER {
+        bigint id PK
+        bigint customer_id FK
+        string service_line
+        string status
+    }
+    SAMPLE {
+        bigint id PK
+        bigint order_id FK
+        string service_line
+        string unique_sample_code
+        string status
+        json safety_flags
+    }
+    CHAIN_OF_CUSTODY_EVENT {
+        bigint id PK
+        bigint sample_id FK
+        bigint from_holder_id FK
+        bigint to_holder_id FK
+        datetime transferred_at
+    }
+    TEST_METHOD {
+        bigint id PK
+        string name
+        string code
+    }
+    TEST_REQUEST {
+        bigint id PK
+        bigint sample_id FK
+        bigint test_method_id FK
+        bigint assigned_analyst_id FK
+        bigint assigned_instrument_id FK
+        string status
+    }
+    TEST_RESULT {
+        bigint id PK
+        bigint test_request_id FK
+        bigint entered_by_id FK
+        bigint instrument_id FK
+        string raw_file_checksum_sha256
+    }
+    REVIEW_ACTION {
+        bigint id PK
+        bigint test_result_id FK
+        bigint sample_id FK
+        bigint reviewer_id FK
+        string outcome
+    }
+    APPROVAL_ACTION {
+        bigint id PK
+        bigint sample_id FK
+        bigint approver_id FK
+        string outcome
+    }
+    REPORT {
+        bigint id PK
+        bigint sample_id FK
+        bigint order_id FK
+        bigint generated_by_id FK
+        string report_type
+    }
+    INVESTIGATION {
+        bigint id PK
+        bigint related_test_result_id FK
+        bigint related_sample_id FK
+        bigint opened_by_id FK
+        string root_cause
+        string capa_action
+    }
+
+    CUSTOMER_USER ||--o{ ORDER : places
+    ORDER ||--o{ SAMPLE : contains
+    SAMPLE ||--o{ CHAIN_OF_CUSTODY_EVENT : tracks
+    STAFF_USER ||--o{ CHAIN_OF_CUSTODY_EVENT : "holds custody"
+
+    SAMPLE ||--o{ TEST_REQUEST : requires
+    TEST_METHOD ||--o{ TEST_REQUEST : "used in"
+    STAFF_USER ||--o{ TEST_REQUEST : "assigned analyst"
+
+    TEST_REQUEST ||--o{ TEST_RESULT : produces
+    STAFF_USER ||--o{ TEST_RESULT : enters
+
+    TEST_RESULT ||--o{ REVIEW_ACTION : "reviewed via"
+    SAMPLE ||--o{ REVIEW_ACTION : "reviewed on"
+    STAFF_USER ||--o{ REVIEW_ACTION : reviews
+
+    SAMPLE ||--o{ APPROVAL_ACTION : "approved on"
+    STAFF_USER ||--o{ APPROVAL_ACTION : approves
+
+    SAMPLE ||--o{ REPORT : "reported for"
+    ORDER ||--o{ REPORT : "reported for"
+    STAFF_USER ||--o{ REPORT : generates
+
+    TEST_RESULT ||--o{ INVESTIGATION : "may trigger"
+    SAMPLE ||--o{ INVESTIGATION : "may trigger"
+    STAFF_USER ||--o{ INVESTIGATION : opens
