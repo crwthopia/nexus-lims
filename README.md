@@ -32,6 +32,9 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
+- **43-test automated regression suite** (`backend/tests/`, pytest +
+  pytest-django + factory_boy), run against the same live Postgres/Redis/
+  MinIO stack rather than mocked — see Running the test suite below.
 
 ## What is in this package
 
@@ -46,7 +49,10 @@ nasat-lims/
 └── backend/
     ├── manage.py
     ├── requirements.txt
+    ├── requirements-dev.txt       <- adds pytest, pytest-django, factory_boy
+    ├── pytest.ini
     ├── .env.example
+    ├── tests/                     <- see "Running the test suite" below
     ├── config/
     │   ├── settings.py        <- Postgres, Celery/Redis, OSS, Entra ID, DRF, TIME_ZONE=Asia/Manila
     │   ├── urls.py             <- /admin/, /api/v1/, /api-auth/, /oauth2/ (Entra ID SSO)
@@ -440,6 +446,70 @@ to sanity-check the worker is picking things up):
 python manage.py shell -c "from apps.audit.tasks import run_retention_sweep; print(run_retention_sweep.delay().get(timeout=20))"
 ```
 
+## Running the test suite
+
+`backend/tests/` (pytest + pytest-django + factory_boy) covers the
+behaviors this README calls "verified live" above, run for real against a
+live Postgres/Redis/MinIO stack (a real `test_nasat_lims` database, created
+and migrated by pytest-django) rather than mocked — consistent with how
+everything else in this project has been verified:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+43 tests, organized by behavior rather than by app:
+
+| File | Covers |
+|---|---|
+| `test_sample_fsm.py` | `Sample` FSM transitions end to end, illegal-transition 400s, per-action role gates |
+| `test_segregation_of_duties.py` | `check_can_approve`: regulated (Water/Environmental) hard split vs. Failure Analysis self-approve bypass |
+| `test_row_level_security.py` | Customer order/sample isolation through the real API *and* directly against the DB connection (bypassing the ORM's own filtering) — proves the Postgres policy itself enforces the boundary |
+| `test_customer_auth.py` | Register → verify-email → login, generic invalid-credentials error, TOTP MFA enroll/confirm/login |
+| `test_auth_domain_isolation.py` | Customer session can't reach staff endpoints and vice versa; a customer-authenticated write doesn't crash `django-simple-history` |
+| `test_testing_competency_and_oos.py` | FR-C3-02 competency gate, FR-C3-08 server-computed OOS flag, expired-reagent rejection |
+| `test_documents.py` | FR-D1-03 version approval archives the prior current version and syncs `Document.current_version` |
+| `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date` |
+| `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close |
+| `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker) |
+| `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
+| `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
+
+Two non-obvious fixtures in `tests/conftest.py` are worth knowing about
+before adding more tests:
+
+- **Staff login uses `client.force_login(user, backend=...)`, never DRF's
+  `force_authenticate`.** `force_authenticate` only patches the DRF-wrapped
+  `Request` seen inside the view; `RLSContextMiddleware` reads the plain
+  Django `request.user` *before* DRF ever wraps it, so `force_authenticate`
+  would silently defeat the RLS staff-bypass policy. `force_login` drives a
+  real session through `AuthenticationMiddleware`, same as a real
+  Entra ID-authenticated request.
+- **`_rls_staff_bypass_for_fixture_setup` (autouse)** defaults every test's
+  DB connection to the RLS staff-bypass policy, because `order`/`sample`
+  carry `FORCE ROW LEVEL SECURITY` and factory setup writes directly via the
+  ORM outside of any HTTP request (so `RLSContextMiddleware` never runs to
+  set the session variables the policies check). Without it, an ordinary
+  `OrderFactory()` call in test setup is rejected by Postgres itself.
+  `test_row_level_security.py` overrides this explicitly to test the real
+  policy; any actual API request in any other test overwrites it via the
+  middleware regardless.
+- **Use `tests/helpers.reload(instance)`, not `instance.refresh_from_db()`,
+  for models with a `django-fsm` `protected=True` field** (`Sample`,
+  `TestRequest`, `TrainingSession`, `Enrollment`). None of them mix in
+  `django_fsm.FSMModelMixin` (which teaches `refresh_from_db` to skip
+  protected fields), so calling it directly raises `AttributeError: Direct
+  status modification is not allowed` — a real, currently-latent footgun in
+  the models themselves, not just a test artifact.
+
+Not covered yet: Entra ID SSO (needs a live Azure AD tenant, per the
+Authentication section above), report PDF generation and instrument
+file-parsing (neither is built — see Known gaps below), and the two Celery
+beat schedule entries themselves (the task *logic* is tested directly;
+`CELERY_BEAT_SCHEDULE`'s cron wiring isn't).
+
 ## Known gaps / next steps
 
 Genuinely not built yet, not just undocumented:
@@ -459,10 +529,6 @@ Genuinely not built yet, not just undocumented:
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —
   walk-in/staff-initiated intake is still the only path onto a `Sample`.
-- **No automated test suite.** Everything described as "verified" above
-  was verified by actually running it (live HTTP requests, direct DB
-  queries, real Celery dispatch) during development, not via
-  `pytest`/`Django TestCase`. There's no regression safety net yet.
 - **No CI/CD, no IaC.** No GitHub Actions workflows, no Terraform for the
   Alibaba Cloud resources described in Blueprint Section 2.2 — this all
   runs from a local dev environment only.
