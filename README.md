@@ -460,7 +460,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-43 tests, organized by behavior rather than by app:
+47 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -476,6 +476,7 @@ pytest
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker) |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
+| `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 
 Two non-obvious fixtures in `tests/conftest.py` are worth knowing about
 before adding more tests:
@@ -496,13 +497,19 @@ before adding more tests:
   `test_row_level_security.py` overrides this explicitly to test the real
   policy; any actual API request in any other test overwrites it via the
   middleware regardless.
-- **Use `tests/helpers.reload(instance)`, not `instance.refresh_from_db()`,
-  for models with a `django-fsm` `protected=True` field** (`Sample`,
-  `TestRequest`, `TrainingSession`, `Enrollment`). None of them mix in
-  `django_fsm.FSMModelMixin` (which teaches `refresh_from_db` to skip
-  protected fields), so calling it directly raises `AttributeError: Direct
-  status modification is not allowed` — a real, currently-latent footgun in
-  the models themselves, not just a test artifact.
+- **`tests/helpers.reload(instance)`** fetches a fresh instance via
+  `Model.objects.get(pk=...)` instead of calling `instance.refresh_from_db()`
+  in place. It predates a real bug this test suite surfaced: `Sample`,
+  `TestRequest`, `TrainingSession`, and `Enrollment` all declare a
+  `django-fsm` `protected=True` field but didn't mix in
+  `django_fsm.FSMModelMixin`, so `Model.refresh_from_db()`'s plain `setattr`
+  on every field hit the protected FSM descriptor's rejection of any second
+  direct assignment, raising `AttributeError: Direct status modification is
+  not allowed` — on any instance of any of these four models, not just in
+  tests. Now fixed (`FSMModelMixin` added to all four,
+  `test_fsm_refresh_from_db.py` regression-tests it), so plain
+  `refresh_from_db()` works again; `reload()` is kept as a convenience for
+  new tests that don't need to mutate the same instance in place.
 
 Not covered yet: Entra ID SSO (needs a live Azure AD tenant, per the
 Authentication section above), report PDF generation and instrument

@@ -15,7 +15,7 @@ Encodes the fully RESOLVED Section 13 gap 7 decisions:
 """
 
 from django.db import models
-from django_fsm import FSMField, transition
+from django_fsm import FSMField, FSMModelMixin, transition
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
@@ -42,7 +42,7 @@ class TrainingCourse(models.Model):
         return self.title
 
 
-class TrainingSession(models.Model):
+class TrainingSession(FSMModelMixin, models.Model):
     """
     Blueprint Section 3.6. min_capacity and cancellation_threshold_days
     (added per NASAT architectural review, closes the remainder of Section
@@ -50,6 +50,9 @@ class TrainingSession(models.Model):
     Blueprint Section 3.6 / 4.3: if confirmed Enrollment count is below
     min_capacity at cancellation_threshold_days before start_date, status
     auto-transitions to pending_reschedule.
+
+    FSMModelMixin: see apps.samples.models.Sample -- same protected=True
+    refresh_from_db() footgun, same fix.
     """
 
     class Status(models.TextChoices):
@@ -107,11 +110,14 @@ class TrainingSession(models.Model):
         pass
 
 
-class Enrollment(models.Model):
+class Enrollment(FSMModelMixin, models.Model):
     """
     Blueprint Section 3.6. `rescheduled` replaces any refund-style workflow
     (Section 13 gap 7, RESOLVED): funds stay tied to the customer's account
     via a CreditNote rather than a cash/bank refund.
+
+    FSMModelMixin: see apps.samples.models.Sample -- same protected=True
+    refresh_from_db() footgun, same fix.
     """
 
     class Status(models.TextChoices):

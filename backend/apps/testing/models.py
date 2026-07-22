@@ -4,7 +4,7 @@ first since accounts.StaffUser.instrument_certifications M2M's to it.
 """
 
 from django.db import models
-from django_fsm import FSMField, transition
+from django_fsm import FSMField, FSMModelMixin, transition
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
@@ -35,11 +35,14 @@ class TestMethod(models.Model):
         return f"{self.name} ({self.method_reference})"
 
 
-class TestRequest(models.Model):
+class TestRequest(FSMModelMixin, models.Model):
     """
     Blueprint Section 3.2. status mirrors the relevant slice of Sample.status
     for the specific test (a Sample may have multiple TestRequests against
     different TestMethods running independently).
+
+    FSMModelMixin: see apps.samples.models.Sample -- same protected=True
+    refresh_from_db() footgun, same fix.
     """
 
     class Status(models.TextChoices):

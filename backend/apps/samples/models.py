@@ -10,7 +10,7 @@ non-regulated lines (Failure Analysis) permit a self-approve bypass.
 """
 
 from django.db import models
-from django_fsm import FSMField, transition
+from django_fsm import FSMField, FSMModelMixin, transition
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
@@ -52,7 +52,7 @@ class Order(models.Model):
         return f"Order #{self.id} ({self.get_service_line_display()})"
 
 
-class Sample(models.Model):
+class Sample(FSMModelMixin, models.Model):
     """
     Blueprint Section 3.2. service_line is denormalized directly onto Sample
     (added per NASAT architectural review) rather than only derived via
@@ -64,6 +64,12 @@ class Sample(models.Model):
     pre_registered -> registered -> received -> in_prep -> in_testing ->
     under_review -> approved | rejected -> under_investigation ->
     retest_pending (-> in_testing) | disposed
+
+    FSMModelMixin: without it, instance.refresh_from_db() raises
+    AttributeError on this model, since Model.refresh_from_db() does a plain
+    setattr() for every field and status's protected=True descriptor rejects
+    any second direct assignment. The mixin teaches refresh_from_db() to
+    skip protected FSM fields instead of reassigning them.
     """
 
     class Status(models.TextChoices):
