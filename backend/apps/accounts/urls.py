@@ -10,7 +10,14 @@ from apps.accounts.customer_views import (
     CustomerRegisterView,
     CustomerVerifyEmailView,
 )
-from apps.accounts.views import CustomerUserViewSet, ESignatureViewSet, RoleViewSet, StaffUserViewSet
+from apps.accounts.views import (
+    CustomerUserViewSet,
+    ESignatureViewSet,
+    RoleViewSet,
+    StaffLogoutView,
+    StaffMeView,
+    StaffUserViewSet,
+)
 
 router = SimpleRouter()
 router.register("roles", RoleViewSet, basename="role")
@@ -29,4 +36,9 @@ customer_auth_urlpatterns = [
     path("auth/customer/mfa/confirm", CustomerMFAConfirmView.as_view(), name="customer-mfa-confirm"),
 ]
 
-urlpatterns = router.urls + customer_auth_urlpatterns
+staff_auth_urlpatterns = [
+    path("auth/staff/me", StaffMeView.as_view(), name="staff-me"),
+    path("auth/staff/logout", StaffLogoutView.as_view(), name="staff-logout"),
+]
+
+urlpatterns = router.urls + customer_auth_urlpatterns + staff_auth_urlpatterns

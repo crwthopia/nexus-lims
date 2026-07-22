@@ -1,12 +1,13 @@
-# NASAT LIMS Backend
+# NASAT LIMS
 
-A working Django/DRF backend for the NASAT Laboratory Information
-Management System, built directly from the locked-in decisions in the
-NASAT LIMS Blueprint (all 12 gaps in Blueprint Section 13 resolved). This
-is not a schema mockup — every piece described below has been exercised
-against a live PostgreSQL 18 database, a live Redis broker, a live
-S3-compatible object store, and (for staff SSO) a live Microsoft Entra ID
-tenant, not just imported cleanly.
+A working Django/DRF backend, plus a React/TypeScript Staff Console
+frontend, for the NASAT Laboratory Information Management System, built
+directly from the locked-in decisions in the NASAT LIMS Blueprint (all 12
+gaps in Blueprint Section 13 resolved). This is not a schema mockup —
+every piece described below has been exercised against a live PostgreSQL
+18 database, a live Redis broker, a live S3-compatible object store, and
+(for staff SSO) a live Microsoft Entra ID tenant, not just imported
+cleanly.
 
 Grounding: every entity, endpoint, and background task traces back to ASTM
 E1578-18, ISO/IEC 17025:2017, the NASAT service list, or an explicit NASAT
@@ -35,6 +36,14 @@ was invented outside that grounding.
 - **43-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
+- **Staff Console frontend** (`frontend/`, React + TypeScript + Vite,
+  Blueprint Section 2.1 item 1): real Entra ID SSO login through Django,
+  a live samples worklist, and the full Sample FSM action set
+  (register → receive → prep → testing → review → approve/reject → …)
+  driven against the real API — not a mockup, see "Staff Console" below.
+  Covers the Samples resource group only so far; the rest of the API
+  surface (testing, documents, equipment, training, billing, etc.) has no
+  UI yet.
 
 ## What is in this package
 
@@ -45,7 +54,14 @@ nasat-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat)
+├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend)
+├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
+│   ├── vite.config.ts          <- dev server on :5174, proxies /api,/admin,/static to Django on :8000
+│   └── src/
+│       ├── api/                <- client.ts (fetch wrapper), types.ts, queries.ts (React Query hooks)
+│       ├── auth/AuthContext.tsx <- staff-me query, login/logout, hasRole()
+│       ├── components/         <- Layout, ProtectedRoute, StatusBadge
+│       └── pages/               <- Login, SamplesList, SampleDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -311,6 +327,71 @@ history-tracked model. Fixed once, centrally, in
 `apps/accounts/history.py` (`get_history_user`), applied to every
 `HistoricalRecords()` declaration across all 10 apps.
 
+## Staff Console (React frontend)
+
+`frontend/` (Blueprint Section 2.1 item 1): Vite + React + TypeScript,
+React Router, and TanStack Query. Session-cookie auth against the same
+Entra ID SSO flow the backend already had — not the MSAL.js
+Bearer-token-in-the-browser pattern the API layer's doc comment on
+`AdfsAccessTokenAuthentication` anticipates, and that's a deliberate
+choice, not an oversight: MSAL.js needs the Azure App Registration to also
+expose a "Single-page application" platform redirect (public client, PKCE),
+which is an Azure Portal change outside this repo's control. Reusing the
+already-live-tested `/oauth2/login` server-side flow needed zero Azure
+changes and works today; switching to MSAL.js is a real option later if
+NASAT wants the SPA fully decoupled from the Django host.
+
+**Running it**: `cd frontend && npm install && npm run dev` (or the
+`frontend` entry in `.claude/launch.json`), alongside the backend on
+`:8000`. The dev server listens on `:5174` and proxies `/api`, `/admin`,
+and `/static` to `:8000` (`vite.config.ts`), so the browser only ever talks
+to one origin and the Django session cookie works with zero CORS setup.
+
+**Login flow**, and why it needs one extra hop: clicking "Log in with
+Microsoft" is a real full-page navigation to
+`http://localhost:8000/oauth2/login?next=/staff/login-complete/` — Entra ID
+SSO can't happen inside a fetch(). `next=` is `django-auth-adfs`'s own
+post-login redirect mechanism, but it only allows redirecting within the
+*same host:port* the login started on (`url_has_allowed_host_and_scheme`
+checks against `request.get_host()`), so it can't send the browser from
+Django's port straight back to Vite's port on its own. `StaffLoginCompleteView`
+(`apps/accounts/views.py`) closes that gap: `next=` points at it (same-origin,
+passes the safety check), and it issues a real `HttpResponseRedirect` to
+`settings.STAFF_CONSOLE_BASE_URL` — an app-controlled setting, not
+user input, so there's no open-redirect risk in trusting it. The session
+cookie set during the Entra ID callback carries over regardless of the
+port hop, since cookie scoping is host-based, not port-based.
+
+**Two other real bugs surfaced building this**, both fixed in the backend:
+- `GET /auth/staff/me` and `POST /auth/staff/logout` (`apps/accounts/views.py`
+  `StaffMeView`/`StaffLogoutView`) didn't exist before — `StaffUserViewSet`
+  is a paginated listing of *every* staff user, not scoped to the caller, so
+  there was previously no way for a client to ask "who am I / what roles do
+  I hold," which the console needs on every page load to render role-gated
+  actions (`SampleViewSet._ROLE_MAP`, mirrored client-side in
+  `frontend/src/api/types.ts SAMPLE_ACTION_ROLES` — kept in sync by hand,
+  no codegen yet). `StaffLogoutView` clears only the Django session, not the
+  Entra ID/Microsoft SSO session — deliberately separate from
+  `/oauth2/logout`, which this version of `django-auth-adfs` can't be told
+  a post-logout redirect for, so following it would strand the browser on a
+  bare Microsoft page with no way back to the console.
+- Every state-changing request from the SPA (e.g. a Sample FSM action)
+  failed with `CSRF Failed: Origin checking failed`, even though the
+  session/CSRF cookies themselves were flowing correctly through the proxy.
+  Django 4+'s `CsrfViewMiddleware` checks the browser's real `Origin` header
+  (`http://localhost:5174`) against `request.get_host()`, and Vite's proxy
+  doesn't make that match — confirmed live via the browser preview, not
+  just reasoned about. Fixed with `CSRF_TRUSTED_ORIGINS`
+  (`config/settings.py`).
+
+**Verified live** (browser preview, not just unit tests): logged in via a
+local password-auth account (real Entra ID SSO needs a live Microsoft
+sign-in this environment can't complete non-interactively), loaded the real
+samples worklist from Postgres, opened a sample, ran `register` then
+`receive` through the actual FSM actions — status and the chain-of-custody
+timeline updated from real API responses each time — and logged out
+correctly.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -383,6 +464,8 @@ rather than silently losing the archival action.
 
 ### Prerequisites
 
+- **Node.js** (v24 used in dev) — only needed for the Staff Console
+  frontend (`frontend/`); the backend alone doesn't need it.
 - **PostgreSQL** (18 used in dev) — the app database.
 - **Redis** — Celery broker/result backend.
 - **An S3-compatible object store** — a local [MinIO](https://min.io/)
@@ -521,9 +604,18 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **No frontend.** Staff Console and Customer Portal (Blueprint Section
-  2.1 item 1, React/TypeScript) don't exist — this is API-only. `/` and
-  `/admin/` are the only browsable entry points.
+- **Staff Console covers Samples only.** `frontend/` (see "Staff Console"
+  above) has login, the samples worklist, and the full Sample FSM action
+  set — nothing yet for testing/results entry, documents, equipment,
+  investigations, training, or billing. No CI-driven build/typecheck for it
+  either (backend's CI gap below applies here too).
+- **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
+  frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
+  `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
+- **No frontend automated tests.** The Staff Console was verified live
+  through the browser preview during development (see "Staff Console"
+  above), not via Vitest/React Testing Library — there's no regression
+  safety net on the frontend the way `backend/tests/` gives the API.
 - **No report PDF generation.** `Report` is metadata + an OSS object key
   (`file_id`) supplied by the caller; the decoupled WeasyPrint/Jinja2
   rendering pipeline described in Blueprint Section 2.1a hasn't been

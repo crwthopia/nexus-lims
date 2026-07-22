@@ -18,6 +18,8 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic.base import RedirectView
 
+from apps.accounts.views import StaffLoginCompleteView
+
 # Versioned under /api/v1/ per Blueprint Section 6. Each app owns its own
 # urls.py (a SimpleRouter of ModelViewSets/ReadOnlyModelViewSets) so the
 # resource groups stay aligned with the ASTM function-map app split in
@@ -53,4 +55,10 @@ urlpatterns = [
     # SSO-bypass variants. Importing this triggers django_auth_adfs to
     # validate AUTH_ADFS at startup -- see config/settings.py.
     path('oauth2/', include('django_auth_adfs.urls')),
+    # Bounces the browser from this dev server's port back to the Staff
+    # Console SPA's port once Entra ID SSO finishes -- see
+    # apps.accounts.views.StaffLoginCompleteView and config/settings.py
+    # STAFF_CONSOLE_BASE_URL for why this can't just be django-auth-adfs's
+    # own "next" redirect.
+    path('staff/login-complete/', StaffLoginCompleteView.as_view(), name='staff-login-complete'),
 ]

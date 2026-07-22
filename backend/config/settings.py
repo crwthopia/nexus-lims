@@ -25,6 +25,21 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-key-change-me")
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# CSRF (Blueprint Section 2.1 item 1: React Staff Console). Django's
+# CsrfViewMiddleware checks the Origin header against request.get_host() on
+# every unsafe request since Django 4.0, falling back to this list when they
+# don't match -- which they never will here, since the SPA (frontend/, Vite
+# dev server on 5174) and Django (8000) are different origins even though
+# Vite's dev proxy (vite.config.ts) makes /api/* requests *look* same-origin
+# to the browser's fetch() call; the Origin header it sends still reflects
+# the page's real origin. Confirmed empirically: without this, every
+# state-changing request from the SPA (e.g. a Sample FSM action) failed with
+# "CSRF Failed: Origin checking failed" even though the session/CSRF cookies
+# themselves were flowing correctly.
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    "DJANGO_CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://localhost:5174"
+).split(",")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -241,6 +256,19 @@ DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasat
 # use to build the clickable verification link; the console email includes
 # the raw token either way so this doesn't block testing the flow.
 CUSTOMER_PORTAL_BASE_URL = os.environ.get("CUSTOMER_PORTAL_BASE_URL", "http://localhost:5173")
+
+# Base URL of the React Staff Console (frontend/, Blueprint Section 2.1 item
+# 1). Used only by StaffLoginCompleteView (apps/accounts/views.py) to bounce
+# the browser back to the SPA once Entra ID SSO finishes: django-auth-adfs's
+# own post-login redirect (the "next"/state param, see OAuth2CallbackView)
+# only allows redirecting within the *same host:port* it was reached on
+# (url_has_allowed_host_and_scheme checks against request.get_host()), so it
+# can't send the browser from the Django dev server's port straight back to
+# the Vite dev server's port on its own -- this setting is the one place
+# that cross-port hop is expressed. Deliberately a different default port
+# (5174) than CUSTOMER_PORTAL_BASE_URL's 5173, since both dev servers may
+# run at once once the customer portal exists too.
+STAFF_CONSOLE_BASE_URL = os.environ.get("STAFF_CONSOLE_BASE_URL", "http://localhost:5174")
 
 # Email verification token expiry (django.core.signing.TimestampSigner,
 # apps/accounts/customer_auth.py) -- CustomerUser isn't AUTH_USER_MODEL so
