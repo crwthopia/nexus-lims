@@ -61,7 +61,7 @@ nasat-lims/
 │       ├── api/                <- client.ts (fetch wrapper), types.ts, queries.ts (React Query hooks)
 │       ├── auth/AuthContext.tsx <- staff-me query, login/logout, hasRole()
 │       ├── components/         <- Layout, ProtectedRoute, StatusBadge
-│       └── pages/               <- Login, SamplesList, SampleDetail
+│       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -391,6 +391,29 @@ samples worklist from Postgres, opened a sample, ran `register` then
 `receive` through the actual FSM actions — status and the chain-of-custody
 timeline updated from real API responses each time — and logged out
 correctly.
+
+**Review Queue** (`frontend/src/pages/ReviewQueue.tsx`): a worklist of
+samples in `under_review`, for Reviewer/Approver/QA Officer/Lab Supervisor,
+flagging `water_environmental` as a regulated service line. The Sample
+detail page's Actions panel now shows the full review/approval history
+(`GET /review-actions/?sample=` and `/approval-actions/?sample=`, both
+already-existing read-only endpoints, apps/review/views.py) and disables
+Approve client-side — with the same ASTM E1578-18 6.6.1 message the server
+gives — when the current user already reviewed a regulated sample
+themselves, mirroring `apps.review.services.check_can_approve` as defense
+in depth rather than letting the click round-trip to a 400.
+
+A real bug surfaced building the queue: `SampleViewSet` had no
+`get_queryset()` override, so `?status=`/`?service_line=` were silently
+ignored by DRF (it doesn't error on unrecognized query params) — every
+Samples-list request returned everything regardless of the filter
+dropdown, a bug that predates this feature but only became obvious once
+the queue's filtering had to actually work. Fixed in
+`apps/samples/views.py`, regression-tested in
+`backend/tests/test_sample_filters.py`. Verified live end to end: opened a
+pre-reviewed regulated sample and confirmed Approve was disabled, recorded
+a review and approved a non-regulated sample through the UI, and rejected
+the regulated one into `under_investigation`.
 
 ## Row-level security
 
