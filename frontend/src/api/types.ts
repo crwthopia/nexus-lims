@@ -97,6 +97,32 @@ export interface SampleDetail extends Sample {
   chain_of_custody_events: ChainOfCustodyEvent[];
 }
 
+export type ReviewActionType = "reviewed" | "flagged" | "returned";
+
+export interface ReviewAction {
+  id: number;
+  test_result: number | null;
+  sample: number | null;
+  reviewer: number;
+  reviewer_display_name: string;
+  action: ReviewActionType;
+  comments: string;
+  e_signature: number | null;
+  created_at: string;
+}
+
+export type ApprovalDisposition = "approved" | "rejected";
+
+export interface ApprovalAction {
+  id: number;
+  sample: number;
+  approver: number;
+  approver_display_name: string;
+  disposition: ApprovalDisposition;
+  e_signature: number | null;
+  created_at: string;
+}
+
 /** SampleViewSet._ROLE_MAP (backend/apps/samples/views.py) -- keep in sync by hand. */
 export const SAMPLE_ACTION_ROLES: Record<string, RoleName[]> = {
   register: ["sample_receiver"],

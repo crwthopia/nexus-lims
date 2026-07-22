@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useSample, useSampleAction } from "../api/queries";
+import { useSample, useSampleAction, useSampleReviewHistory } from "../api/queries";
 import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
 import { ApiError } from "../api/client";
@@ -22,11 +22,16 @@ const ACTION_LABELS: Record<string, string> = {
 
 const DESTRUCTIVE_ACTIONS = new Set(["reject", "dispose"]);
 
+const SEGREGATION_OF_DUTIES_MESSAGE =
+  "Water/Environmental Testing is a regulated service line: the Approver must be a different " +
+  "person from the Reviewer who reviewed this sample (ASTM E1578-18 6.6.1).";
+
 export function SampleDetail() {
   const { id } = useParams<{ id: string }>();
   const sampleId = Number(id);
   const { data: sample, isLoading, isError } = useSample(sampleId);
-  const { hasRole } = useAuth();
+  const { reviewActions, approvalActions } = useSampleReviewHistory(sampleId);
+  const { user, hasRole } = useAuth();
   const action = useSampleAction(sampleId);
   const [comments, setComments] = useState("");
 
@@ -34,6 +39,15 @@ export function SampleDetail() {
   if (isError || !sample) return <div style={{ color: "var(--color-danger)" }}>Couldn't load this sample.</div>;
 
   const availableActions = SAMPLE_ACTIONS_BY_STATUS[sample.status] ?? [];
+
+  // Mirrors apps/review/services.check_can_approve server-side: for the
+  // regulated water_environmental line, an Approver may not approve a
+  // sample they themselves reviewed. The server is the real guard (this is
+  // defense in depth, same principle as CustomerOrderViewSet's RLS
+  // reasoning) -- this just saves a doomed round trip and explains why,
+  // rather than letting the click fail with a generic 400.
+  const reviewedByMe = reviewActions.some((r) => r.reviewer === user?.id);
+  const approveBlockedBySegregationOfDuties = sample.service_line === "water_environmental" && reviewedByMe;
 
   function runAction(name: string) {
     const body = name === "review" ? { comments } : undefined;
@@ -57,49 +71,101 @@ export function SampleDetail() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div className="card" style={{ padding: 20 }}>
-          <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-          <dl style={fieldGridStyle}>
-            <Field label="Service line" value={sample.service_line.replace("_", " ")} />
-            <Field label="Client reference" value={sample.client_reference || "—"} />
-            <Field label="Sampling point" value={sample.sampling_point || "—"} />
-            <Field label="Container" value={`${sample.container_count}× ${sample.container_type || "unspecified"}`} />
-            <Field label="Preservation method" value={sample.preservation_method || "—"} />
-            <Field
-              label="Collection date"
-              value={sample.collection_datetime ? new Date(sample.collection_datetime).toLocaleString() : "—"}
-            />
-            <Field label="Created" value={new Date(sample.created_at).toLocaleString()} />
-            <Field label="Last updated" value={new Date(sample.updated_at).toLocaleString()} />
-          </dl>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
+            <dl style={fieldGridStyle}>
+              <Field label="Service line" value={sample.service_line.replace("_", " ")} />
+              <Field label="Client reference" value={sample.client_reference || "—"} />
+              <Field label="Sampling point" value={sample.sampling_point || "—"} />
+              <Field label="Container" value={`${sample.container_count}× ${sample.container_type || "unspecified"}`} />
+              <Field label="Preservation method" value={sample.preservation_method || "—"} />
+              <Field
+                label="Collection date"
+                value={sample.collection_datetime ? new Date(sample.collection_datetime).toLocaleString() : "—"}
+              />
+              <Field label="Created" value={new Date(sample.created_at).toLocaleString()} />
+              <Field label="Last updated" value={new Date(sample.updated_at).toLocaleString()} />
+            </dl>
 
-          <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Chain of custody</h2>
-          {sample.chain_of_custody_events.length === 0 ? (
-            <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>No custody events recorded yet.</p>
-          ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.9rem" }}>
-              {sample.chain_of_custody_events.map((event) => (
-                <li
-                  key={event.id}
-                  style={{ padding: "8px 0", borderTop: "1px solid var(--color-border)" }}
-                >
-                  <strong style={{ textTransform: "capitalize" }}>{event.event_type}</strong>{" "}
-                  <span style={{ color: "var(--color-text-muted)" }}>
-                    {new Date(event.timestamp).toLocaleString()}
-                    {event.to_location ? ` — ${event.to_location}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+            <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Chain of custody</h2>
+            {sample.chain_of_custody_events.length === 0 ? (
+              <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>No custody events recorded yet.</p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.9rem" }}>
+                {sample.chain_of_custody_events.map((event) => (
+                  <li key={event.id} style={{ padding: "8px 0", borderTop: "1px solid var(--color-border)" }}>
+                    <strong style={{ textTransform: "capitalize" }}>{event.event_type}</strong>{" "}
+                    <span style={{ color: "var(--color-text-muted)" }}>
+                      {new Date(event.timestamp).toLocaleString()}
+                      {event.to_location ? ` — ${event.to_location}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Review &amp; approval history</h2>
+            {reviewActions.length === 0 && approvalActions.length === 0 ? (
+              <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
+                No review or approval recorded yet.
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.9rem" }}>
+                {reviewActions.map((r) => (
+                  <li key={`review-${r.id}`} style={{ padding: "10px 0", borderTop: "1px solid var(--color-border)" }}>
+                    <div>
+                      <strong>Reviewed</strong> by {r.reviewer_display_name}
+                      {r.reviewer === user?.id && (
+                        <span style={{ color: "var(--color-text-muted)" }}> (you)</span>
+                      )}
+                    </div>
+                    {r.comments && <div style={{ color: "var(--color-text-muted)", margin: "2px 0" }}>“{r.comments}”</div>}
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>
+                      {new Date(r.created_at).toLocaleString()}
+                    </div>
+                  </li>
+                ))}
+                {approvalActions.map((a) => (
+                  <li key={`approval-${a.id}`} style={{ padding: "10px 0", borderTop: "1px solid var(--color-border)" }}>
+                    <div>
+                      <strong style={{ textTransform: "capitalize" }}>{a.disposition}</strong> by{" "}
+                      {a.approver_display_name}
+                      {a.approver === user?.id && <span style={{ color: "var(--color-text-muted)" }}> (you)</span>}
+                    </div>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>
+                      {new Date(a.created_at).toLocaleString()}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
-        <div className="card" style={{ padding: 20 }}>
+        <div className="card" style={{ padding: 20, alignSelf: "start" }}>
           <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Actions</h2>
 
           {availableActions.length === 0 && (
             <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
               No further actions from this status.
+            </p>
+          )}
+
+          {approveBlockedBySegregationOfDuties && availableActions.includes("approve") && (
+            <p
+              style={{
+                background: "var(--color-warning-bg)",
+                color: "var(--color-warning)",
+                borderRadius: "var(--radius)",
+                padding: "8px 10px",
+                fontSize: "0.8rem",
+                margin: "0 0 10px",
+              }}
+            >
+              You reviewed this sample yourself — you can't also approve it.
             </p>
           )}
 
@@ -125,12 +191,19 @@ export function SampleDetail() {
             {availableActions.map((name) => {
               const allowedRoles = SAMPLE_ACTION_ROLES[name] ?? [];
               const permitted = hasRole(...allowedRoles);
+              const sodBlocked = name === "approve" && approveBlockedBySegregationOfDuties;
+              const disabled = !permitted || sodBlocked || action.isPending;
+
+              let title: string | undefined;
+              if (!permitted) title = `Requires role: ${allowedRoles.join(" or ")}`;
+              else if (sodBlocked) title = SEGREGATION_OF_DUTIES_MESSAGE;
+
               return (
                 <button
                   key={name}
                   className={`btn ${DESTRUCTIVE_ACTIONS.has(name) ? "btn-danger" : "btn-primary"}`}
-                  disabled={!permitted || action.isPending}
-                  title={permitted ? undefined : `Requires role: ${allowedRoles.join(" or ")}`}
+                  disabled={disabled}
+                  title={title}
                   onClick={() => runAction(name)}
                 >
                   {ACTION_LABELS[name] ?? name}

@@ -100,6 +100,22 @@ class SampleViewSet(viewsets.ModelViewSet):
     queryset = Sample.objects.select_related("order").prefetch_related("chain_of_custody_events")
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        ?status= (e.g. the Staff Console's Review Queue: ?status=under_review)
+        and ?service_line= -- DRF ignores unrecognized query params rather
+        than erroring, so without this override these silently did nothing
+        server-side even though a client sent them.
+        """
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        service_line = self.request.query_params.get("service_line")
+        if service_line:
+            qs = qs.filter(service_line=service_line)
+        return qs
+
     # Per-action role requirements (Blueprint Section 7.1 RBAC / Section 5.1 role-aware screens).
     _ROLE_MAP = {
         "register": (RoleName.SAMPLE_RECEIVER,),

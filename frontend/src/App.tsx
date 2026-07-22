@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Login } from "./pages/Login";
 import { SamplesList } from "./pages/SamplesList";
 import { SampleDetail } from "./pages/SampleDetail";
+import { ReviewQueue } from "./pages/ReviewQueue";
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="/" element={<Navigate to="/samples" replace />} />
         <Route path="/samples" element={<SamplesList />} />
         <Route path="/samples/:id" element={<SampleDetail />} />
+        <Route path="/review-queue" element={<ReviewQueue />} />
       </Route>
     </Routes>
   );

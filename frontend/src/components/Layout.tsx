@@ -2,8 +2,9 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
+  const canReview = hasRole("reviewer", "approver", "qa_officer", "lab_supervisor");
 
   async function handleLogout() {
     await logout();
@@ -35,6 +36,11 @@ export function Layout() {
               <NavLink to="/samples" style={navStyle}>
                 Samples
               </NavLink>
+              {canReview && (
+                <NavLink to="/review-queue" style={navStyle}>
+                  Review Queue
+                </NavLink>
+              )}
             </nav>
           </div>
           {user && (

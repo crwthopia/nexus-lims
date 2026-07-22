@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
-import type { Paginated, Sample, SampleDetail } from "./types";
+import type { ApprovalAction, Paginated, ReviewAction, Sample, SampleDetail } from "./types";
 
-export function useSamples(params: { status?: string; search?: string } = {}) {
+export function useSamples(params: { status?: string; service_line?: string } = {}) {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
-  if (params.search) query.set("search", params.search);
+  if (params.service_line) query.set("service_line", params.service_line);
   const qs = query.toString();
 
   return useQuery({
@@ -19,6 +19,24 @@ export function useSample(id: number) {
     queryKey: ["samples", id],
     queryFn: () => apiGet<SampleDetail>(`/samples/${id}/`),
   });
+}
+
+/** GET /review-actions/?sample= and /approval-actions/?sample= (apps/review/views.py) -- the review/approval history for one sample. */
+export function useSampleReviewHistory(sampleId: number) {
+  const reviewActions = useQuery({
+    queryKey: ["review-actions", sampleId],
+    queryFn: () => apiGet<Paginated<ReviewAction>>(`/review-actions/?sample=${sampleId}`),
+  });
+  const approvalActions = useQuery({
+    queryKey: ["approval-actions", sampleId],
+    queryFn: () => apiGet<Paginated<ApprovalAction>>(`/approval-actions/?sample=${sampleId}`),
+  });
+
+  return {
+    reviewActions: reviewActions.data?.results ?? [],
+    approvalActions: approvalActions.data?.results ?? [],
+    isLoading: reviewActions.isLoading || approvalActions.isLoading,
+  };
 }
 
 /**
@@ -37,6 +55,8 @@ export function useSampleAction(sampleId: number) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["samples", sampleId] });
       queryClient.invalidateQueries({ queryKey: ["samples"] });
+      queryClient.invalidateQueries({ queryKey: ["review-actions", sampleId] });
+      queryClient.invalidateQueries({ queryKey: ["approval-actions", sampleId] });
     },
   });
 }
