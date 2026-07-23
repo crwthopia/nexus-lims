@@ -50,3 +50,15 @@ def test_failing_calibration_marks_instrument_out_of_calibration(login_as_staff)
     instrument.refresh_from_db()
     assert instrument.status == Instrument.Status.OUT_OF_CALIBRATION
     assert instrument.calibration_due_date == due_date
+
+
+def test_instrument_status_filter_returns_only_matching_instruments(login_as_staff):
+    in_service = InstrumentFactory(status=Instrument.Status.IN_SERVICE)
+    InstrumentFactory(status=Instrument.Status.OUT_OF_CALIBRATION)
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get("/api/v1/instruments/?status=in_service")
+
+    assert response.status_code == 200
+    ids = {i["id"] for i in response.data["results"]}
+    assert ids == {in_service.id}

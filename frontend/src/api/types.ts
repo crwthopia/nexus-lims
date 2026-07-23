@@ -245,14 +245,43 @@ export interface TestResult {
 
 export type InstrumentStatus = "in_service" | "out_of_calibration" | "retired";
 
+export type InstrumentModel =
+  | "fesem"
+  | "sem"
+  | "edx"
+  | "afm"
+  | "ir_obirch"
+  | "tga"
+  | "xrf"
+  | "ebsd"
+  | "thermal_emission_microscope"
+  | "dsc"
+  | "other";
+
 export interface Instrument {
   id: number;
   name: string;
-  model: string;
+  model: InstrumentModel;
   parent_instrument: number | null;
   calibration_due_date: string | null;
   status: InstrumentStatus;
   custodian: number | null;
+  custodian_display_name: string | null;
+}
+
+export interface InstrumentDetail extends Instrument {
+  child_instruments: Instrument[];
+}
+
+export interface CalibrationRecord {
+  id: number;
+  instrument: number;
+  instrument_name: string;
+  performed_by: number;
+  performed_by_display_name: string | null;
+  performed_at: string;
+  result: string;
+  next_due_date: string;
 }
 
 export type StandardReagentStatus = "active" | "retired";
@@ -267,6 +296,29 @@ export interface StandardReagent {
   status: StandardReagentStatus;
   storage_location: string;
 }
+
+export const INSTRUMENT_MODEL_LABELS: Record<InstrumentModel, string> = {
+  fesem: "FESEM",
+  sem: "SEM",
+  edx: "EDX",
+  afm: "AFM",
+  ir_obirch: "IR-OBIRCH",
+  tga: "TGA",
+  xrf: "XRF",
+  ebsd: "EBSD",
+  thermal_emission_microscope: "Thermal Emission Microscope",
+  dsc: "DSC",
+  other: "Other",
+};
+
+export const INSTRUMENT_STATUS_LABELS: Record<InstrumentStatus, string> = {
+  in_service: "In Service",
+  out_of_calibration: "Out of Calibration",
+  retired: "Retired",
+};
+
+/** EQUIPMENT_WRITE_ROLES (backend/apps/equipment/views.py) -- keep in sync by hand. */
+export const EQUIPMENT_WRITE_ROLES: RoleName[] = ["instrument_custodian", "lab_supervisor"];
 
 /** TestRequestViewSet._ROLE_MAP (backend/apps/testing/views.py) -- keep in sync by hand. */
 export const TEST_REQUEST_ACTION_ROLES: Record<string, RoleName[]> = {

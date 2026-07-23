@@ -11,6 +11,8 @@ import { DocumentsList } from "./pages/DocumentsList";
 import { DocumentDetail } from "./pages/DocumentDetail";
 import { InvestigationsList } from "./pages/InvestigationsList";
 import { InvestigationDetail } from "./pages/InvestigationDetail";
+import { EquipmentList } from "./pages/EquipmentList";
+import { InstrumentDetail } from "./pages/InstrumentDetail";
 
 function App() {
   return (
@@ -33,6 +35,8 @@ function App() {
         <Route path="/documents/:id" element={<DocumentDetail />} />
         <Route path="/investigations" element={<InvestigationsList />} />
         <Route path="/investigations/:id" element={<InvestigationDetail />} />
+        <Route path="/equipment" element={<EquipmentList />} />
+        <Route path="/equipment/instruments/:id" element={<InstrumentDetail />} />
       </Route>
     </Routes>
   );

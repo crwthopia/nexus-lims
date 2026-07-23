@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost } from "./client";
 import type {
   ApprovalAction,
+  CalibrationRecord,
   Document,
   DocumentDetail,
   DocumentVersion,
   Instrument,
+  InstrumentDetail,
   Investigation,
   Paginated,
   ReviewAction,
@@ -139,10 +141,63 @@ export function useCreateTestResult(testRequestId: number) {
   });
 }
 
-export function useInstruments() {
+export function useInstruments(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
   return useQuery({
-    queryKey: ["instruments"],
-    queryFn: () => apiGet<Paginated<Instrument>>("/instruments/"),
+    queryKey: ["instruments", params],
+    queryFn: () => apiGet<Paginated<Instrument>>(`/instruments/${qs}`),
+  });
+}
+
+export function useInstrument(id: number) {
+  return useQuery({
+    queryKey: ["instruments", id],
+    queryFn: () => apiGet<InstrumentDetail>(`/instruments/${id}/`),
+  });
+}
+
+export function useCreateInstrument() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { name: string; model: string; parent_instrument?: number | null }) =>
+      apiPost<Instrument>("/instruments/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["instruments"] });
+    },
+  });
+}
+
+export function useCalibrationRecordsForInstrument(instrumentId: number) {
+  return useQuery({
+    queryKey: ["calibration-records", instrumentId],
+    queryFn: () => apiGet<Paginated<CalibrationRecord>>(`/calibration-records/?instrument=${instrumentId}`),
+  });
+}
+
+export function useCreateCalibrationRecord(instrumentId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { performed_at: string; result: string; next_due_date: string }) =>
+      apiPost<CalibrationRecord>("/calibration-records/", { ...data, instrument: instrumentId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["calibration-records", instrumentId] });
+      queryClient.invalidateQueries({ queryKey: ["instruments", instrumentId] });
+      queryClient.invalidateQueries({ queryKey: ["instruments"] });
+    },
+  });
+}
+
+export function useCreateStandardReagent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { name: string; lot_number: string; crm_traceability_reference: string; expiry_date: string }) =>
+      apiPost<StandardReagent>("/standard-reagents/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["standard-reagents"] });
+    },
   });
 }
 

@@ -39,6 +39,14 @@ class InstrumentViewSet(viewsets.ModelViewSet):
     queryset = Instrument.objects.select_related("parent_instrument", "custodian").prefetch_related("child_instruments")
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """?status= -- e.g. the Staff Console Equipment screen's "needs attention" filter for out_of_calibration instruments."""
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
     def get_serializer_class(self):
         if self.action == "retrieve":
             return InstrumentDetailSerializer
