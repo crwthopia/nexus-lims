@@ -33,17 +33,19 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **43-test automated regression suite** (`backend/tests/`, pytest +
+- **57-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Staff Console frontend** (`frontend/`, React + TypeScript + Vite,
   Blueprint Section 2.1 item 1): real Entra ID SSO login through Django,
-  a live samples worklist, and the full Sample FSM action set
-  (register → receive → prep → testing → review → approve/reject → …)
-  driven against the real API — not a mockup, see "Staff Console" below.
-  Covers the Samples resource group only so far; the rest of the API
-  surface (testing, documents, equipment, training, billing, etc.) has no
-  UI yet.
+  a live samples worklist with the full Sample FSM action set (register →
+  receive → prep → testing → review → approve/reject → …), a Review Queue
+  with segregation-of-duties awareness, and a Testing Queue with results
+  entry (competency check, OOS flagging) — all driven against the real
+  API, not a mockup, see "Staff Console" below. Covers Samples,
+  Review/Approval, and Testing/Results only so far; documents, equipment,
+  investigations, training, billing, and the Customer Portal have no UI
+  yet.
 
 ## What is in this package
 
@@ -61,7 +63,8 @@ nasat-lims/
 │       ├── api/                <- client.ts (fetch wrapper), types.ts, queries.ts (React Query hooks)
 │       ├── auth/AuthContext.tsx <- staff-me query, login/logout, hasRole()
 │       ├── components/         <- Layout, ProtectedRoute, StatusBadge
-│       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue
+│       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue,
+│                                    TestingQueue, TestRequestDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -415,6 +418,39 @@ pre-reviewed regulated sample and confirmed Approve was disabled, recorded
 a review and approved a non-regulated sample through the UI, and rejected
 the regulated one into `under_investigation`.
 
+**Testing Queue / results entry** (`frontend/src/pages/TestingQueue.tsx`,
+`TestRequestDetail.tsx`): a worklist of `TestRequest`s in
+`assigned`/`in_progress`, and a detail screen showing the `TestMethod`'s
+specification limits, existing results (with the OOS badge), a
+result-entry form (data type, value, unit, instrument, standard
+reagents), and the full `TestRequest` FSM action set. A client-side "not
+certified" banner mirrors the server-side FR-C3-02 competency check
+(`TestResultSerializer.validate`) — same defense-in-depth reasoning as the
+Review Queue's segregation-of-duties hint. Sample detail now also lists
+its test requests, linking into this screen.
+
+Same class of filtering bug as `SampleViewSet` had, found the same way:
+`TestRequestViewSet` had no `get_queryset()` override either, so
+`?sample=`/`?status=` (comma-separated, e.g. `assigned,in_progress` for
+the queue) did nothing server-side. Fixed in `apps/testing/views.py`,
+regression-tested in `backend/tests/test_test_request_filters.py`.
+`TestRequestSerializer`/`TestResultSerializer` also gained read-only
+display fields (`sample_code`, `test_method_name`,
+`assigned_analyst_display_name`, `entered_by_display_name`) matching the
+convention already used elsewhere (e.g. `approver_display_name`) — a
+list/detail UI would otherwise only see bare FK ids.
+
+Verified live end to end: entered an in-spec and an out-of-spec result on
+a certified test method (the OOS badge rendered correctly for the
+out-of-spec one), ran `start`/`submit-for-review` through the real FSM,
+and confirmed the Sample detail panel picked up the status change. Also
+confirmed the "not certified" warning renders for an uncertified method —
+and separately confirmed, by deliberately testing with a superuser
+account, that the one case where an uncertified result *did* save anyway
+is the competency check's own documented superuser bypass
+(`apps/testing/serializers.py`, same "System Administrator escape hatch"
+pattern as `HasRole`), not a bug in this feature.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -566,7 +602,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-47 tests, organized by behavior rather than by app:
+57 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -583,6 +619,9 @@ pytest
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
+| `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
+| `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
+| `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 
 Two non-obvious fixtures in `tests/conftest.py` are worth knowing about
 before adding more tests:
@@ -627,11 +666,12 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **Staff Console covers Samples only.** `frontend/` (see "Staff Console"
-  above) has login, the samples worklist, and the full Sample FSM action
-  set — nothing yet for testing/results entry, documents, equipment,
-  investigations, training, or billing. No CI-driven build/typecheck for it
-  either (backend's CI gap below applies here too).
+- **Staff Console covers Samples, Review/Approval, and Testing/Results
+  only.** `frontend/` (see "Staff Console" above) has login, the samples
+  worklist and FSM actions, the Review Queue, and the Testing Queue with
+  results entry — nothing yet for documents, equipment, investigations,
+  training, or billing. No CI-driven build/typecheck for it either
+  (backend's CI gap below applies here too).
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
