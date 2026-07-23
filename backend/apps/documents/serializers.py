@@ -19,9 +19,13 @@ class DocumentVersionSerializer(serializers.ModelSerializer):
 
 
 class DocumentSerializer(serializers.ModelSerializer):
+    """current_version_number: read-only convenience field for list UIs, which would otherwise only see current_version's bare FK id."""
+
+    current_version_number = serializers.IntegerField(source="current_version.version_number", read_only=True, default=None)
+
     class Meta:
         model = Document
-        fields = ["id", "title", "type", "current_version", "created_at"]
+        fields = ["id", "title", "type", "current_version", "current_version_number", "created_at"]
         read_only_fields = ["id", "current_version", "created_at"]
 
 

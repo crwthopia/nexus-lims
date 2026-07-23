@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import type {
   ApprovalAction,
+  Document,
+  DocumentDetail,
+  DocumentVersion,
   Instrument,
   Paginated,
   ReviewAction,
@@ -146,5 +149,54 @@ export function useStandardReagents() {
   return useQuery({
     queryKey: ["standard-reagents"],
     queryFn: () => apiGet<Paginated<StandardReagent>>("/standard-reagents/"),
+  });
+}
+
+export function useDocuments() {
+  return useQuery({
+    queryKey: ["documents"],
+    queryFn: () => apiGet<Paginated<Document>>("/documents/"),
+  });
+}
+
+export function useDocument(id: number) {
+  return useQuery({
+    queryKey: ["documents", id],
+    queryFn: () => apiGet<DocumentDetail>(`/documents/${id}/`),
+  });
+}
+
+export function useCreateDocument() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { title: string; type: string }) => apiPost<Document>("/documents/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+}
+
+export function useCreateDocumentVersion(documentId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { version_number: number; file_id: string; effective_date?: string }) =>
+      apiPost<DocumentVersion>("/document-versions/", { ...data, document: documentId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents", documentId] });
+    },
+  });
+}
+
+export function useApproveDocumentVersion(documentId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (versionId: number) => apiPost<DocumentVersion>(`/document-versions/${versionId}/approve/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents", documentId] });
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
   });
 }

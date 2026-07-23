@@ -123,6 +123,44 @@ export interface ApprovalAction {
   created_at: string;
 }
 
+export type DocumentType = "sop" | "manual" | "form" | "training_material" | "uploaded_supporting_file";
+
+export interface Document {
+  id: number;
+  title: string;
+  type: DocumentType;
+  current_version: number | null;
+  current_version_number: number | null;
+  created_at: string;
+}
+
+export interface DocumentVersion {
+  id: number;
+  document: number;
+  version_number: number;
+  file_id: string;
+  approved_by: number | null;
+  approved_by_display_name: string | null;
+  effective_date: string | null;
+  is_current: boolean;
+  created_at: string;
+}
+
+export interface DocumentDetail extends Document {
+  versions: DocumentVersion[];
+}
+
+export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  sop: "SOP",
+  manual: "Manual",
+  form: "Form",
+  training_material: "Training Material",
+  uploaded_supporting_file: "Uploaded Supporting File",
+};
+
+/** DOCUMENT_WRITE_ROLES (backend/apps/documents/views.py) -- keep in sync by hand. */
+export const DOCUMENT_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];
+
 export interface TestMethod {
   id: number;
   name: string;

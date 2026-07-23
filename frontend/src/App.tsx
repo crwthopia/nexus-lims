@@ -7,6 +7,8 @@ import { SampleDetail } from "./pages/SampleDetail";
 import { ReviewQueue } from "./pages/ReviewQueue";
 import { TestingQueue } from "./pages/TestingQueue";
 import { TestRequestDetail } from "./pages/TestRequestDetail";
+import { DocumentsList } from "./pages/DocumentsList";
+import { DocumentDetail } from "./pages/DocumentDetail";
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
         <Route path="/review-queue" element={<ReviewQueue />} />
         <Route path="/testing-queue" element={<TestingQueue />} />
         <Route path="/test-requests/:id" element={<TestRequestDetail />} />
+        <Route path="/documents" element={<DocumentsList />} />
+        <Route path="/documents/:id" element={<DocumentDetail />} />
       </Route>
     </Routes>
   );
