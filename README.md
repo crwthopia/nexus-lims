@@ -42,11 +42,12 @@ was invented outside that grounding.
   receive → prep → testing → review → approve/reject → …), a Review Queue
   with segregation-of-duties awareness, a Testing Queue with results entry
   (competency check, OOS flagging), a Documents screen (version history,
-  FR-D1-03 approval), and Investigations/CAPA tracking (FR-E9-01) — all
-  driven against the real API, not a mockup, see "Staff Console" below.
-  Covers Samples, Review/Approval, Testing/Results, Documents, and
-  Investigations only so far; equipment, training, billing, and the
-  Customer Portal have no UI yet.
+  FR-D1-03 approval), Investigations/CAPA tracking (FR-E9-01), and an
+  Equipment screen (instruments, standard reagents, calibration logging
+  with FR-E3-02 status sync) — all driven against the real API, not a
+  mockup, see "Staff Console" below. Covers Samples, Review/Approval,
+  Testing/Results, Documents, Investigations, and Equipment only so far;
+  training, billing, and the Customer Portal have no UI yet.
 
 ## What is in this package
 
@@ -67,7 +68,8 @@ nasat-lims/
 │       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue,
 │                                    TestingQueue, TestRequestDetail,
 │                                    DocumentsList, DocumentDetail,
-│                                    InvestigationsList, InvestigationDetail
+│                                    InvestigationsList, InvestigationDetail,
+│                                    EquipmentList, InstrumentDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -513,6 +515,31 @@ read-only, then separately opened a second investigation from an
 out-of-spec Tensile Strength result and confirmed that row's button
 correctly swapped to a status link afterward.
 
+**Equipment** (`frontend/src/pages/EquipmentList.tsx`, `InstrumentDetail.tsx`,
+Blueprint Section 3.3, C-2/E-3): instruments and standard reagents/reference
+materials, each with a create form, plus per-instrument detail — attached
+components (e.g. FESEM+EDX), calibration history, and a log-calibration
+form. Read access is always visible, same reasoning as Documents/
+Investigations; the create/log-calibration forms are gated to Instrument
+Custodian/Lab Supervisor (`EQUIPMENT_WRITE_ROLES`).
+
+Same class of filtering bug as the previous three screens, found the same
+way: `InstrumentViewSet` had no `get_queryset()` override, so `?status=`
+(the Equipment screen's "which instruments are out of calibration" filter)
+did nothing server-side. Fixed in `apps/equipment/views.py`,
+regression-tested (backend now at 61 tests). `InstrumentSerializer`/
+`CalibrationRecordSerializer` also gained `custodian_display_name`/
+`performed_by_display_name`, matching the display-field convention used
+everywhere else.
+
+Verified live end to end: created an instrument and a standard reagent,
+logged a calibration record and confirmed `Instrument.status`/
+`calibration_due_date` synced correctly (FR-E3-02) through this new UI —
+not just the API, as originally verified when the endpoint was built — and
+confirmed the status filter actually filters. Also deliberately verified
+the negative case: the write forms correctly stay hidden for an account
+without the required role, then reappear once temporarily granted it.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -664,7 +691,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-60 tests, organized by behavior rather than by app:
+61 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -675,7 +702,7 @@ pytest
 | `test_auth_domain_isolation.py` | Customer session can't reach staff endpoints and vice versa; a customer-authenticated write doesn't crash `django-simple-history` |
 | `test_testing_competency_and_oos.py` | FR-C3-02 competency gate, FR-C3-08 server-computed OOS flag, expired-reagent rejection |
 | `test_documents.py` | FR-D1-03 version approval archives the prior current version and syncs `Document.current_version` |
-| `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date` |
+| `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date`; `?status=` filter actually filters |
 | `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker) |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
@@ -729,12 +756,12 @@ beat schedule entries themselves (the task *logic* is tested directly;
 Genuinely not built yet, not just undocumented:
 
 - **Staff Console covers Samples, Review/Approval, Testing/Results,
-  Documents, and Investigations only.** `frontend/` (see "Staff Console"
-  above) has login, the samples worklist and FSM actions, the Review
-  Queue, the Testing Queue with results entry, the Documents screen, and
-  Investigations/CAPA tracking — nothing yet for equipment, training, or
-  billing. No CI-driven build/typecheck for it either (backend's CI gap
-  below applies here too).
+  Documents, Investigations, and Equipment only.** `frontend/` (see "Staff
+  Console" above) has login, the samples worklist and FSM actions, the
+  Review Queue, the Testing Queue with results entry, the Documents
+  screen, Investigations/CAPA tracking, and the Equipment screen —
+  nothing yet for training or billing. No CI-driven build/typecheck for
+  it either (backend's CI gap below applies here too).
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
