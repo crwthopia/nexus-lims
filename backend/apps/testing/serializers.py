@@ -12,11 +12,19 @@ class TestMethodSerializer(serializers.ModelSerializer):
 
 
 class TestRequestSerializer(serializers.ModelSerializer):
+    """sample_code/test_method_name/assigned_analyst_display_name: read-only convenience fields for list/detail UIs (e.g. the Staff Console's Testing Queue) that would otherwise only see bare FK ids."""
+
+    sample_code = serializers.CharField(source="sample.unique_sample_code", read_only=True)
+    test_method_name = serializers.CharField(source="test_method.name", read_only=True)
+    assigned_analyst_display_name = serializers.CharField(
+        source="assigned_analyst.display_name", read_only=True, default=None
+    )
+
     class Meta:
         model = TestRequest
         fields = [
-            "id", "sample", "test_method", "status",
-            "assigned_analyst", "assigned_instrument", "created_at",
+            "id", "sample", "sample_code", "test_method", "test_method_name", "status",
+            "assigned_analyst", "assigned_analyst_display_name", "assigned_instrument", "created_at",
         ]
         read_only_fields = ["id", "status", "created_at"]
 
@@ -32,12 +40,13 @@ class TestResultSerializer(serializers.ModelSerializer):
 
     is_out_of_spec = serializers.BooleanField(read_only=True)
     entered_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    entered_by_display_name = serializers.CharField(source="entered_by.display_name", read_only=True, default=None)
 
     class Meta:
         model = TestResult
         fields = [
-            "id", "test_request", "data_type", "value", "unit", "entered_by", "entered_at",
-            "is_out_of_spec", "instrument", "standard_reagents", "raw_file_id", "raw_file_checksum_sha256",
+            "id", "test_request", "data_type", "value", "unit", "entered_by", "entered_by_display_name",
+            "entered_at", "is_out_of_spec", "instrument", "standard_reagents", "raw_file_id", "raw_file_checksum_sha256",
         ]
         read_only_fields = ["id", "entered_by", "entered_at", "is_out_of_spec"]
 

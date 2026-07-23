@@ -123,6 +123,108 @@ export interface ApprovalAction {
   created_at: string;
 }
 
+export interface TestMethod {
+  id: number;
+  name: string;
+  method_reference: string;
+  specification_limits: { min?: number; max?: number };
+  holding_time: string | null;
+  active_sop_version: number | null;
+}
+
+export type TestRequestStatus =
+  | "assigned"
+  | "in_progress"
+  | "awaiting_review"
+  | "under_investigation"
+  | "retest_pending"
+  | "completed";
+
+export interface TestRequest {
+  id: number;
+  sample: number;
+  sample_code: string;
+  test_method: number;
+  test_method_name: string;
+  status: TestRequestStatus;
+  assigned_analyst: number | null;
+  assigned_analyst_display_name: string | null;
+  assigned_instrument: number | null;
+  created_at: string;
+}
+
+export type TestResultDataType = "float" | "int" | "text" | "date" | "list" | "file" | "calculated" | "boolean" | "interval";
+
+export interface TestResult {
+  id: number;
+  test_request: number;
+  data_type: TestResultDataType;
+  value: string;
+  unit: string;
+  entered_by: number;
+  entered_by_display_name: string | null;
+  entered_at: string;
+  is_out_of_spec: boolean;
+  instrument: number | null;
+  standard_reagents: number[];
+  raw_file_id: string | null;
+  raw_file_checksum_sha256: string | null;
+}
+
+export type InstrumentStatus = "in_service" | "out_of_calibration" | "retired";
+
+export interface Instrument {
+  id: number;
+  name: string;
+  model: string;
+  parent_instrument: number | null;
+  calibration_due_date: string | null;
+  status: InstrumentStatus;
+  custodian: number | null;
+}
+
+export type StandardReagentStatus = "active" | "retired";
+
+export interface StandardReagent {
+  id: number;
+  name: string;
+  lot_number: string;
+  crm_traceability_reference: string;
+  opened_date: string | null;
+  expiry_date: string;
+  status: StandardReagentStatus;
+  storage_location: string;
+}
+
+/** TestRequestViewSet._ROLE_MAP (backend/apps/testing/views.py) -- keep in sync by hand. */
+export const TEST_REQUEST_ACTION_ROLES: Record<string, RoleName[]> = {
+  start: ["analyst"],
+  "submit-for-review": ["analyst"],
+  "flag-nonconforming": ["reviewer", "qa_officer"],
+  "authorize-retest": ["qa_officer", "lab_supervisor"],
+  "resume-testing": ["analyst"],
+  complete: ["reviewer", "approver", "qa_officer", "lab_supervisor"],
+};
+
+/** TestRequest.Status FSM edges (backend/apps/testing/models.py) -- which action(s) are legal from each status. */
+export const TEST_REQUEST_ACTIONS_BY_STATUS: Record<TestRequestStatus, string[]> = {
+  assigned: ["start"],
+  in_progress: ["submit-for-review"],
+  awaiting_review: ["flag-nonconforming", "complete"],
+  under_investigation: ["authorize-retest"],
+  retest_pending: ["resume-testing"],
+  completed: [],
+};
+
+export const TEST_REQUEST_STATUS_LABELS: Record<TestRequestStatus, string> = {
+  assigned: "Assigned",
+  in_progress: "In Progress",
+  awaiting_review: "Awaiting Review",
+  under_investigation: "Under Investigation",
+  retest_pending: "Retest Pending",
+  completed: "Completed",
+};
+
 /** SampleViewSet._ROLE_MAP (backend/apps/samples/views.py) -- keep in sync by hand. */
 export const SAMPLE_ACTION_ROLES: Record<string, RoleName[]> = {
   register: ["sample_receiver"],

@@ -1,0 +1,279 @@
+import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import {
+  useCreateTestResult,
+  useInstruments,
+  useStandardReagents,
+  useTestMethod,
+  useTestRequest,
+  useTestRequestAction,
+  useTestResults,
+} from "../api/queries";
+import { useAuth } from "../auth/AuthContext";
+import { describeApiError } from "../api/client";
+import { TEST_REQUEST_ACTIONS_BY_STATUS, TEST_REQUEST_ACTION_ROLES, TEST_REQUEST_STATUS_LABELS } from "../api/types";
+import type { TestResultDataType } from "../api/types";
+
+const ACTION_LABELS: Record<string, string> = {
+  start: "Start Testing",
+  "submit-for-review": "Submit for Review",
+  "flag-nonconforming": "Flag Nonconforming",
+  "authorize-retest": "Authorize Retest",
+  "resume-testing": "Resume Testing",
+  complete: "Complete",
+};
+
+const DESTRUCTIVE_ACTIONS = new Set(["flag-nonconforming"]);
+
+const DATA_TYPES: TestResultDataType[] = ["float", "int", "text", "date", "boolean", "list"];
+
+export function TestRequestDetail() {
+  const { id } = useParams<{ id: string }>();
+  const testRequestId = Number(id);
+  const { data: testRequest, isLoading, isError } = useTestRequest(testRequestId);
+  const { data: testMethod } = useTestMethod(testRequest?.test_method);
+  const { data: results } = useTestResults(testRequestId);
+  const { data: instruments } = useInstruments();
+  const { data: reagents } = useStandardReagents();
+  const { hasRole, user } = useAuth();
+  const requestAction = useTestRequestAction(testRequestId, testRequest?.sample);
+  const createResult = useCreateTestResult(testRequestId);
+
+  const [dataType, setDataType] = useState<TestResultDataType>("float");
+  const [value, setValue] = useState("");
+  const [unit, setUnit] = useState("");
+  const [instrumentId, setInstrumentId] = useState("");
+  const [reagentIds, setReagentIds] = useState<number[]>([]);
+
+  if (isLoading) return <div>Loading…</div>;
+  if (isError || !testRequest) return <div style={{ color: "var(--color-danger)" }}>Couldn't load this test request.</div>;
+
+  const availableActions = TEST_REQUEST_ACTIONS_BY_STATUS[testRequest.status] ?? [];
+  const isCertified = user?.instrument_certifications.includes(testRequest.test_method) ?? false;
+  const limits = testMethod?.specification_limits ?? {};
+  const hasLimits = limits.min !== undefined || limits.max !== undefined;
+
+  function toggleReagent(reagentId: number) {
+    setReagentIds((prev) => (prev.includes(reagentId) ? prev.filter((r) => r !== reagentId) : [...prev, reagentId]));
+  }
+
+  function submitResult(e: React.FormEvent) {
+    e.preventDefault();
+    createResult.mutate(
+      {
+        data_type: dataType,
+        value,
+        unit,
+        instrument: instrumentId ? Number(instrumentId) : null,
+        standard_reagents: reagentIds,
+      },
+      {
+        onSuccess: () => {
+          setValue("");
+          setUnit("");
+          setInstrumentId("");
+          setReagentIds([]);
+        },
+      },
+    );
+  }
+
+  return (
+    <div>
+      <Link to={`/samples/${testRequest.sample}`} style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+        ← Back to {testRequest.sample_code}
+      </Link>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
+        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{testRequest.test_method_name}</h1>
+        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
+          {TEST_REQUEST_STATUS_LABELS[testRequest.status]}
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Test method</h2>
+            <dl style={fieldGridStyle}>
+              <Field label="Method reference" value={testMethod?.method_reference || "—"} />
+              <Field
+                label="Specification limits"
+                value={hasLimits ? `${limits.min ?? "–"} to ${limits.max ?? "–"}` : "Not numerically bounded"}
+              />
+            </dl>
+            {!isCertified && (
+              <p
+                style={{
+                  background: "var(--color-warning-bg)",
+                  color: "var(--color-warning)",
+                  borderRadius: "var(--radius)",
+                  padding: "8px 10px",
+                  fontSize: "0.8rem",
+                  margin: "10px 0 0",
+                }}
+              >
+                You're not certified for this test method (FR-C3-02) — entering a result will be rejected server-side.
+              </p>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Results</h2>
+            {!results || results.length === 0 ? (
+              <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>No results entered yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Value</th>
+                    <th>Entered by</th>
+                    <th>Entered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((r) => (
+                    <tr key={r.id} style={{ cursor: "default" }}>
+                      <td>
+                        {r.value} {r.unit}
+                        {r.is_out_of_spec && (
+                          <span
+                            className="badge"
+                            style={{ background: "var(--color-danger-bg)", color: "var(--color-danger)", marginLeft: 8 }}
+                          >
+                            Out of spec
+                          </span>
+                        )}
+                      </td>
+                      <td>{r.entered_by_display_name || "—"}</td>
+                      <td>{new Date(r.entered_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {(testRequest.status === "assigned" || testRequest.status === "in_progress") && (
+            <div className="card" style={{ padding: 20 }}>
+              <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Enter a result</h2>
+              <form onSubmit={submitResult} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <label style={labelStyle}>
+                    Data type
+                    <select
+                      value={dataType}
+                      onChange={(e) => setDataType(e.target.value as TestResultDataType)}
+                      style={inputStyle}
+                    >
+                      {DATA_TYPES.map((dt) => (
+                        <option key={dt} value={dt}>
+                          {dt}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={labelStyle}>
+                    Value
+                    <input value={value} onChange={(e) => setValue(e.target.value)} required style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    Unit
+                    <input value={unit} onChange={(e) => setUnit(e.target.value)} style={inputStyle} />
+                  </label>
+                </div>
+
+                <label style={labelStyle}>
+                  Instrument (optional)
+                  <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)} style={inputStyle}>
+                    <option value="">—</option>
+                    {instruments?.results.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {reagents && reagents.results.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", marginBottom: 4 }}>
+                      Standard reagents used (optional)
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      {reagents.results.map((r) => (
+                        <label key={r.id} style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 4 }}>
+                          <input
+                            type="checkbox"
+                            checked={reagentIds.includes(r.id)}
+                            onChange={() => toggleReagent(r.id)}
+                          />
+                          {r.name} (lot {r.lot_number})
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button type="submit" className="btn btn-primary" disabled={createResult.isPending} style={{ alignSelf: "start" }}>
+                  Save result
+                </button>
+                {createResult.isError && (
+                  <p style={{ color: "var(--color-danger)", fontSize: "0.85rem" }}>{describeApiError(createResult.error)}</p>
+                )}
+              </form>
+            </div>
+          )}
+        </div>
+
+        <div className="card" style={{ padding: 20, alignSelf: "start" }}>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Actions</h2>
+          {availableActions.length === 0 && (
+            <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>No further actions from this status.</p>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {availableActions.map((name) => {
+              const allowedRoles = TEST_REQUEST_ACTION_ROLES[name] ?? [];
+              const permitted = hasRole(...allowedRoles);
+              return (
+                <button
+                  key={name}
+                  className={`btn ${DESTRUCTIVE_ACTIONS.has(name) ? "btn-danger" : "btn-primary"}`}
+                  disabled={!permitted || requestAction.isPending}
+                  title={permitted ? undefined : `Requires role: ${allowedRoles.join(" or ")}`}
+                  onClick={() => requestAction.mutate(name)}
+                >
+                  {ACTION_LABELS[name] ?? name}
+                </button>
+              );
+            })}
+          </div>
+          {requestAction.isError && (
+            <p style={{ color: "var(--color-danger)", fontSize: "0.85rem", marginTop: 12 }}>
+              {describeApiError(requestAction.error)}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>{label}</dt>
+      <dd style={{ margin: "0 0 10px" }}>{value}</dd>
+    </>
+  );
+}
+
+const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
+const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1 } as const;
+const inputStyle = {
+  padding: "6px 8px",
+  borderRadius: "var(--radius)",
+  border: "1px solid var(--color-border)",
+  fontFamily: "inherit",
+  fontSize: "0.9rem",
+} as const;

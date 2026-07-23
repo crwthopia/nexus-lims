@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useSample, useSampleAction, useSampleReviewHistory } from "../api/queries";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { useSample, useSampleAction, useSampleReviewHistory, useTestRequestsForSample } from "../api/queries";
 import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
-import { ApiError } from "../api/client";
-import { SAMPLE_ACTIONS_BY_STATUS, SAMPLE_ACTION_ROLES } from "../api/types";
+import { describeApiError } from "../api/client";
+import { SAMPLE_ACTIONS_BY_STATUS, SAMPLE_ACTION_ROLES, TEST_REQUEST_STATUS_LABELS } from "../api/types";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -31,8 +31,10 @@ export function SampleDetail() {
   const sampleId = Number(id);
   const { data: sample, isLoading, isError } = useSample(sampleId);
   const { reviewActions, approvalActions } = useSampleReviewHistory(sampleId);
+  const { data: testRequests } = useTestRequestsForSample(sampleId);
   const { user, hasRole } = useAuth();
   const action = useSampleAction(sampleId);
+  const navigate = useNavigate();
   const [comments, setComments] = useState("");
 
   if (isLoading) return <div>Loading…</div>;
@@ -103,6 +105,32 @@ export function SampleDetail() {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Test requests</h2>
+            {!testRequests || testRequests.results.length === 0 ? (
+              <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>No test requests yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Test method</th>
+                    <th>Status</th>
+                    <th>Assigned analyst</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {testRequests.results.map((tr) => (
+                    <tr key={tr.id} onClick={() => navigate(`/test-requests/${tr.id}`)}>
+                      <td style={{ fontWeight: 600 }}>{tr.test_method_name}</td>
+                      <td>{TEST_REQUEST_STATUS_LABELS[tr.status]}</td>
+                      <td>{tr.assigned_analyst_display_name || "Unassigned"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
 
@@ -214,22 +242,13 @@ export function SampleDetail() {
 
           {action.isError && (
             <p style={{ color: "var(--color-danger)", fontSize: "0.85rem", marginTop: 12 }}>
-              {action.error instanceof ApiError ? describeError(action.error) : "Something went wrong."}
+              {describeApiError(action.error)}
             </p>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function describeError(error: ApiError): string {
-  if (typeof error.body === "string") return error.body;
-  if (error.body && typeof error.body === "object") {
-    const values = Object.values(error.body as Record<string, unknown>).flat();
-    if (values.length) return values.join(" ");
-  }
-  return error.message;
 }
 
 function Field({ label, value }: { label: string; value: string }) {

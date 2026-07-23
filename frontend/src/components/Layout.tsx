@@ -5,6 +5,7 @@ export function Layout() {
   const { user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
   const canReview = hasRole("reviewer", "approver", "qa_officer", "lab_supervisor");
+  const canTest = hasRole("analyst", "reviewer", "qa_officer", "lab_supervisor");
 
   async function handleLogout() {
     await logout();
@@ -36,6 +37,11 @@ export function Layout() {
               <NavLink to="/samples" style={navStyle}>
                 Samples
               </NavLink>
+              {canTest && (
+                <NavLink to="/testing-queue" style={navStyle}>
+                  Testing Queue
+                </NavLink>
+              )}
               {canReview && (
                 <NavLink to="/review-queue" style={navStyle}>
                   Review Queue

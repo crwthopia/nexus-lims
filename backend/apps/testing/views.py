@@ -53,6 +53,24 @@ class TestRequestViewSet(viewsets.ModelViewSet):
     serializer_class = TestRequestSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        ?sample= (Sample detail's Test Requests panel) and ?status= --
+        comma-separated, so the Staff Console's Testing Queue can ask for
+        "needs an analyst" (assigned,in_progress) in one request. Same class
+        of gap as SampleViewSet before it grew this override: DRF ignores
+        unrecognized query params rather than erroring, so without this a
+        client-sent filter would silently do nothing server-side.
+        """
+        qs = super().get_queryset()
+        sample_id = self.request.query_params.get("sample")
+        if sample_id:
+            qs = qs.filter(sample_id=sample_id)
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(","))
+        return qs
+
     _ROLE_MAP = {
         "start": (RoleName.ANALYST,),
         "submit_for_review": (RoleName.ANALYST,),

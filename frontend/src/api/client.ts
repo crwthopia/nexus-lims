@@ -68,3 +68,14 @@ export function apiGet<T>(path: string): Promise<T> {
 export function apiPost<T>(path: string, data?: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "POST", body: data !== undefined ? JSON.stringify(data) : undefined });
 }
+
+/** Turns a DRF error response body (field-error dict, {"detail": ...}, or a plain string) into one displayable line. */
+export function describeApiError(error: unknown): string {
+  if (!(error instanceof ApiError)) return "Something went wrong.";
+  if (typeof error.body === "string") return error.body;
+  if (error.body && typeof error.body === "object") {
+    const values = Object.values(error.body as Record<string, unknown>).flat();
+    if (values.length) return values.join(" ");
+  }
+  return error.message;
+}

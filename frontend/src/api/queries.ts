@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
-import type { ApprovalAction, Paginated, ReviewAction, Sample, SampleDetail } from "./types";
+import type {
+  ApprovalAction,
+  Instrument,
+  Paginated,
+  ReviewAction,
+  Sample,
+  SampleDetail,
+  StandardReagent,
+  TestMethod,
+  TestRequest,
+  TestResult,
+} from "./types";
 
 export function useSamples(params: { status?: string; service_line?: string } = {}) {
   const query = new URLSearchParams();
@@ -57,6 +68,83 @@ export function useSampleAction(sampleId: number) {
       queryClient.invalidateQueries({ queryKey: ["samples"] });
       queryClient.invalidateQueries({ queryKey: ["review-actions", sampleId] });
       queryClient.invalidateQueries({ queryKey: ["approval-actions", sampleId] });
+      queryClient.invalidateQueries({ queryKey: ["test-requests", "for-sample", sampleId] });
     },
+  });
+}
+
+export function useTestRequestsForSample(sampleId: number) {
+  return useQuery({
+    queryKey: ["test-requests", "for-sample", sampleId],
+    queryFn: () => apiGet<Paginated<TestRequest>>(`/test-requests/?sample=${sampleId}`),
+  });
+}
+
+/** ?status=assigned,in_progress etc. -- see TestRequestViewSet.get_queryset (apps/testing/views.py). */
+export function useTestRequestQueue(statuses: string[]) {
+  return useQuery({
+    queryKey: ["test-requests", "queue", statuses],
+    queryFn: () => apiGet<Paginated<TestRequest>>(`/test-requests/?status=${statuses.join(",")}`),
+  });
+}
+
+export function useTestRequest(id: number) {
+  return useQuery({
+    queryKey: ["test-requests", id],
+    queryFn: () => apiGet<TestRequest>(`/test-requests/${id}/`),
+  });
+}
+
+export function useTestMethod(id: number | undefined) {
+  return useQuery({
+    queryKey: ["test-methods", id],
+    queryFn: () => apiGet<TestMethod>(`/test-methods/${id}/`),
+    enabled: id !== undefined,
+  });
+}
+
+export function useTestResults(testRequestId: number) {
+  return useQuery({
+    queryKey: ["test-results", testRequestId],
+    queryFn: () => apiGet<TestResult[]>(`/test-requests/${testRequestId}/results/`),
+  });
+}
+
+/** One mutation for every TestRequest FSM action (start/submit-for-review/.../complete) -- same reasoning as useSampleAction. */
+export function useTestRequestAction(testRequestId: number, sampleId?: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (action: string) => apiPost(`/test-requests/${testRequestId}/${action}/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["test-requests", testRequestId] });
+      queryClient.invalidateQueries({ queryKey: ["test-requests", "queue"] });
+      if (sampleId) queryClient.invalidateQueries({ queryKey: ["test-requests", "for-sample", sampleId] });
+    },
+  });
+}
+
+export function useCreateTestResult(testRequestId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => apiPost<TestResult>(`/test-requests/${testRequestId}/results/`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["test-results", testRequestId] });
+    },
+  });
+}
+
+export function useInstruments() {
+  return useQuery({
+    queryKey: ["instruments"],
+    queryFn: () => apiGet<Paginated<Instrument>>("/instruments/"),
+  });
+}
+
+export function useStandardReagents() {
+  return useQuery({
+    queryKey: ["standard-reagents"],
+    queryFn: () => apiGet<Paginated<StandardReagent>>("/standard-reagents/"),
   });
 }

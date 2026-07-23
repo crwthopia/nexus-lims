@@ -5,6 +5,8 @@ import { Login } from "./pages/Login";
 import { SamplesList } from "./pages/SamplesList";
 import { SampleDetail } from "./pages/SampleDetail";
 import { ReviewQueue } from "./pages/ReviewQueue";
+import { TestingQueue } from "./pages/TestingQueue";
+import { TestRequestDetail } from "./pages/TestRequestDetail";
 
 function App() {
   return (
@@ -21,6 +23,8 @@ function App() {
         <Route path="/samples" element={<SamplesList />} />
         <Route path="/samples/:id" element={<SampleDetail />} />
         <Route path="/review-queue" element={<ReviewQueue />} />
+        <Route path="/testing-queue" element={<TestingQueue />} />
+        <Route path="/test-requests/:id" element={<TestRequestDetail />} />
       </Route>
     </Routes>
   );
