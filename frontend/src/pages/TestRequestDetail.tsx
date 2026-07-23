@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   useCreateTestResult,
   useInstruments,
+  useInvestigationsForTestResult,
+  useOpenInvestigation,
   useStandardReagents,
   useTestMethod,
   useTestRequest,
@@ -11,8 +13,14 @@ import {
 } from "../api/queries";
 import { useAuth } from "../auth/AuthContext";
 import { describeApiError } from "../api/client";
-import { TEST_REQUEST_ACTIONS_BY_STATUS, TEST_REQUEST_ACTION_ROLES, TEST_REQUEST_STATUS_LABELS } from "../api/types";
-import type { TestResultDataType } from "../api/types";
+import {
+  INVESTIGATION_STATUS_LABELS,
+  INVESTIGATION_WRITE_ROLES,
+  TEST_REQUEST_ACTIONS_BY_STATUS,
+  TEST_REQUEST_ACTION_ROLES,
+  TEST_REQUEST_STATUS_LABELS,
+} from "../api/types";
+import type { TestResult, TestResultDataType } from "../api/types";
 
 const ACTION_LABELS: Record<string, string> = {
   start: "Start Testing",
@@ -36,6 +44,7 @@ export function TestRequestDetail() {
   const { data: instruments } = useInstruments();
   const { data: reagents } = useStandardReagents();
   const { hasRole, user } = useAuth();
+  const canOpenInvestigation = hasRole(...INVESTIGATION_WRITE_ROLES);
   const requestAction = useTestRequestAction(testRequestId, testRequest?.sample);
   const createResult = useCreateTestResult(testRequestId);
 
@@ -129,25 +138,12 @@ export function TestRequestDetail() {
                     <th>Value</th>
                     <th>Entered by</th>
                     <th>Entered</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((r) => (
-                    <tr key={r.id} style={{ cursor: "default" }}>
-                      <td>
-                        {r.value} {r.unit}
-                        {r.is_out_of_spec && (
-                          <span
-                            className="badge"
-                            style={{ background: "var(--color-danger-bg)", color: "var(--color-danger)", marginLeft: 8 }}
-                          >
-                            Out of spec
-                          </span>
-                        )}
-                      </td>
-                      <td>{r.entered_by_display_name || "—"}</td>
-                      <td>{new Date(r.entered_at).toLocaleString()}</td>
-                    </tr>
+                    <ResultRow key={r.id} result={r} canOpenInvestigation={canOpenInvestigation} />
                   ))}
                 </tbody>
               </table>
@@ -256,6 +252,56 @@ export function TestRequestDetail() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Its own component (rather than inline in the map()) because it needs the
+ * per-result useInvestigationsForTestResult/useOpenInvestigation hooks --
+ * calling those inside a .map() callback would violate the rules of hooks.
+ */
+function ResultRow({ result, canOpenInvestigation }: { result: TestResult; canOpenInvestigation: boolean }) {
+  const navigate = useNavigate();
+  const { data: investigations } = useInvestigationsForTestResult(result.id);
+  const openInvestigation = useOpenInvestigation();
+  const investigation = investigations?.results[0];
+
+  return (
+    <tr style={{ cursor: "default" }}>
+      <td>
+        {result.value} {result.unit}
+        {result.is_out_of_spec && (
+          <span className="badge" style={{ background: "var(--color-danger-bg)", color: "var(--color-danger)", marginLeft: 8 }}>
+            Out of spec
+          </span>
+        )}
+      </td>
+      <td>{result.entered_by_display_name || "—"}</td>
+      <td>{new Date(result.entered_at).toLocaleString()}</td>
+      <td>
+        {result.is_out_of_spec &&
+          (investigation ? (
+            <Link to={`/investigations/${investigation.id}`} style={{ fontSize: "0.8rem" }}>
+              {INVESTIGATION_STATUS_LABELS[investigation.status]}
+            </Link>
+          ) : (
+            canOpenInvestigation && (
+              <button
+                className="btn"
+                disabled={openInvestigation.isPending}
+                onClick={() =>
+                  openInvestigation.mutate(
+                    { related_test_result: result.id, type: "oos" },
+                    { onSuccess: (inv) => navigate(`/investigations/${inv.id}`) },
+                  )
+                }
+              >
+                Open Investigation
+              </button>
+            )
+          ))}
+      </td>
+    </tr>
   );
 }
 

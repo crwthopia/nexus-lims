@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPatch, apiPost } from "./client";
 import type {
   ApprovalAction,
   Document,
   DocumentDetail,
   DocumentVersion,
   Instrument,
+  Investigation,
   Paginated,
   ReviewAction,
   Sample,
@@ -197,6 +198,80 @@ export function useApproveDocumentVersion(documentId: number) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents", documentId] });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+}
+
+export function useInvestigations(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
+  return useQuery({
+    queryKey: ["investigations", params],
+    queryFn: () => apiGet<Paginated<Investigation>>(`/investigations/${qs}`),
+  });
+}
+
+export function useInvestigation(id: number) {
+  return useQuery({
+    queryKey: ["investigations", id],
+    queryFn: () => apiGet<Investigation>(`/investigations/${id}/`),
+  });
+}
+
+/** "Does this sample/result already have an investigation" -- drives the Open Investigation affordance on Sample/Test Request detail. */
+export function useInvestigationsForSample(sampleId: number) {
+  return useQuery({
+    queryKey: ["investigations", "for-sample", sampleId],
+    queryFn: () => apiGet<Paginated<Investigation>>(`/investigations/?related_sample=${sampleId}`),
+  });
+}
+
+export function useInvestigationsForTestResult(testResultId: number) {
+  return useQuery({
+    queryKey: ["investigations", "for-test-result", testResultId],
+    queryFn: () => apiGet<Paginated<Investigation>>(`/investigations/?related_test_result=${testResultId}`),
+  });
+}
+
+export function useOpenInvestigation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { related_sample?: number; related_test_result?: number; type: string }) =>
+      apiPost<Investigation>("/investigations/", data),
+    onSuccess: (investigation) => {
+      queryClient.invalidateQueries({ queryKey: ["investigations"] });
+      if (investigation.related_sample) {
+        queryClient.invalidateQueries({ queryKey: ["investigations", "for-sample", investigation.related_sample] });
+      }
+      if (investigation.related_test_result) {
+        queryClient.invalidateQueries({
+          queryKey: ["investigations", "for-test-result", investigation.related_test_result],
+        });
+      }
+    },
+  });
+}
+
+export function useUpdateInvestigation(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { root_cause?: string; capa_actions?: string; status?: string }) =>
+      apiPatch<Investigation>(`/investigations/${id}/`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["investigations", id] });
+    },
+  });
+}
+
+export function useCloseInvestigation(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<Investigation>(`/investigations/${id}/close/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["investigations", id] });
+      queryClient.invalidateQueries({ queryKey: ["investigations"] });
     },
   });
 }

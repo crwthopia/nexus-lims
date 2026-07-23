@@ -3,7 +3,7 @@
 import pytest
 
 from apps.investigations.models import Investigation
-from tests.factories import InvestigationFactory, StaffUserFactory
+from tests.factories import InvestigationFactory, SampleFactory, StaffUserFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -41,3 +41,40 @@ def test_write_requires_qa_officer_or_lab_supervisor_role(login_as_staff):
     response = client.post(f"/api/v1/investigations/{investigation.id}/close/")
 
     assert response.status_code == 403
+
+
+def test_status_filter_supports_comma_separated_values(login_as_staff):
+    open_inv = InvestigationFactory(status=Investigation.Status.OPEN)
+    closed_inv = InvestigationFactory(status=Investigation.Status.CLOSED)
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get("/api/v1/investigations/?status=open")
+
+    assert response.status_code == 200
+    ids = {i["id"] for i in response.data["results"]}
+    assert open_inv.id in ids
+    assert closed_inv.id not in ids
+
+
+def test_related_sample_filter_returns_only_that_samples_investigations(login_as_staff):
+    sample = SampleFactory()
+    matching = InvestigationFactory(related_sample=sample)
+    InvestigationFactory()  # different sample
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get(f"/api/v1/investigations/?related_sample={sample.id}")
+
+    assert response.status_code == 200
+    ids = {i["id"] for i in response.data["results"]}
+    assert ids == {matching.id}
+
+
+def test_related_sample_code_is_included_for_display(login_as_staff):
+    sample = SampleFactory(unique_sample_code="NASAT-999999")
+    investigation = InvestigationFactory(related_sample=sample)
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get(f"/api/v1/investigations/{investigation.id}/")
+
+    assert response.status_code == 200
+    assert response.data["related_sample_code"] == "NASAT-999999"

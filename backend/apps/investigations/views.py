@@ -26,6 +26,28 @@ class InvestigationViewSet(viewsets.ModelViewSet):
     serializer_class = InvestigationSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        ?status= (comma-separated), ?related_sample=, ?related_test_result= --
+        same class of gap SampleViewSet/TestRequestViewSet had before their
+        own filters were added: DRF ignores unrecognized query params rather
+        than erroring, so without this override none of these did anything
+        server-side. Needed by the Staff Console's Investigations list and
+        by the "does this sample/result already have an investigation"
+        checks on the Sample/Test Request detail pages.
+        """
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(","))
+        related_sample = self.request.query_params.get("related_sample")
+        if related_sample:
+            qs = qs.filter(related_sample_id=related_sample)
+        related_test_result = self.request.query_params.get("related_test_result")
+        if related_test_result:
+            qs = qs.filter(related_test_result_id=related_test_result)
+        return qs
+
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy", "close"):
             return [IsAuthenticated(), roles_required(*INVESTIGATION_WRITE_ROLES)()]

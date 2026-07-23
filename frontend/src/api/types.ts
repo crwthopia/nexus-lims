@@ -161,6 +161,40 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
 /** DOCUMENT_WRITE_ROLES (backend/apps/documents/views.py) -- keep in sync by hand. */
 export const DOCUMENT_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];
 
+export type InvestigationType = "oos" | "oot";
+
+export type InvestigationStatus = "open" | "root_cause_identified" | "capa_in_progress" | "closed";
+
+export interface Investigation {
+  id: number;
+  related_test_result: number | null;
+  related_sample: number | null;
+  related_sample_code: string | null;
+  type: InvestigationType;
+  opened_by: number;
+  opened_by_display_name: string;
+  root_cause: string;
+  capa_actions: string;
+  status: InvestigationStatus;
+  opened_at: string;
+  closed_at: string | null;
+}
+
+export const INVESTIGATION_TYPE_LABELS: Record<InvestigationType, string> = {
+  oos: "Out of Specification",
+  oot: "Out of Trend",
+};
+
+export const INVESTIGATION_STATUS_LABELS: Record<InvestigationStatus, string> = {
+  open: "Open",
+  root_cause_identified: "Root Cause Identified",
+  capa_in_progress: "CAPA In Progress",
+  closed: "Closed",
+};
+
+/** INVESTIGATION_WRITE_ROLES (backend/apps/investigations/views.py) -- keep in sync by hand. */
+export const INVESTIGATION_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];
+
 export interface TestMethod {
   id: number;
   name: string;

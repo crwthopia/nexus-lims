@@ -1,10 +1,23 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { useSample, useSampleAction, useSampleReviewHistory, useTestRequestsForSample } from "../api/queries";
+import {
+  useInvestigationsForSample,
+  useOpenInvestigation,
+  useSample,
+  useSampleAction,
+  useSampleReviewHistory,
+  useTestRequestsForSample,
+} from "../api/queries";
 import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
 import { describeApiError } from "../api/client";
-import { SAMPLE_ACTIONS_BY_STATUS, SAMPLE_ACTION_ROLES, TEST_REQUEST_STATUS_LABELS } from "../api/types";
+import {
+  INVESTIGATION_STATUS_LABELS,
+  INVESTIGATION_WRITE_ROLES,
+  SAMPLE_ACTIONS_BY_STATUS,
+  SAMPLE_ACTION_ROLES,
+  TEST_REQUEST_STATUS_LABELS,
+} from "../api/types";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -32,6 +45,8 @@ export function SampleDetail() {
   const { data: sample, isLoading, isError } = useSample(sampleId);
   const { reviewActions, approvalActions } = useSampleReviewHistory(sampleId);
   const { data: testRequests } = useTestRequestsForSample(sampleId);
+  const { data: investigations } = useInvestigationsForSample(sampleId);
+  const openInvestigation = useOpenInvestigation();
   const { user, hasRole } = useAuth();
   const action = useSampleAction(sampleId);
   const navigate = useNavigate();
@@ -133,6 +148,49 @@ export function SampleDetail() {
               </table>
             )}
           </div>
+
+          {sample.status === "under_investigation" && (
+            <div className="card" style={{ padding: 20 }}>
+              <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Investigation</h2>
+              {investigations && investigations.results.length > 0 ? (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.9rem" }}>
+                  {investigations.results.map((inv) => (
+                    <li key={inv.id} style={{ padding: "6px 0", borderTop: "1px solid var(--color-border)" }}>
+                      <Link to={`/investigations/${inv.id}`}>Investigation #{inv.id}</Link>{" "}
+                      <span style={{ color: "var(--color-text-muted)" }}>
+                        — {INVESTIGATION_STATUS_LABELS[inv.status]}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <>
+                  <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
+                    No investigation opened yet for this rejection (ISO/IEC 17025:2017 7.10).
+                  </p>
+                  {hasRole(...INVESTIGATION_WRITE_ROLES) && (
+                    <button
+                      className="btn btn-primary"
+                      disabled={openInvestigation.isPending}
+                      onClick={() =>
+                        openInvestigation.mutate(
+                          { related_sample: sampleId, type: "oos" },
+                          { onSuccess: (inv) => navigate(`/investigations/${inv.id}`) },
+                        )
+                      }
+                    >
+                      Open Investigation
+                    </button>
+                  )}
+                  {openInvestigation.isError && (
+                    <p style={{ color: "var(--color-danger)", fontSize: "0.85rem", marginTop: 10 }}>
+                      {describeApiError(openInvestigation.error)}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Review &amp; approval history</h2>

@@ -40,6 +40,9 @@ export function Layout() {
               <NavLink to="/documents" style={navStyle}>
                 Documents
               </NavLink>
+              <NavLink to="/investigations" style={navStyle}>
+                Investigations
+              </NavLink>
               {canTest && (
                 <NavLink to="/testing-queue" style={navStyle}>
                   Testing Queue

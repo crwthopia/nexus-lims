@@ -9,6 +9,8 @@ import { TestingQueue } from "./pages/TestingQueue";
 import { TestRequestDetail } from "./pages/TestRequestDetail";
 import { DocumentsList } from "./pages/DocumentsList";
 import { DocumentDetail } from "./pages/DocumentDetail";
+import { InvestigationsList } from "./pages/InvestigationsList";
+import { InvestigationDetail } from "./pages/InvestigationDetail";
 
 function App() {
   return (
@@ -29,6 +31,8 @@ function App() {
         <Route path="/test-requests/:id" element={<TestRequestDetail />} />
         <Route path="/documents" element={<DocumentsList />} />
         <Route path="/documents/:id" element={<DocumentDetail />} />
+        <Route path="/investigations" element={<InvestigationsList />} />
+        <Route path="/investigations/:id" element={<InvestigationDetail />} />
       </Route>
     </Routes>
   );
