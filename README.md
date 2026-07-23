@@ -41,11 +41,12 @@ was invented outside that grounding.
   a live samples worklist with the full Sample FSM action set (register →
   receive → prep → testing → review → approve/reject → …), a Review Queue
   with segregation-of-duties awareness, a Testing Queue with results entry
-  (competency check, OOS flagging), and a Documents screen (version
-  history, FR-D1-03 approval) — all driven against the real API, not a
-  mockup, see "Staff Console" below. Covers Samples, Review/Approval,
-  Testing/Results, and Documents only so far; equipment, investigations,
-  training, billing, and the Customer Portal have no UI yet.
+  (competency check, OOS flagging), a Documents screen (version history,
+  FR-D1-03 approval), and Investigations/CAPA tracking (FR-E9-01) — all
+  driven against the real API, not a mockup, see "Staff Console" below.
+  Covers Samples, Review/Approval, Testing/Results, Documents, and
+  Investigations only so far; equipment, training, billing, and the
+  Customer Portal have no UI yet.
 
 ## What is in this package
 
@@ -65,7 +66,8 @@ nasat-lims/
 │       ├── components/         <- Layout, ProtectedRoute, StatusBadge
 │       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue,
 │                                    TestingQueue, TestRequestDetail,
-│                                    DocumentsList, DocumentDetail
+│                                    DocumentsList, DocumentDetail,
+│                                    InvestigationsList, InvestigationDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -472,6 +474,45 @@ document, added a version, approved it (the version's "Current" badge
 and the list's `current_version_number` both updated), and confirmed the
 suggested next version number advances after each add.
 
+**Investigations** (`frontend/src/pages/InvestigationsList.tsx`,
+`InvestigationDetail.tsx`, Blueprint E-9, FR-E9-01): a filterable list and
+a detail screen with type, related sample/test result, an editable root
+cause/CAPA form (QA Officer/Lab Supervisor only, locked read-only once
+`closed`), and the close action. Read access is always visible, same
+reasoning as Documents.
+
+The `Investigation` model's own docstring names two trigger points —
+"Opened... when a TestResult is flagged OOS/OOT, or when an Approver
+rejects a Sample into `under_investigation`" — but neither `Sample.reject`
+nor OOS `TestResult` creation actually creates one; both just leave the
+FSM state with nothing tracking it. Rather than quietly changing that
+backend behavior as a side effect of a UI feature, this adds contextual
+**"Open Investigation"** buttons instead: on Sample detail when
+`status === "under_investigation"`, and per-row on Test Request detail for
+any `is_out_of_spec` result — both pre-fill the right `related_sample`/
+`related_test_result` and route straight to the new investigation. Once
+one exists, the button becomes a status link instead, so it can't be
+opened twice for the same nonconformance.
+
+Same class of filtering bug as the previous two screens, found the same
+way: `InvestigationViewSet` had no `get_queryset()` override, so
+`?status=`/`?related_sample=`/`?related_test_result=` did nothing
+server-side — needed both for the list's status filter and for the
+Sample/Test-Request pages to know whether an investigation already
+exists. Fixed in `apps/investigations/views.py`, regression-tested
+(backend now at 60 tests). `InvestigationSerializer` also gained
+`related_sample_code` (display convenience, same convention as
+elsewhere). `apiPatch()` was added to `frontend/src/api/client.ts` — the
+root cause/CAPA edit form is the first thing in this frontend that needed
+PATCH rather than GET/POST.
+
+Verified live end to end: opened an investigation from a rejected
+Water/Environmental sample, saved root cause/CAPA and confirmed it
+survived a hard reload, closed it and confirmed the form switched to
+read-only, then separately opened a second investigation from an
+out-of-spec Tensile Strength result and confirmed that row's button
+correctly swapped to a status link afterward.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -623,7 +664,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-57 tests, organized by behavior rather than by app:
+60 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -635,7 +676,7 @@ pytest
 | `test_testing_competency_and_oos.py` | FR-C3-02 competency gate, FR-C3-08 server-computed OOS flag, expired-reagent rejection |
 | `test_documents.py` | FR-D1-03 version approval archives the prior current version and syncs `Document.current_version` |
 | `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date` |
-| `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close |
+| `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker) |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
@@ -687,12 +728,13 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **Staff Console covers Samples, Review/Approval, Testing/Results, and
-  Documents only.** `frontend/` (see "Staff Console" above) has login, the
-  samples worklist and FSM actions, the Review Queue, the Testing Queue
-  with results entry, and the Documents screen — nothing yet for
-  equipment, investigations, training, or billing. No CI-driven
-  build/typecheck for it either (backend's CI gap below applies here too).
+- **Staff Console covers Samples, Review/Approval, Testing/Results,
+  Documents, and Investigations only.** `frontend/` (see "Staff Console"
+  above) has login, the samples worklist and FSM actions, the Review
+  Queue, the Testing Queue with results entry, the Documents screen, and
+  Investigations/CAPA tracking — nothing yet for equipment, training, or
+  billing. No CI-driven build/typecheck for it either (backend's CI gap
+  below applies here too).
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
