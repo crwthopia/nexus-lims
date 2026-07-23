@@ -40,12 +40,12 @@ was invented outside that grounding.
   Blueprint Section 2.1 item 1): real Entra ID SSO login through Django,
   a live samples worklist with the full Sample FSM action set (register →
   receive → prep → testing → review → approve/reject → …), a Review Queue
-  with segregation-of-duties awareness, and a Testing Queue with results
-  entry (competency check, OOS flagging) — all driven against the real
-  API, not a mockup, see "Staff Console" below. Covers Samples,
-  Review/Approval, and Testing/Results only so far; documents, equipment,
-  investigations, training, billing, and the Customer Portal have no UI
-  yet.
+  with segregation-of-duties awareness, a Testing Queue with results entry
+  (competency check, OOS flagging), and a Documents screen (version
+  history, FR-D1-03 approval) — all driven against the real API, not a
+  mockup, see "Staff Console" below. Covers Samples, Review/Approval,
+  Testing/Results, and Documents only so far; equipment, investigations,
+  training, billing, and the Customer Portal have no UI yet.
 
 ## What is in this package
 
@@ -64,7 +64,8 @@ nasat-lims/
 │       ├── auth/AuthContext.tsx <- staff-me query, login/logout, hasRole()
 │       ├── components/         <- Layout, ProtectedRoute, StatusBadge
 │       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue,
-│                                    TestingQueue, TestRequestDetail
+│                                    TestingQueue, TestRequestDetail,
+│                                    DocumentsList, DocumentDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -451,6 +452,26 @@ is the competency check's own documented superuser bypass
 (`apps/testing/serializers.py`, same "System Administrator escape hatch"
 pattern as `HasRole`), not a bug in this feature.
 
+**Documents** (`frontend/src/pages/DocumentsList.tsx`,
+`DocumentDetail.tsx`, Blueprint Section 3.5, D-1): browse/create
+`Document`s, and per-document version history with an "add a new
+version" form and per-version Approve (FR-D1-03). Read access is open to
+any authenticated staff member per the backend, so unlike the Review/
+Testing queues this nav link and page are always visible — only the
+create/add-version/approve forms are conditionally rendered, gated to
+QA Officer/Lab Supervisor (`DOCUMENT_WRITE_ROLES`).
+
+No new query-param filtering gap this time — `DocumentVersionViewSet`
+already supported `?document=` before this feature, unlike the two
+screens before it. One small serializer addition:
+`DocumentSerializer.current_version_number` (read-only, `source=
+current_version.version_number`), matching the display-field convention
+used everywhere else — the list view would otherwise only see
+`current_version`'s bare FK id. Verified live end to end: created a
+document, added a version, approved it (the version's "Current" badge
+and the list's `current_version_number` both updated), and confirmed the
+suggested next version number advances after each add.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -666,12 +687,12 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **Staff Console covers Samples, Review/Approval, and Testing/Results
-  only.** `frontend/` (see "Staff Console" above) has login, the samples
-  worklist and FSM actions, the Review Queue, and the Testing Queue with
-  results entry — nothing yet for documents, equipment, investigations,
-  training, or billing. No CI-driven build/typecheck for it either
-  (backend's CI gap below applies here too).
+- **Staff Console covers Samples, Review/Approval, Testing/Results, and
+  Documents only.** `frontend/` (see "Staff Console" above) has login, the
+  samples worklist and FSM actions, the Review Queue, the Testing Queue
+  with results entry, and the Documents screen — nothing yet for
+  equipment, investigations, training, or billing. No CI-driven
+  build/typecheck for it either (backend's CI gap below applies here too).
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
