@@ -475,3 +475,59 @@ export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
 
 /** TRAINING_WRITE_ROLES (backend/apps/training/views.py) -- keep in sync by hand. */
 export const TRAINING_WRITE_ROLES: RoleName[] = ["training_coordinator", "lab_supervisor", "system_administrator"];
+
+export type InvoiceStatus = "unpaid" | "partially_paid" | "paid" | "void";
+
+export interface Invoice {
+  id: number;
+  order: number | null;
+  enrollment: number | null;
+  customer_email: string | null;
+  amount: string;
+  currency: string;
+  status: InvoiceStatus;
+  created_at: string;
+}
+
+export type PaymentMethod = "cash" | "bank_transfer" | "purchase_order" | "gateway";
+
+export type PaymentStatus = "pending_confirmation" | "confirmed" | "reversed";
+
+export interface Payment {
+  id: number;
+  invoice: number;
+  method: PaymentMethod;
+  reference_number: string | null;
+  recorded_by: number;
+  recorded_by_display_name: string;
+  status: PaymentStatus;
+  paid_at: string | null;
+  notes: string;
+}
+
+export interface InvoiceDetail extends Invoice {
+  payments: Payment[];
+}
+
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  unpaid: "Unpaid",
+  partially_paid: "Partially Paid",
+  paid: "Paid",
+  void: "Void",
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  purchase_order: "Purchase Order",
+  gateway: "Payment Gateway",
+};
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pending_confirmation: "Pending Confirmation",
+  confirmed: "Confirmed",
+  reversed: "Reversed",
+};
+
+/** BILLING_WRITE_ROLES (backend/apps/billing/views.py) -- keep in sync by hand. */
+export const BILLING_WRITE_ROLES: RoleName[] = ["training_coordinator", "lab_supervisor", "system_administrator"];

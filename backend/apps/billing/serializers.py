@@ -18,13 +18,24 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
+    """customer_email: read-only display convenience -- an Invoice bills either an Order or an Enrollment (never both), so this resolves whichever is set rather than making a list UI look up two different resources to identify who's being billed."""
+
+    customer_email = serializers.SerializerMethodField()
+
     class Meta:
         model = Invoice
-        fields = ["id", "order", "enrollment", "amount", "currency", "status", "created_at"]
+        fields = ["id", "order", "enrollment", "customer_email", "amount", "currency", "status", "created_at"]
         # status is read-only: it's only ever changed by confirming a Payment
         # (POST /invoices/{id}/payments/), not by direct PATCH, so it can't
         # drift out of sync with what payments were actually recorded.
         read_only_fields = ["id", "status", "created_at"]
+
+    def get_customer_email(self, invoice):
+        if invoice.order_id:
+            return invoice.order.customer.email
+        if invoice.enrollment_id:
+            return invoice.enrollment.customer.email
+        return None
 
     def validate(self, attrs):
         order = attrs.get("order") or getattr(self.instance, "order", None)

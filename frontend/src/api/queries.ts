@@ -10,8 +10,11 @@ import type {
   Enrollment,
   Instrument,
   InstrumentDetail,
+  Invoice,
+  InvoiceDetail,
   Investigation,
   Paginated,
+  Payment,
   ReviewAction,
   Sample,
   SampleDetail,
@@ -448,6 +451,46 @@ export function useApplyCreditNote() {
       apiPost<CreditNote>(`/credit-notes/${creditNoteId}/apply/`, { enrollment }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["credit-notes"] });
+    },
+  });
+}
+
+export function useInvoices(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
+  return useQuery({
+    queryKey: ["invoices", params],
+    queryFn: () => apiGet<Paginated<Invoice>>(`/invoices/${qs}`),
+  });
+}
+
+export function useInvoice(id: number) {
+  return useQuery({
+    queryKey: ["invoices", id],
+    queryFn: () => apiGet<InvoiceDetail>(`/invoices/${id}/`),
+  });
+}
+
+export function useCreateInvoice() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { order?: number; enrollment?: number; amount: string; currency?: string }) =>
+      apiPost<Invoice>("/invoices/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+}
+
+export function useRecordPayment(invoiceId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { method: string; reference_number?: string; status: string; notes?: string }) =>
+      apiPost<Payment>(`/invoices/${invoiceId}/payments/`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["invoices", invoiceId] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
   });
 }

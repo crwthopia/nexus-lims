@@ -25,8 +25,18 @@ BILLING_WRITE_ROLES = (RoleName.TRAINING_COORDINATOR, RoleName.LAB_SUPERVISOR, R
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
-    queryset = Invoice.objects.select_related("order", "enrollment").prefetch_related("payments")
+    queryset = Invoice.objects.select_related(
+        "order__customer", "enrollment__customer",
+    ).prefetch_related("payments")
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """?status= -- same filtering-gap pattern already fixed on Sample/TestRequest/Investigation/Instrument/TrainingSession."""
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(","))
+        return qs
 
     def get_serializer_class(self):
         if self.action == "retrieve":
