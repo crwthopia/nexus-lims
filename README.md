@@ -42,12 +42,13 @@ was invented outside that grounding.
   receive → prep → testing → review → approve/reject → …), a Review Queue
   with segregation-of-duties awareness, a Testing Queue with results entry
   (competency check, OOS flagging), a Documents screen (version history,
-  FR-D1-03 approval), Investigations/CAPA tracking (FR-E9-01), and an
+  FR-D1-03 approval), Investigations/CAPA tracking (FR-E9-01), an
   Equipment screen (instruments, standard reagents, calibration logging
-  with FR-E3-02 status sync) — all driven against the real API, not a
+  with FR-E3-02 status sync), and Training (courses, sessions, credit
+  notes, attendee export) — all driven against the real API, not a
   mockup, see "Staff Console" below. Covers Samples, Review/Approval,
-  Testing/Results, Documents, Investigations, and Equipment only so far;
-  training, billing, and the Customer Portal have no UI yet.
+  Testing/Results, Documents, Investigations, Equipment, and Training
+  only so far; billing and the Customer Portal have no UI yet.
 
 ## What is in this package
 
@@ -69,7 +70,8 @@ nasat-lims/
 │                                    TestingQueue, TestRequestDetail,
 │                                    DocumentsList, DocumentDetail,
 │                                    InvestigationsList, InvestigationDetail,
-│                                    EquipmentList, InstrumentDetail
+│                                    EquipmentList, InstrumentDetail,
+│                                    TrainingList, TrainingSessionDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -540,6 +542,45 @@ confirmed the status filter actually filters. Also deliberately verified
 the negative case: the write forms correctly stay hidden for an account
 without the required role, then reappear once temporarily granted it.
 
+**Training** (`frontend/src/pages/TrainingList.tsx`,
+`TrainingSessionDetail.tsx`, Blueprint Section 3.6): courses, sessions,
+and credit notes, each with a create form where applicable; a session
+detail screen with its enrollments (complete/cancel), walk-in enrollment
+registration, an attendee-export CSV download, and the session FSM
+actions. Course/session read is public per the backend (`AllowAny`, since
+customers browse the catalog before logging in — Blueprint Section 4.3),
+but the console still gates its own write UI to Training Coordinator/Lab
+Supervisor/System Administrator (`TRAINING_WRITE_ROLES`) regardless.
+
+Unlike the last four screens, the real gap here wasn't just a missing
+filter: `TrainingSession` has `start_session`/`complete_session`/
+`cancel_session` `@transition` methods on the model, but
+`TrainingSessionViewSet` exposed no action to reach *any* of them — a
+session could never actually be started, completed, or cancelled through
+the API at all. Added `start-session`/`complete-session`/`cancel-session`
+actions using the file's own existing `_run_transition` helper (already
+powering `EnrollmentViewSet.complete`/`cancel`), so this exposes existing
+model behavior rather than inventing new business logic — the same
+principle behind the Investigations screen's contextual buttons instead
+of an automatic side effect.
+
+The now-familiar filtering gap showed up twice more on top of that:
+neither `TrainingSessionViewSet` nor `EnrollmentViewSet` had a
+`get_queryset()` override, so `?status=`/`?course=` and `?session=`/
+`?status=` did nothing server-side — needed for the session list and the
+per-session enrollee list respectively. Fixed in `apps/training/views.py`,
+regression-tested (backend now at 65 tests).
+`TrainingSessionSerializer` also gained `instructor_display_name`,
+matching the display-field convention used everywhere else.
+
+Verified live end to end: created a course and a session, ran the full
+`start-session` → `complete-session` lifecycle, registered a walk-in
+enrollment and completed it (certificate correctly marked issued),
+downloaded a real attendee-export CSV with real enrollment data, and
+applied a credit note to a different session's enrollment — status
+flipped to `applied` and the Apply control correctly disappeared
+afterward.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -691,7 +732,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-61 tests, organized by behavior rather than by app:
+65 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -704,7 +745,7 @@ pytest
 | `test_documents.py` | FR-D1-03 version approval archives the prior current version and syncs `Document.current_version` |
 | `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date`; `?status=` filter actually filters |
 | `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
-| `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker) |
+| `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker), `TrainingSession` FSM actions reachable over the API, `?session=`/`?status=`/`?course=` filters |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
@@ -756,12 +797,12 @@ beat schedule entries themselves (the task *logic* is tested directly;
 Genuinely not built yet, not just undocumented:
 
 - **Staff Console covers Samples, Review/Approval, Testing/Results,
-  Documents, Investigations, and Equipment only.** `frontend/` (see "Staff
-  Console" above) has login, the samples worklist and FSM actions, the
-  Review Queue, the Testing Queue with results entry, the Documents
-  screen, Investigations/CAPA tracking, and the Equipment screen —
-  nothing yet for training or billing. No CI-driven build/typecheck for
-  it either (backend's CI gap below applies here too).
+  Documents, Investigations, Equipment, and Training only.** `frontend/`
+  (see "Staff Console" above) has login, the samples worklist and FSM
+  actions, the Review Queue, the Testing Queue with results entry, the
+  Documents screen, Investigations/CAPA tracking, the Equipment screen,
+  and Training — nothing yet for billing. No CI-driven build/typecheck
+  for it either (backend's CI gap below applies here too).
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
