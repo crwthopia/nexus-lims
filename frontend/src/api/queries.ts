@@ -3,9 +3,11 @@ import { apiGet, apiPatch, apiPost } from "./client";
 import type {
   ApprovalAction,
   CalibrationRecord,
+  CreditNote,
   Document,
   DocumentDetail,
   DocumentVersion,
+  Enrollment,
   Instrument,
   InstrumentDetail,
   Investigation,
@@ -17,6 +19,8 @@ import type {
   TestMethod,
   TestRequest,
   TestResult,
+  TrainingCourse,
+  TrainingSession,
 } from "./types";
 
 export function useSamples(params: { status?: string; service_line?: string } = {}) {
@@ -327,6 +331,123 @@ export function useCloseInvestigation(id: number) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["investigations", id] });
       queryClient.invalidateQueries({ queryKey: ["investigations"] });
+    },
+  });
+}
+
+export function useTrainingCourses() {
+  return useQuery({
+    queryKey: ["training-courses"],
+    queryFn: () => apiGet<Paginated<TrainingCourse>>("/training-courses/"),
+  });
+}
+
+export function useCreateTrainingCourse() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { title: string; description?: string; cpd_units: string; price: string }) =>
+      apiPost<TrainingCourse>("/training-courses/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["training-courses"] });
+    },
+  });
+}
+
+export function useTrainingSessions(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
+  return useQuery({
+    queryKey: ["training-sessions", params],
+    queryFn: () => apiGet<Paginated<TrainingSession>>(`/training-sessions/${qs}`),
+  });
+}
+
+export function useTrainingSession(id: number) {
+  return useQuery({
+    queryKey: ["training-sessions", id],
+    queryFn: () => apiGet<TrainingSession>(`/training-sessions/${id}/`),
+  });
+}
+
+export function useCreateTrainingSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      course: number;
+      start_date: string;
+      end_date: string;
+      capacity: number;
+      min_capacity: number;
+      cancellation_threshold_days: number;
+    }) => apiPost<TrainingSession>("/training-sessions/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["training-sessions"] });
+    },
+  });
+}
+
+/** One mutation for every TrainingSession FSM action (start-session/complete-session/cancel-session). */
+export function useTrainingSessionAction(sessionId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (action: string) => apiPost<TrainingSession>(`/training-sessions/${sessionId}/${action}/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["training-sessions", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["training-sessions"] });
+    },
+  });
+}
+
+export function useEnrollmentsForSession(sessionId: number) {
+  return useQuery({
+    queryKey: ["enrollments", "for-session", sessionId],
+    queryFn: () => apiGet<Paginated<Enrollment>>(`/enrollments/?session=${sessionId}`),
+  });
+}
+
+export function useCreateEnrollment(sessionId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { customer: number }) => apiPost<Enrollment>("/enrollments/", { ...data, session: sessionId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["enrollments", "for-session", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["training-sessions", sessionId] });
+    },
+  });
+}
+
+/** Covers both Enrollment actions (complete/cancel) -- same reasoning as useSampleAction. */
+export function useEnrollmentAction(sessionId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ enrollmentId, action }: { enrollmentId: number; action: string }) =>
+      apiPost<Enrollment>(`/enrollments/${enrollmentId}/${action}/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["enrollments", "for-session", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["training-sessions", sessionId] });
+    },
+  });
+}
+
+export function useCreditNotes() {
+  return useQuery({
+    queryKey: ["credit-notes"],
+    queryFn: () => apiGet<Paginated<CreditNote>>("/credit-notes/"),
+  });
+}
+
+export function useApplyCreditNote() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ creditNoteId, enrollment }: { creditNoteId: number; enrollment: number }) =>
+      apiPost<CreditNote>(`/credit-notes/${creditNoteId}/apply/`, { enrollment }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["credit-notes"] });
     },
   });
 }

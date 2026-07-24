@@ -392,3 +392,86 @@ export const SAMPLE_STATUS_LABELS: Record<SampleStatus, string> = {
   retest_pending: "Retest Pending",
   disposed: "Disposed",
 };
+
+export interface TrainingCourse {
+  id: number;
+  title: string;
+  description: string;
+  cpd_units: string;
+  price: string;
+  early_bird_discount_pct: string;
+  student_discount_pct: string;
+}
+
+export type TrainingSessionStatus = "scheduled" | "pending_reschedule" | "in_progress" | "completed" | "cancelled";
+
+export interface TrainingSession {
+  id: number;
+  course: number;
+  course_title: string;
+  start_date: string;
+  end_date: string;
+  capacity: number;
+  min_capacity: number;
+  cancellation_threshold_days: number;
+  instructor: number | null;
+  instructor_display_name: string | null;
+  status: TrainingSessionStatus;
+  confirmed_enrollment_count: number;
+}
+
+export type EnrollmentStatus = "confirmed" | "rescheduled" | "completed" | "cancelled";
+
+export type EnrollmentPaymentStatus = "unpaid" | "partially_paid" | "paid";
+
+export interface Enrollment {
+  id: number;
+  session: number;
+  customer: number;
+  customer_email: string;
+  payment_status: EnrollmentPaymentStatus;
+  discount_applied: string;
+  discount_override: string | null;
+  certificate_issued: boolean;
+  status: EnrollmentStatus;
+  created_at: string;
+}
+
+export type CreditNoteStatus = "available" | "applied" | "expired";
+
+export interface CreditNote {
+  id: number;
+  customer: number;
+  source_enrollment: number;
+  amount: string;
+  status: CreditNoteStatus;
+  applied_to_enrollment: number | null;
+  created_at: string;
+}
+
+export const TRAINING_SESSION_STATUS_LABELS: Record<TrainingSessionStatus, string> = {
+  scheduled: "Scheduled",
+  pending_reschedule: "Pending Reschedule",
+  in_progress: "In Progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+/** TrainingSession.Status FSM edges (backend/apps/training/models.py) -- which action(s) are legal from each status. */
+export const TRAINING_SESSION_ACTIONS_BY_STATUS: Record<TrainingSessionStatus, string[]> = {
+  scheduled: ["start-session", "cancel-session"],
+  pending_reschedule: ["cancel-session"],
+  in_progress: ["complete-session"],
+  completed: [],
+  cancelled: [],
+};
+
+export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
+  confirmed: "Confirmed",
+  rescheduled: "Rescheduled",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+/** TRAINING_WRITE_ROLES (backend/apps/training/views.py) -- keep in sync by hand. */
+export const TRAINING_WRITE_ROLES: RoleName[] = ["training_coordinator", "lab_supervisor", "system_administrator"];

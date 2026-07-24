@@ -66,10 +66,39 @@ class TrainingSessionViewSet(viewsets.ModelViewSet):
     queryset = TrainingSession.objects.select_related("course", "instructor").prefetch_related("enrollments")
     serializer_class = TrainingSessionSerializer
 
+    def get_queryset(self):
+        """?status=, ?course= -- same filtering-gap pattern already fixed on Sample/TestRequest/Investigation/Instrument."""
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(","))
+        course_id = self.request.query_params.get("course")
+        if course_id:
+            qs = qs.filter(course_id=course_id)
+        return qs
+
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [AllowAny()]
         return [IsAuthenticated(), roles_required(*TRAINING_WRITE_ROLES)()]
+
+    @action(detail=True, methods=["post"], url_path="start-session")
+    def start_session(self, request, pk=None):
+        session = self.get_object()
+        _run_transition(session, "start_session")
+        return Response(TrainingSessionSerializer(session).data)
+
+    @action(detail=True, methods=["post"], url_path="complete-session")
+    def complete_session(self, request, pk=None):
+        session = self.get_object()
+        _run_transition(session, "complete_session")
+        return Response(TrainingSessionSerializer(session).data)
+
+    @action(detail=True, methods=["post"], url_path="cancel-session")
+    def cancel_session(self, request, pk=None):
+        session = self.get_object()
+        _run_transition(session, "cancel_session")
+        return Response(TrainingSessionSerializer(session).data)
 
     @action(detail=True, methods=["get"], url_path="attendee-export")
     def attendee_export(self, request, pk=None):
@@ -104,6 +133,17 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     queryset = Enrollment.objects.select_related("session__course", "customer")
     serializer_class = EnrollmentSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """?session=, ?status= -- needed by the Staff Console's Training Session detail enrollee list."""
+        qs = super().get_queryset()
+        session_id = self.request.query_params.get("session")
+        if session_id:
+            qs = qs.filter(session_id=session_id)
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(","))
+        return qs
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy", "complete", "cancel"):

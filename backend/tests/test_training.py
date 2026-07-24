@@ -18,6 +18,7 @@ from tests.factories import (
     DocumentFactory,
     EnrollmentFactory,
     InvoiceFactory,
+    StaffUserFactory,
     TrainingCourseFactory,
     TrainingSessionFactory,
 )
@@ -117,3 +118,52 @@ def test_check_session_capacity_ignores_healthy_sessions():
 
     assert result["sessions_flagged"] == 0
     assert reload(session).status == TrainingSession.Status.SCHEDULED
+
+
+def test_session_fsm_actions_are_reachable_over_the_api(login_as_staff):
+    """TrainingSessionViewSet previously exposed no way to reach start_session/complete_session/cancel_session at all."""
+    session = TrainingSessionFactory(status=TrainingSession.Status.SCHEDULED)
+    coordinator = StaffUserFactory(roles=["training_coordinator"])
+    client = login_as_staff(coordinator)
+
+    assert client.post(f"/api/v1/training-sessions/{session.id}/start-session/").status_code == 200
+    assert reload(session).status == TrainingSession.Status.IN_PROGRESS
+
+    response = client.post(f"/api/v1/training-sessions/{session.id}/complete-session/")
+    assert response.status_code == 200
+    assert reload(session).status == TrainingSession.Status.COMPLETED
+
+
+def test_session_fsm_actions_require_training_write_role(login_as_staff):
+    session = TrainingSessionFactory(status=TrainingSession.Status.SCHEDULED)
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.post(f"/api/v1/training-sessions/{session.id}/start-session/")
+
+    assert response.status_code == 403
+
+
+def test_enrollment_session_filter_returns_only_that_sessions_enrollments(login_as_staff):
+    session = TrainingSessionFactory()
+    matching = EnrollmentFactory(session=session)
+    EnrollmentFactory()  # different session
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get(f"/api/v1/enrollments/?session={session.id}")
+
+    assert response.status_code == 200
+    ids = {e["id"] for e in response.data["results"]}
+    assert ids == {matching.id}
+
+
+def test_training_session_status_filter_supports_comma_separated_values(login_as_staff):
+    scheduled = TrainingSessionFactory(status=TrainingSession.Status.SCHEDULED)
+    cancelled = TrainingSessionFactory(status=TrainingSession.Status.CANCELLED)
+    client = login_as_staff(StaffUserFactory())
+
+    response = client.get("/api/v1/training-sessions/?status=scheduled")
+
+    assert response.status_code == 200
+    ids = {s["id"] for s in response.data["results"]}
+    assert scheduled.id in ids
+    assert cancelled.id not in ids

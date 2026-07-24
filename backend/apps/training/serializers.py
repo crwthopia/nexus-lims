@@ -15,13 +15,14 @@ class TrainingCourseSerializer(serializers.ModelSerializer):
 
 class TrainingSessionSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source="course.title", read_only=True)
+    instructor_display_name = serializers.CharField(source="instructor.display_name", read_only=True, default=None)
     confirmed_enrollment_count = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingSession
         fields = [
             "id", "course", "course_title", "start_date", "end_date", "capacity",
-            "min_capacity", "cancellation_threshold_days", "instructor", "status",
+            "min_capacity", "cancellation_threshold_days", "instructor", "instructor_display_name", "status",
             "confirmed_enrollment_count",
         ]
         read_only_fields = ["id", "status"]  # status only changes via the FSM (django-fsm @transition methods)
