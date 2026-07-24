@@ -1,13 +1,13 @@
 # NASAT LIMS
 
-A working Django/DRF backend, plus a React/TypeScript Staff Console
-frontend, for the NASAT Laboratory Information Management System, built
-directly from the locked-in decisions in the NASAT LIMS Blueprint (all 12
-gaps in Blueprint Section 13 resolved). This is not a schema mockup —
-every piece described below has been exercised against a live PostgreSQL
-18 database, a live Redis broker, a live S3-compatible object store, and
-(for staff SSO) a live Microsoft Entra ID tenant, not just imported
-cleanly.
+A working Django/DRF backend, plus both React/TypeScript frontends the
+Blueprint calls for — a Staff Console and a Customer Portal — for the
+NASAT Laboratory Information Management System, built directly from the
+locked-in decisions in the NASAT LIMS Blueprint (all 12 gaps in Blueprint
+Section 13 resolved). This is not a schema mockup — every piece described
+below has been exercised against a live PostgreSQL 18 database, a live
+Redis broker, a live S3-compatible object store, and (for staff SSO) a
+live Microsoft Entra ID tenant, not just imported cleanly.
 
 Grounding: every entity, endpoint, and background task traces back to ASTM
 E1578-18, ISO/IEC 17025:2017, the NASAT service list, or an explicit NASAT
@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **57-test automated regression suite** (`backend/tests/`, pytest +
+- **68-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Staff Console frontend, feature-complete for staff** (`frontend/`,
@@ -49,8 +49,16 @@ was invented outside that grounding.
   export), and Billing (invoices, manual payment reconciliation) — all
   driven against the real API, not a mockup, see "Staff Console" below.
   Every staff-facing resource group in the Blueprint's API now has a
-  screen; the Customer Portal (a separate frontend) and frontend
-  automated tests are what's left — see Known gaps.
+  screen.
+- **Customer Portal frontend** (`customer-portal/`, React + TypeScript +
+  Vite, Blueprint Section 2.1 item 1's second frontend): register → verify
+  email → login with optional TOTP MFA, My Orders/My Samples (RLS-scoped
+  read-only), a public Training catalog with self-enrollment, My
+  Enrollments, My Credit Notes (redeem to a future session), My Invoices,
+  and an Account page with MFA enrollment — see "Customer Portal" below.
+  Needed **zero backend changes** to build; every endpoint it uses already
+  existed and was already tested. Frontend automated tests (Vitest/RTL)
+  for either frontend are what's left — see Known gaps.
 
 ## What is in this package
 
@@ -61,7 +69,7 @@ nasat-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend)
+├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
 │   ├── vite.config.ts          <- dev server on :5174, proxies /api,/admin,/static to Django on :8000
 │   └── src/
@@ -75,6 +83,15 @@ nasat-lims/
 │                                    EquipmentList, InstrumentDetail,
 │                                    TrainingList, TrainingSessionDetail,
 │                                    BillingList, InvoiceDetail
+├── customer-portal/            <- Customer Portal (React + TypeScript + Vite) -- see "Customer Portal" below
+│   ├── vite.config.ts          <- dev server on :5173, proxies /api to Django on :8000
+│   └── src/
+│       ├── api/                <- client.ts, auth.ts (register/login/MFA calls), types.ts, queries.ts
+│       ├── auth/AuthContext.tsx <- customer-me query, logout
+│       ├── components/         <- Layout, ProtectedRoute
+│       └── pages/               <- Register, VerifyEmail, Login, Orders, Samples,
+│                                    TrainingCatalog, MyEnrollments, MyCreditNotes,
+│                                    MyInvoices, Account
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -602,15 +619,68 @@ display-convenience fields that couldn't just be a `source=` lookup.
 
 This is the 8th and last of the currently-planned Staff Console screens —
 the frontend now covers every staff-facing resource group in the
-Blueprint's API. What's left is the Customer Portal (a separate frontend
-entirely, not an extension of this one) and frontend automated tests; see
-Known gaps below.
+Blueprint's API.
 
 Verified live end to end: created an invoice against a real `Order`
 (`customer_email` resolved correctly), recorded a confirmed payment and
 watched the invoice auto-transition to `paid` through this new UI exactly
 as the endpoint's own tests already proved server-side, and confirmed the
 status filter actually filters.
+
+## Customer Portal (React frontend)
+
+`customer-portal/` (Blueprint Section 2.1 item 1's second frontend, a
+genuinely separate app from the Staff Console — not a shared codebase,
+matching the two-segregated-identity-domains principle that runs through
+this whole project): Vite + React + TypeScript, React Router, TanStack
+Query — same stack as the Staff Console, but its own `npm install`/`npm
+run dev` on its own port. **Needed zero backend changes to build**: every
+endpoint it uses (`/auth/customer/*`, `/my/orders/`, `/my/samples/`, the
+public `/training-courses/`/`/training-sessions/`, `/my/enrollments/`,
+`/my/credit-notes/`, `/my/invoices/`) already existed and was already
+covered by `backend/tests/`.
+
+**Running it**: `cd customer-portal && npm install && npm run dev` (or
+the `customer-portal` entry in `.claude/launch.json`), alongside the
+backend on `:8000`. The dev server listens on `:5173` — the same port
+`CUSTOMER_PORTAL_BASE_URL` already defaulted to (`config/settings.py`,
+set up back when only the customer auth *backend* existed) — and proxies
+`/api` to `:8000`, same single-origin reasoning as the Staff Console.
+
+**Auth is genuinely simpler here than the Staff Console's**: customer
+auth was never Entra ID SSO — it's plain email/password + optional TOTP
+MFA against `CustomerSessionAuthentication`, which already uses Django's
+own session cookie (just a different session key, `customer_user_id`,
+than the staff `_auth_user_id`). So there's no OAuth2 redirect dance, no
+port-hop indirection like `StaffLoginCompleteView` — `AuthContext.tsx`
+just POSTs to `/auth/customer/login` directly like any other form. One
+piece of infrastructure was already in place before this session touched
+it: `CSRF_TRUSTED_ORIGINS` already included `http://localhost:5173`
+(added proactively alongside `:5174` when the Staff Console's CSRF bug
+was fixed), so the same class of "CSRF Failed: Origin checking failed"
+bug that hit the Staff Console never happened here.
+
+**Email verification round-trips through this app**: `customer_auth.py`'s
+`send_verification_email` builds the link as
+`{CUSTOMER_PORTAL_BASE_URL}/verify-email?token=...`; `VerifyEmail.tsx`
+reads `?token=` from the URL and POSTs it automatically on mount — no
+user input needed beyond clicking the emailed link. `MyEnrollments.tsx`
+cross-references the public `/training-sessions/` list to show course
+title/date, since `CustomerEnrollmentSerializer` only returns a bare
+`session` id (no server-side change needed to fix that — the public
+endpoint already has everything).
+
+Verified live end to end, using a **real account this time, no
+workaround needed** (unlike the Staff Console, where Entra ID SSO can't
+be completed non-interactively in this environment): registered a new
+customer, pulled the actual verification link out of the console email
+backend's server log, followed it, logged in, browsed the public Training
+catalog while still logged out to confirm it's genuinely public, enrolled
+in a real session (the seat count updated 1/20 → 2/20), enabled MFA and
+confirmed it with a TOTP code computed via `pyotp` against the real
+provisioning secret (the same library `backend/tests/test_customer_auth.py`
+already uses), logged out, and logged back in with the MFA-required flow
+correctly triggered and satisfied on the second attempt.
 
 ## Row-level security
 
@@ -684,8 +754,9 @@ rather than silently losing the archival action.
 
 ### Prerequisites
 
-- **Node.js** (v24 used in dev) — only needed for the Staff Console
-  frontend (`frontend/`); the backend alone doesn't need it.
+- **Node.js** (v24 used in dev) — only needed for the two frontends
+  (`frontend/` Staff Console, `customer-portal/` Customer Portal); the
+  backend alone doesn't need it.
 - **PostgreSQL** (18 used in dev) — the app database.
 - **Redis** — Celery broker/result backend.
 - **An S3-compatible object store** — a local [MinIO](https://min.io/)
@@ -827,17 +898,16 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **No CI-driven build/typecheck for the Staff Console.** `frontend/` is
-  feature-complete for every staff-facing resource group (see "Staff
-  Console" above), but `npm run build`/`tsc` isn't wired into any CI
-  pipeline — the backend's CI/CD gap below applies here too.
-- **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
-  frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
-  `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
-- **No frontend automated tests.** The Staff Console was verified live
-  through the browser preview during development (see "Staff Console"
-  above), not via Vitest/React Testing Library — there's no regression
-  safety net on the frontend the way `backend/tests/` gives the API.
+- **No CI-driven build/typecheck for either frontend.** `frontend/` (Staff
+  Console) and `customer-portal/` (Customer Portal) are both
+  feature-complete for their respective sides of the Blueprint, but
+  neither has `npm run build`/`tsc` wired into any CI pipeline — the
+  backend's CI/CD gap below applies here too.
+- **No frontend automated tests.** Both frontends were verified live
+  through the browser preview during development (see "Staff Console" and
+  "Customer Portal" above), not via Vitest/React Testing Library — there's
+  no regression safety net on either frontend the way `backend/tests/`
+  gives the API.
 - **No report PDF generation.** `Report` is metadata + an OSS object key
   (`file_id`) supplied by the caller; the decoupled WeasyPrint/Jinja2
   rendering pipeline described in Blueprint Section 2.1a hasn't been
