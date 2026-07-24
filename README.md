@@ -36,19 +36,21 @@ was invented outside that grounding.
 - **57-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
-- **Staff Console frontend** (`frontend/`, React + TypeScript + Vite,
-  Blueprint Section 2.1 item 1): real Entra ID SSO login through Django,
-  a live samples worklist with the full Sample FSM action set (register →
-  receive → prep → testing → review → approve/reject → …), a Review Queue
-  with segregation-of-duties awareness, a Testing Queue with results entry
-  (competency check, OOS flagging), a Documents screen (version history,
-  FR-D1-03 approval), Investigations/CAPA tracking (FR-E9-01), an
-  Equipment screen (instruments, standard reagents, calibration logging
-  with FR-E3-02 status sync), and Training (courses, sessions, credit
-  notes, attendee export) — all driven against the real API, not a
-  mockup, see "Staff Console" below. Covers Samples, Review/Approval,
-  Testing/Results, Documents, Investigations, Equipment, and Training
-  only so far; billing and the Customer Portal have no UI yet.
+- **Staff Console frontend, feature-complete for staff** (`frontend/`,
+  React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
+  SSO login through Django, a live samples worklist with the full Sample
+  FSM action set (register → receive → prep → testing → review →
+  approve/reject → …), a Review Queue with segregation-of-duties
+  awareness, a Testing Queue with results entry (competency check, OOS
+  flagging), a Documents screen (version history, FR-D1-03 approval),
+  Investigations/CAPA tracking (FR-E9-01), an Equipment screen
+  (instruments, standard reagents, calibration logging with FR-E3-02
+  status sync), Training (courses, sessions, credit notes, attendee
+  export), and Billing (invoices, manual payment reconciliation) — all
+  driven against the real API, not a mockup, see "Staff Console" below.
+  Every staff-facing resource group in the Blueprint's API now has a
+  screen; the Customer Portal (a separate frontend) and frontend
+  automated tests are what's left — see Known gaps.
 
 ## What is in this package
 
@@ -71,7 +73,8 @@ nasat-lims/
 │                                    DocumentsList, DocumentDetail,
 │                                    InvestigationsList, InvestigationDetail,
 │                                    EquipmentList, InstrumentDetail,
-│                                    TrainingList, TrainingSessionDetail
+│                                    TrainingList, TrainingSessionDetail,
+│                                    BillingList, InvoiceDetail
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -581,6 +584,34 @@ applied a credit note to a different session's enrollment — status
 flipped to `applied` and the Apply control correctly disappeared
 afterward.
 
+**Billing** (`frontend/src/pages/BillingList.tsx`, `InvoiceDetail.tsx`,
+Blueprint Section 3.7): a status-filterable invoice list with a create
+form, and per-invoice payment history with a record-payment form.
+Write access is gated to Training Coordinator/Lab Supervisor/System
+Administrator (`BILLING_WRITE_ROLES`); read is open to any authenticated
+staff, same reasoning as Documents/Investigations/Equipment/Training.
+
+Same filtering gap as the previous five screens, found the same way:
+`InvoiceViewSet` had no `get_queryset()` override, so `?status=` did
+nothing server-side. Fixed in `apps/billing/views.py`, regression-tested
+(backend now at 68 tests). `InvoiceSerializer` also gained
+`customer_email`, a `SerializerMethodField` resolving whichever of
+`order`/`enrollment` is actually set — an `Invoice` bills exactly one of
+the two, never both, so this is the one case among all these
+display-convenience fields that couldn't just be a `source=` lookup.
+
+This is the 8th and last of the currently-planned Staff Console screens —
+the frontend now covers every staff-facing resource group in the
+Blueprint's API. What's left is the Customer Portal (a separate frontend
+entirely, not an extension of this one) and frontend automated tests; see
+Known gaps below.
+
+Verified live end to end: created an invoice against a real `Order`
+(`customer_email` resolved correctly), recorded a confirmed payment and
+watched the invoice auto-transition to `paid` through this new UI exactly
+as the endpoint's own tests already proved server-side, and confirmed the
+status filter actually filters.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -732,7 +763,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-65 tests, organized by behavior rather than by app:
+68 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -746,7 +777,7 @@ pytest
 | `test_equipment_calibration.py` | FR-E3-02: a calibration result flips `Instrument.status` and advances `calibration_due_date`; `?status=` filter actually filters |
 | `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker), `TrainingSession` FSM actions reachable over the API, `?session=`/`?status=`/`?course=` filters |
-| `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't |
+| `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't; `?status=` filter and `customer_email` resolution (order- and enrollment-based) |
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
@@ -796,13 +827,10 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 Genuinely not built yet, not just undocumented:
 
-- **Staff Console covers Samples, Review/Approval, Testing/Results,
-  Documents, Investigations, Equipment, and Training only.** `frontend/`
-  (see "Staff Console" above) has login, the samples worklist and FSM
-  actions, the Review Queue, the Testing Queue with results entry, the
-  Documents screen, Investigations/CAPA tracking, the Equipment screen,
-  and Training — nothing yet for billing. No CI-driven build/typecheck
-  for it either (backend's CI gap below applies here too).
+- **No CI-driven build/typecheck for the Staff Console.** `frontend/` is
+  feature-complete for every staff-facing resource group (see "Staff
+  Console" above), but `npm run build`/`tsc` isn't wired into any CI
+  pipeline — the backend's CI/CD gap below applies here too.
 - **No Customer Portal at all.** Blueprint Section 2.1 item 1's second
   frontend, and Section 5.2's screens, don't exist — `/auth/customer/*`,
   `/my/orders/`, `/my/samples/`, `/my/enrollments/`, etc. are API-only.
