@@ -24,6 +24,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 5174
+    },
+    {
+      "name": "customer-portal",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "customer-portal", "run", "dev"],
+      "port": 5173
     }
   ]
 }
