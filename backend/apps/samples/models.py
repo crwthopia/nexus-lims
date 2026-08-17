@@ -1,7 +1,7 @@
 """
 Sample and Order entities (Blueprint Section 3.2, C-1/C-2).
 
-Sample.status is a django-fsm FSMField (Blueprint Section 2.1 item 3a) so
+Sample.status is a django-fsm-2 FSMField (Blueprint Section 2.1 item 3a) so
 illegal transitions raise an error at the model layer regardless of which
 API endpoint or admin action attempts it. Guard conditions differ by
 service_line (Blueprint Section 2.1 item 3a segregation-of-duties RESOLVED

@@ -50,7 +50,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     # Third-party (locked-in tech stack, Blueprint Section 2.1 / repo instructions)
     "rest_framework",
-    "django_fsm",
+    "django_fsm",  # django-fsm-2 (the maintained fork) keeps the original module name
     "simple_history",
     "django_auth_adfs",  # ships templates/django_auth_adfs/login_failed.html; needs APP_DIRS discovery
     # NASAT LIMS apps, one per ASTM function-map domain (Blueprint Section 10)

@@ -19,7 +19,7 @@ class Role(models.Model):
     """
     The 10 named staff roles from the blueprint's RBAC model
     (Blueprint Section 7.1). Also referenced descriptively by
-    django-fsm @transition guards on Sample/TestRequest/ApprovalAction.
+    django-fsm-2 @transition guards on Sample/TestRequest/ApprovalAction.
     """
 
     class RoleName(models.TextChoices):
