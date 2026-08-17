@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  # Runs on every branch, not just main, so a feature branch is verified
-  # before a pull request exists. Same-repo pull requests therefore run
-  # twice; the concurrency group below cancels superseded runs.
+  # Every job runs exactly once per commit: pull_request covers branch work,
+  # push covers main itself (post-merge, and any direct commit). Widening
+  # push to '**' would double every job for the whole life of a PR, in
+  # exchange for CI on a branch that has no pull request open yet.
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
