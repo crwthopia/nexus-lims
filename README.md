@@ -36,6 +36,10 @@ was invented outside that grounding.
 - **68-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
+- **CI on every push** (`.github/workflows/ci.yml`): the backend suite
+  against live Postgres/Redis/MinIO service containers, plus lint,
+  typecheck, and production build for both frontends — see Continuous
+  integration below.
 - **Staff Console frontend, feature-complete for staff** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -69,6 +73,7 @@ nasat-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO) + both frontends' lint/typecheck/build
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
 │   ├── vite.config.ts          <- dev server on :5174, proxies /api,/admin,/static to Django on :8000
@@ -894,15 +899,47 @@ file-parsing (neither is built — see Known gaps below), and the two Celery
 beat schedule entries themselves (the task *logic* is tested directly;
 `CELERY_BEAT_SCHEDULE`'s cron wiring isn't).
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request, in two
+jobs:
+
+- **Backend** — the full `pytest` suite against live PostgreSQL 18, Redis,
+  and MinIO service containers, the same stack the suite is written for
+  (see Running the test suite above). Nothing is mocked in CI that isn't
+  mocked locally.
+- **Frontend** — a matrix over `frontend/` and `customer-portal/` running
+  `npm ci`, `npm run lint` (oxlint), and `npm run build` (`tsc -b && vite
+  build`, so a type error fails the build).
+
+Three details in that workflow are load-bearing and worth knowing before
+editing it:
+
+- **The `nasat_lims` role is created `NOSUPERUSER NOBYPASSRLS`.** Postgres
+  exempts both attributes from row-level security entirely, so a
+  superuser role makes `test_row_level_security.py`'s
+  direct-against-the-DB-connection assertion fail with one customer
+  reading another customer's orders — which reads like a security
+  regression in the application rather than what it is, a CI provisioning
+  mistake. `CREATEDB` *is* required: pytest-django creates
+  `test_nasat_lims` itself. The same applies to any local Postgres you
+  point the suite at.
+- **Dummy `AZURE_AD_*` values are set.** `config/urls.py` imports
+  `django_auth_adfs.urls`, which validates `AUTH_ADFS` at startup
+  (see Authentication above), so the suite can't even be *collected*
+  without them. No test performs a real SSO handshake.
+- **MinIO runs via `docker run`, not as a service container.** The
+  official image needs a `server /data` command and the `services:` block
+  has no way to supply one.
+
+The frontend jobs use `npm ci`, never `npm install`: `npm ci` installs
+exactly what the lockfile pins and never rewrites it, so CI can't drift
+`package-lock.json` out from under you.
+
 ## Known gaps / next steps
 
 Genuinely not built yet, not just undocumented:
 
-- **No CI-driven build/typecheck for either frontend.** `frontend/` (Staff
-  Console) and `customer-portal/` (Customer Portal) are both
-  feature-complete for their respective sides of the Blueprint, but
-  neither has `npm run build`/`tsc` wired into any CI pipeline — the
-  backend's CI/CD gap below applies here too.
 - **No frontend automated tests.** Both frontends were verified live
   through the browser preview during development (see "Staff Console" and
   "Customer Portal" above), not via Vitest/React Testing Library — there's
@@ -920,9 +957,11 @@ Genuinely not built yet, not just undocumented:
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —
   walk-in/staff-initiated intake is still the only path onto a `Sample`.
-- **No CI/CD, no IaC.** No GitHub Actions workflows, no Terraform for the
-  Alibaba Cloud resources described in Blueprint Section 2.2 — this all
-  runs from a local dev environment only.
+- **No CD, no IaC.** CI runs on every push (see Continuous integration
+  above), but nothing deploys: there is no release pipeline and no
+  Terraform for the Alibaba Cloud resources described in Blueprint
+  Section 2.2 — outside of CI, this still runs from a local dev
+  environment only.
 - **Real Alibaba Cloud OSS is unverified.** The object storage
   integration is proven against local MinIO; whether Alibaba's actual
   S3-compatible surface accepts the same storage-class values, auth
