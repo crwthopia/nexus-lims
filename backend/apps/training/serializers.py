@@ -25,7 +25,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
             "min_capacity", "cancellation_threshold_days", "instructor", "instructor_display_name", "status",
             "confirmed_enrollment_count",
         ]
-        read_only_fields = ["id", "status"]  # status only changes via the FSM (django-fsm @transition methods)
+        read_only_fields = ["id", "status"]  # status only changes via the FSM (django-fsm-2 @transition methods)
 
     def get_confirmed_enrollment_count(self, obj):
         return obj.enrollments.filter(status=Enrollment.Status.CONFIRMED).count()

@@ -2,7 +2,7 @@
 Segregation-of-duties guard for ApprovalAction (Blueprint Section 2.1 item
 3a, closes Section 13 gap 2; grounded in ASTM E1578-18 6.6.1). Lives outside
 Sample.approve()'s @transition body because it needs request-time context
-(which staff member is acting as Approver) that a pure django-fsm condition
+(which staff member is acting as Approver) that a pure django-fsm-2 condition
 cannot see — it is evaluated by the view before calling sample.approve().
 """
 

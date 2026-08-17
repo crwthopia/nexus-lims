@@ -36,7 +36,7 @@ RoleName = Role.RoleName
 
 
 def _run_transition(sample, method_name):
-    """Runs a django-fsm @transition method, translating TransitionNotAllowed into an HTTP 400."""
+    """Runs a django-fsm-2 @transition method, translating TransitionNotAllowed into an HTTP 400."""
     try:
         getattr(sample, method_name)()
     except TransitionNotAllowed as exc:

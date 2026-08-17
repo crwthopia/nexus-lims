@@ -1,6 +1,12 @@
 Django==5.0.6
 djangorestframework==3.17.1
-django-fsm==3.0.1
+# django-fsm-2 is the maintained django-commons fork of django-fsm, which was
+# abandoned at 3.0.1 (that version's import-time UserWarning points at
+# viewflow.fsm, an AGPL-licensed rewrite with a different API and no
+# FSMModelMixin -- see the FSM state machines note in the root README).
+# Same `django_fsm` module name and same public API, so imports, FSMField
+# deconstruct paths in existing migrations, and MIT licensing all carry over.
+django-fsm-2==4.2.4
 django-simple-history==3.12.0
 psycopg2-binary==2.9.12
 celery==5.4.0

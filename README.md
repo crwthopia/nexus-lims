@@ -307,6 +307,51 @@ the current schema, so this treats any confirmed payment as paying the
 invoice in full — the same documented limitation the training-capacity
 Celery task's `CreditNote` amount calculation has.
 
+## FSM state machines
+
+Four models carry a guarded state machine rather than a plain status
+column: `Sample`, `TestRequest` (Blueprint Section 2.1 item 3a),
+`TrainingSession`, and `Enrollment`. Each declares an
+`FSMField(protected=True)` plus `@transition`-decorated methods, so an
+illegal transition raises at the *model* layer no matter which endpoint,
+admin action, or shell session attempts it — the API's 400 responses are a
+translation of that model-layer refusal (`TransitionNotAllowed`), not an
+independent check that could drift from it.
+
+The library is **`django-fsm-2`** (MIT, maintained under the
+[django-commons](https://github.com/django-commons/django-fsm-2)
+organization), not the original `django-fsm`, which was abandoned at 3.0.1
+and emits an import-time `UserWarning` on every management command and test
+run. The fork keeps the `django_fsm` module name and public API, so this is
+a requirements-file change only: imports, the `django_fsm.FSMField`
+deconstruct paths recorded in the existing migrations, and MIT licensing
+all carry over unchanged, and `makemigrations --check` reports no schema
+drift.
+
+That deprecation warning points at `viewflow.fsm` as the successor, which
+this project deliberately did **not** adopt, for two reasons:
+
+- **Licensing.** `django-viewflow` is AGPL-3.0-or-later. Its own
+  `viewflow/fsm/__init__.py` header describes a dual AGPL/commercial
+  arrangement, but the published wheel ships only the AGPL text — no
+  exception or commercial-license file. AGPL's network-use clause is
+  squarely aimed at software users interact with remotely, which is exactly
+  what the Customer Portal makes this.
+- **It would reintroduce a bug this project already fixed.**
+  `viewflow.fsm` has no `FSMModelMixin`; its own `FSMField` docstring notes
+  that `protected=True` blocks `refresh_from_db()` and that there is "no
+  workaround for that yet". That is precisely the `AttributeError` the test
+  suite surfaced on all four of these models, and
+  `test_fsm_refresh_from_db.py` exists to keep it fixed (see Running the
+  test suite below). Adopting `viewflow.fsm` would mean either dropping
+  `protected=True` — the whole point of the field — or accepting the broken
+  `refresh_from_db()` again.
+
+`viewflow.fsm` is otherwise a reasonable target: it *does* ship a
+backward-compatible `FSMField` and a django-fsm-shaped `@transition`
+decorator, so if the licensing question is ever settled the port is small.
+The `FSMModelMixin` gap would still need an answer.
+
 ## Authentication
 
 Two identity domains, no shared table, no FK between them (Blueprint
@@ -888,7 +933,7 @@ before adding more tests:
   `Model.objects.get(pk=...)` instead of calling `instance.refresh_from_db()`
   in place. It predates a real bug this test suite surfaced: `Sample`,
   `TestRequest`, `TrainingSession`, and `Enrollment` all declare a
-  `django-fsm` `protected=True` field but didn't mix in
+  `django-fsm-2` `protected=True` field but didn't mix in
   `django_fsm.FSMModelMixin`, so `Model.refresh_from_db()`'s plain `setattr`
   on every field hit the protected FSM descriptor's rejection of any second
   direct assignment, raising `AttributeError: Direct status modification is

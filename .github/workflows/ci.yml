@@ -84,7 +84,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          # Both files: requirements-dev.txt is a thin "-r requirements.txt"
+          # plus test tooling, so hashing it alone would keep serving a stale
+          # cache after a runtime dependency changes.
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       - name: Create the application database role
         # Deliberately NOT a superuser and NOT BYPASSRLS: Postgres exempts

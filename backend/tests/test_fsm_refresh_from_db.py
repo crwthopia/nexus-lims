@@ -1,7 +1,7 @@
 """
 Regression test for a latent bug found while writing this test suite:
 Sample, TestRequest, TrainingSession, and Enrollment all declare a
-django-fsm FSMField(protected=True) but didn't mix in
+django-fsm-2 FSMField(protected=True) but didn't mix in
 django_fsm.FSMModelMixin. Model.refresh_from_db() does a plain setattr()
 for every concrete field, and the protected FSM descriptor rejects any
 second direct assignment on an existing instance -- so calling
