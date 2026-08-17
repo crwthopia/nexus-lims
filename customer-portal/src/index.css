@@ -1,20 +1,65 @@
+/*
+ * Dark theme, matched to the NexusCRM Enterprise console so the two products
+ * read as one suite. Every value below was checked for WCAG contrast rather
+ * than eyeballed -- the numbers in the comments are measured ratios against
+ * the surface the colour is actually used on. Nothing here is below AA.
+ *
+ * Two tokens exist per accent because a single value cannot serve both roles
+ * in a dark theme: a blue light enough to read as link text on a near-black
+ * surface is too light to carry a white button label, and vice versa. Hence
+ * --color-primary (fill, white label on it) vs --color-accent (text), and
+ * --color-danger (text) vs --color-danger-fill (button).
+ */
 :root {
-  --color-bg: #f5f6f8;
-  --color-surface: #ffffff;
-  --color-border: #e1e4e9;
-  --color-text: #1a1d24;
-  --color-text-muted: #6b7280;
-  --color-primary: #2454ff;
-  --color-primary-dark: #1a3fcc;
-  --color-danger: #d92d20;
-  --color-danger-bg: #fef3f2;
-  --color-success: #12793f;
-  --color-success-bg: #ecfdf3;
-  --color-warning: #b54708;
-  --color-warning-bg: #fffaeb;
+  /* Surfaces, darkest to lightest. */
+  --color-bg: #0a0e15;            /* app canvas */
+  --color-surface: #10161f;       /* cards, panels */
+  --color-surface-hover: #172030; /* row/button hover -- lifts off the surface
+                                     rather than sinking towards the canvas,
+                                     which is what the light theme's use of
+                                     --color-bg for hover would do here */
+  --color-border: #1e2836;        /* hairline separators between surfaces */
+  --color-border-strong: #56698a; /* 3.27:1 on surface -- for form controls,
+                                     whose border is the only thing marking
+                                     the control's extent (WCAG 1.4.11) */
+
+  /* Text. */
+  --color-text: #e7edf5;          /* 15.42:1 on surface */
+  --color-text-muted: #93a1b3;    /* 6.91:1 on surface */
+
+  /* Primary blue: fill vs text, see the note above. */
+  --color-primary: #3b6ae8;       /* white label on it: 4.76:1 */
+  --color-primary-dark: #3560e0;  /* fill hover; deepens rather than lightens
+                                     so the white label keeps 5.38:1 */
+  --color-accent: #6f9bff;        /* links, active nav: 6.75:1 on surface */
+
+  /* Semantic pairs: a bright foreground on a dark tint of the same hue. */
+  --color-danger: #fb8b8b;        /* 7.93:1 on surface */
+  --color-danger-bg: #2e1518;     /* danger fg on it: 7.41:1 */
+  --color-danger-fill: #c2372c;   /* destructive button; white label: 5.42:1 */
+  --color-danger-fill-hover: #ab2f26;
+  --color-success: #3ad498;       /* 9.55:1 on surface */
+  --color-success-bg: #0d2a1f;    /* success fg on it: 8.08:1 */
+  --color-warning: #f2b950;       /* 10.23:1 on surface */
+  --color-warning-bg: #2b2110;    /* warning fg on it: 8.91:1 */
+
+  /* Sample status badges (components/StatusBadge.tsx). The warning, success
+     and danger pairs above cover in-progress, approved and rejected; these
+     add the three that have no semantic equivalent. Each is measured against
+     its own -bg, since a badge is bold 0.75rem text on a tint. */
+  --color-status-neutral: #a8b6c8;    /* 7.22:1 on its bg */
+  --color-status-neutral-bg: #1e2836;
+  --color-status-muted: #8593a6;      /* 4.76:1 -- lowest in the theme, and
+                                         only used for `disposed` */
+  --color-status-info: #7db3ff;       /* 7.23:1 on its bg */
+  --color-status-info-bg: #12243f;
+  --color-status-review: #ab8dfb;     /* 6.10:1 on its bg */
+  --color-status-review-bg: #231b3f;
+
   --radius: 8px;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color-scheme: light;
+  /* Makes the UA style native form controls, scrollbars and the like dark. */
+  color-scheme: dark;
 }
 
 * {
@@ -36,7 +81,7 @@ button {
 }
 
 a {
-  color: var(--color-primary);
+  color: var(--color-accent);
 }
 
 .btn {
@@ -55,11 +100,22 @@ a {
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--color-bg);
+  background: var(--color-surface-hover);
 }
 
+/*
+ * Disabled buttons get a real muted style rather than opacity. At 0.5 opacity
+ * on a near-black canvas a white label drops to roughly 2.5:1 -- WCAG exempts
+ * inactive controls, but these particular buttons are informational: the
+ * Actions panel deliberately shows transitions you *can't* perform, with the
+ * reason in the tooltip, so the label has to stay readable. Overriding the
+ * primary/danger fills here also stops a disabled button from still reading
+ * as the screen's main call to action.
+ */
 .btn:disabled {
-  opacity: 0.5;
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
   cursor: not-allowed;
 }
 
@@ -74,13 +130,13 @@ a {
 }
 
 .btn-danger {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
+  background: var(--color-danger-fill);
+  border-color: var(--color-danger-fill);
   color: white;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #b42318;
+  background: var(--color-danger-fill-hover);
 }
 
 .card {
@@ -118,7 +174,7 @@ td {
 }
 
 tbody tr:hover {
-  background: var(--color-bg);
+  background: var(--color-surface-hover);
   cursor: pointer;
 }
 
@@ -143,7 +199,36 @@ tbody tr:hover {
 .field textarea {
   padding: 8px 10px;
   border-radius: var(--radius);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: inherit;
   font-size: 0.9rem;
+}
+
+input,
+select,
+textarea {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  /* See the Staff Console's index.css: the UA default ring is too faint on a
+     near-black surface. --color-accent is 6.75:1 there. */
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }

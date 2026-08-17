@@ -414,6 +414,48 @@ history-tracked model. Fixed once, centrally, in
 `apps/accounts/history.py` (`get_history_user`), applied to every
 `HistoricalRecords()` declaration across all 10 apps.
 
+## Theme
+
+Both frontends run a dark theme matched to the **NexusCRM Enterprise**
+console, so the two products read as one suite. It lives entirely in the
+`:root` custom properties at the top of each app's `src/index.css` — the two
+blocks are identical, and are the only place colour is defined. There are no
+hardcoded colours left in any component.
+
+Colours were **measured, not eyeballed.** Every value carries its WCAG
+contrast ratio as a comment, against the surface it is actually used on;
+nothing is below AA (4.5:1) for text, and most pairs clear AAA. Three
+consequences worth knowing before changing a token:
+
+- **Some accents need two tokens, not one.** A blue light enough to read as
+  link text on a near-black surface is too light to carry a white button
+  label. Hence `--color-primary` (fill, white label at 4.76:1) versus
+  `--color-accent` (links and active nav, 6.75:1 on a card), and
+  `--color-danger` (error text, 7.93:1 — used in 47 places) versus
+  `--color-danger-fill` (destructive button, white label at 5.42:1). Setting
+  one where the other belongs looks fine and fails contrast.
+- **Hover lifts, it doesn't sink.** The light theme used `--color-bg` as the
+  hover background on cards and table rows, which worked because the canvas
+  was *darker* than a white surface. Inverted, that reads as a pressed
+  state, so hovers use `--color-surface-hover`, which sits above the surface.
+- **Form controls get `--color-border-strong` (3.27:1), not the hairline
+  `--color-border` (1.22:1).** A control's border is the only thing marking
+  its extent, which WCAG 1.4.11 asks 3:1 of. The hairline is correct for
+  separators between surfaces and wrong for an input.
+
+Disabled buttons use a muted fill rather than `opacity: 0.5`, which on a
+near-black canvas drops a white label to roughly 2.5:1. WCAG exempts
+inactive controls, but the Sample Actions panel deliberately shows
+transitions you *can't* perform with the reason in the tooltip, so those
+labels have to stay readable.
+
+`components/StatusBadge.tsx` maps each of the 11 `Sample` statuses to a
+token pair rather than a literal. The mapping is deliberately many-to-one:
+statuses that mean the same thing to a reviewer share a colour, so a
+worklist reads as four groups (waiting / in progress / accepted / rejected)
+rather than eleven unrelated hues, and `disposed` is muted rather than red
+because it is terminal bookkeeping, not a failure.
+
 ## Staff Console (React frontend)
 
 `frontend/` (Blueprint Section 2.1 item 1): Vite + React + TypeScript,

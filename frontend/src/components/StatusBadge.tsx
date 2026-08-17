@@ -1,24 +1,40 @@
 import type { SampleStatus } from "../api/types";
 import { SAMPLE_STATUS_LABELS } from "../api/types";
 
-const STATUS_COLORS: Record<SampleStatus, { bg: string; fg: string }> = {
-  pre_registered: { bg: "#f2f4f7", fg: "#344054" },
-  registered: { bg: "#eff4ff", fg: "#2454ff" },
-  received: { bg: "#eff4ff", fg: "#2454ff" },
-  in_prep: { bg: "#fffaeb", fg: "#b54708" },
-  in_testing: { bg: "#fffaeb", fg: "#b54708" },
-  under_review: { bg: "#f4f3ff", fg: "#5925dc" },
-  approved: { bg: "#ecfdf3", fg: "#12793f" },
-  rejected: { bg: "#fef3f2", fg: "#d92d20" },
-  under_investigation: { bg: "#fef3f2", fg: "#d92d20" },
-  retest_pending: { bg: "#fffaeb", fg: "#b54708" },
-  disposed: { bg: "#f2f4f7", fg: "#667085" },
+/**
+ * Sample status colours, as CSS custom properties rather than literals.
+ *
+ * These were the only hardcoded colours left in the Staff Console, which made
+ * them the only thing the theme couldn't reach. Now each status maps to a
+ * token pair defined in index.css, so a palette change lands here too.
+ *
+ * The mapping is deliberately not one-colour-per-status: statuses that mean
+ * the same thing to a reviewer share a colour, so the worklist reads as four
+ * groups (waiting / in progress / accepted / rejected) rather than eleven
+ * unrelated hues. `disposed` is muted rather than red -- it's a terminal
+ * bookkeeping state, not a failure.
+ */
+const STATUS_TOKENS: Record<SampleStatus, { bg: string; fg: string }> = {
+  pre_registered: { bg: "--color-status-neutral-bg", fg: "--color-status-neutral" },
+  registered: { bg: "--color-status-info-bg", fg: "--color-status-info" },
+  received: { bg: "--color-status-info-bg", fg: "--color-status-info" },
+  in_prep: { bg: "--color-warning-bg", fg: "--color-warning" },
+  in_testing: { bg: "--color-warning-bg", fg: "--color-warning" },
+  under_review: { bg: "--color-status-review-bg", fg: "--color-status-review" },
+  approved: { bg: "--color-success-bg", fg: "--color-success" },
+  rejected: { bg: "--color-danger-bg", fg: "--color-danger" },
+  under_investigation: { bg: "--color-danger-bg", fg: "--color-danger" },
+  retest_pending: { bg: "--color-warning-bg", fg: "--color-warning" },
+  disposed: { bg: "--color-status-neutral-bg", fg: "--color-status-muted" },
 };
 
 export function StatusBadge({ status }: { status: SampleStatus }) {
-  const colors = STATUS_COLORS[status];
+  const tokens = STATUS_TOKENS[status];
   return (
-    <span className="badge" style={{ background: colors.bg, color: colors.fg }}>
+    <span
+      className="badge"
+      style={{ background: `var(${tokens.bg})`, color: `var(${tokens.fg})` }}
+    >
       {SAMPLE_STATUS_LABELS[status]}
     </span>
   );
