@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite'
+// defineConfig from vitest/config, not vite: the `test` block below is
+// Vitest's, and vite's own UserConfig type rejects it (TS2769).
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // Staff Console dev server. Everything the browser talks to goes through
@@ -20,5 +22,14 @@ export default defineConfig({
       '/admin': 'http://localhost:8000',
       '/static': 'http://localhost:8000',
     },
+  },
+  test: {
+    // jsdom, not the default node environment: every test here renders real
+    // components, and ProtectedRoute/AuthContext depend on document.cookie
+    // and history for the redirect assertions.
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.ts',
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

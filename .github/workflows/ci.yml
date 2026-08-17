@@ -185,7 +185,15 @@ jobs:
         working-directory: ${{ matrix.app }}
         run: npm run lint
 
+      # Vitest + React Testing Library, jsdom. Runs before the build so a
+      # behavioural regression is reported as a test failure rather than
+      # hiding behind a later type error.
+      - name: Test
+        working-directory: ${{ matrix.app }}
+        run: npm run test
+
       # "tsc -b && vite build": typecheck and production build in one script.
+      # Covers the test files too, since they live under src/.
       - name: Typecheck and build
         working-directory: ${{ matrix.app }}
         run: npm run build
