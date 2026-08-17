@@ -38,8 +38,12 @@ was invented outside that grounding.
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
   suite against live Postgres/Redis/MinIO service containers, plus lint,
-  typecheck, and production build for both frontends — see Continuous
-  integration below.
+  tests, typecheck, and production build for both frontends — see
+  Continuous integration below.
+- **49-test frontend suite** (Vitest + React Testing Library): 39 in the
+  Staff Console, 10 in the Customer Portal, covering role gating, the
+  route guards, the Sample FSM action set, and the customer MFA step-up —
+  see Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -63,8 +67,7 @@ was invented outside that grounding.
   Enrollments, My Credit Notes (redeem to a future session), My Invoices,
   and an Account page with MFA enrollment — see "Customer Portal" below.
   Needed **zero backend changes** to build; every endpoint it uses already
-  existed and was already tested. Frontend automated tests (Vitest/RTL)
-  for either frontend are what's left — see Known gaps.
+  existed and was already tested.
 
 ## What is in this package
 
@@ -75,7 +78,7 @@ nasat-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO) + both frontends' lint/typecheck/build
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO) + both frontends' lint/test/typecheck/build
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
 │   ├── vite.config.ts          <- dev server on :5174, proxies /api,/admin,/static to Django on :8000
@@ -83,6 +86,7 @@ nasat-lims/
 │       ├── api/                <- client.ts (fetch wrapper), types.ts, queries.ts (React Query hooks)
 │       ├── auth/AuthContext.tsx <- staff-me query, login/logout, hasRole()
 │       ├── components/         <- Layout, ProtectedRoute, StatusBadge
+│       ├── test/                <- Vitest setup + stubApi/renderWithProviders helpers
 │       └── pages/               <- Login, SamplesList, SampleDetail, ReviewQueue,
 │                                    TestingQueue, TestRequestDetail,
 │                                    DocumentsList, DocumentDetail,
@@ -96,6 +100,7 @@ nasat-lims/
 │       ├── api/                <- client.ts, auth.ts (register/login/MFA calls), types.ts, queries.ts
 │       ├── auth/AuthContext.tsx <- customer-me query, logout
 │       ├── components/         <- Layout, ProtectedRoute
+│       ├── test/                <- Vitest setup + helpers (own copy, not shared)
 │       └── pages/               <- Register, VerifyEmail, Login, Orders, Samples,
 │                                    TrainingCatalog, MyEnrollments, MyCreditNotes,
 │                                    MyInvoices, Account
@@ -949,6 +954,50 @@ file-parsing (neither is built — see Known gaps below), and the two Celery
 beat schedule entries themselves (the task *logic* is tested directly;
 `CELERY_BEAT_SCHEDULE`'s cron wiring isn't).
 
+## Frontend test suites
+
+Vitest + React Testing Library + jsdom, run by `npm run test` in either
+frontend (`npm run test:watch` while developing). 49 tests: 39 in
+`frontend/`, 10 in `customer-portal/`.
+
+**`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
+Query hooks, not `api/client.ts` — so every test drives the real API client
+(CSRF header, `ApiError` mapping, the 204 case), the real provider, and the
+real component. Mocking the hooks instead would leave exactly the wiring
+these tests exist to protect untested, and would keep passing after that
+wiring broke. `src/test/helpers.tsx` provides `stubApi()` (a route table
+keyed on `"METHOD /path"`, which throws on an unmatched request rather than
+returning a plausible empty result) and `renderWithProviders()`.
+
+| File | Covers |
+|---|---|
+| `frontend/src/auth/AuthContext.test.tsx` | `hasRole` as a variadic OR, false for every role while unauthenticated; `logout` clearing the cached user to `null` **not** `undefined`, dropping other cached queries while keeping the `staff-me` entry, and posting to the endpoint rather than only clearing local state |
+| `frontend/src/components/ProtectedRoute.test.tsx` | The three-state guard: renders for an authenticated user, redirects on 401/403, and shows a loading state *instead of redirecting* while `staff-me` is still in flight |
+| `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
+| `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
+| `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
+| `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
+
+Two things worth knowing before adding more:
+
+- **`renderWithProviders` takes a `path`, and you need it whenever the
+  component under test lives at `/login` or `/`.** The helper registers
+  placeholder routes at those two paths so a `<Navigate>` is observable as
+  rendered text; without `path`, the placeholder wins the route match and
+  the test silently asserts against "Login page" instead of the component.
+- **Assert on the query cache, not on `result.current`, for anything that
+  must happen synchronously.** React Query's observer notifications reach a
+  `renderHook` result asynchronously, so a synchronous assertion on
+  `result.current` right after an `act()` is testing the notification
+  scheduler, not the code under test. `AuthContext.test.tsx`'s logout test
+  checks `queryClient.getQueryData(["staff-me"])` for exactly this reason.
+
+Not covered: the remaining 14 Staff Console screens beyond `SampleDetail`,
+and the Customer Portal's catalog/enrollment/invoice screens. The suite
+deliberately starts at the two places bugs have actually come from — the
+role/FSM gating, and the auth wiring — rather than spreading thin across
+every screen.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every pull request, and on pushes to
@@ -959,8 +1008,10 @@ beat schedule entries themselves (the task *logic* is tested directly;
   (see Running the test suite above). Nothing is mocked in CI that isn't
   mocked locally.
 - **Frontend** — a matrix over `frontend/` and `customer-portal/` running
-  `npm ci`, `npm run lint` (oxlint), and `npm run build` (`tsc -b && vite
-  build`, so a type error fails the build).
+  `npm ci`, `npm run lint` (oxlint), `npm run test` (Vitest, see Frontend
+  test suites below), and `npm run build` (`tsc -b && vite build`, so a type
+  error fails the build — test files live under `src/`, so they are
+  typechecked too).
 
 Those two triggers are chosen so every job runs exactly once per commit:
 `pull_request` covers branch work and `push` covers `main` itself. Widening
@@ -995,11 +1046,6 @@ exactly what the lockfile pins and never rewrites it, so CI can't drift
 
 Genuinely not built yet, not just undocumented:
 
-- **No frontend automated tests.** Both frontends were verified live
-  through the browser preview during development (see "Staff Console" and
-  "Customer Portal" above), not via Vitest/React Testing Library — there's
-  no regression safety net on either frontend the way `backend/tests/`
-  gives the API.
 - **No report PDF generation.** `Report` is metadata + an OSS object key
   (`file_id`) supplied by the caller; the decoupled WeasyPrint/Jinja2
   rendering pipeline described in Blueprint Section 2.1a hasn't been
