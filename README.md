@@ -36,8 +36,8 @@ was invented outside that grounding.
 - **68-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
-- **CI on every push** (`.github/workflows/ci.yml`): the backend suite
-  against live Postgres/Redis/MinIO service containers, plus lint,
+- **CI on every pull request** (`.github/workflows/ci.yml`): the backend
+  suite against live Postgres/Redis/MinIO service containers, plus lint,
   typecheck, and production build for both frontends — see Continuous
   integration below.
 - **Staff Console frontend** (`frontend/`,
@@ -951,8 +951,8 @@ beat schedule entries themselves (the task *logic* is tested directly;
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request, in two
-jobs:
+`.github/workflows/ci.yml` runs on every pull request, and on pushes to
+`main`, in two jobs:
 
 - **Backend** — the full `pytest` suite against live PostgreSQL 18, Redis,
   and MinIO service containers, the same stack the suite is written for
@@ -961,6 +961,11 @@ jobs:
 - **Frontend** — a matrix over `frontend/` and `customer-portal/` running
   `npm ci`, `npm run lint` (oxlint), and `npm run build` (`tsc -b && vite
   build`, so a type error fails the build).
+
+Those two triggers are chosen so every job runs exactly once per commit:
+`pull_request` covers branch work and `push` covers `main` itself. Widening
+`push` to all branches would double every job for the whole life of a pull
+request, buying only CI on a branch with no pull request open yet.
 
 Three details in that workflow are load-bearing and worth knowing before
 editing it:
@@ -1011,7 +1016,7 @@ Genuinely not built yet, not just undocumented:
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —
   walk-in/staff-initiated intake is still the only path onto a `Sample`.
-- **No CD, no IaC.** CI runs on every push (see Continuous integration
+- **No CD, no IaC.** CI runs on every pull request (see Continuous integration
   above), but nothing deploys: there is no release pipeline and no
   Terraform for the Alibaba Cloud resources described in Blueprint
   Section 2.2 — outside of CI, this still runs from a local dev
