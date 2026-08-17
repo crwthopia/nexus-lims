@@ -38,10 +38,12 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
-    # No frontend is served by this project (Blueprint Section 2.1: the React
-    # SPA is a separate app not yet built). Bare '/' redirects to the admin
-    # site rather than 404ing, since that's the only browsable entry point
-    # this backend has right now.
+    # Django serves no frontend itself: both React SPAs (Blueprint Section
+    # 2.1 item 1 -- ../../frontend Staff Console on :5174, ../../customer-portal
+    # Customer Portal on :5173) are separate apps with their own dev servers,
+    # proxying /api here rather than being served from it. Bare '/' redirects
+    # to the admin site rather than 404ing, since that's the only browsable
+    # entry point this backend has of its own.
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
     path('admin/', admin.site.urls),
     path('api/v1/', include(api_v1_patterns)),

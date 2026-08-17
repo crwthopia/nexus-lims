@@ -252,9 +252,9 @@ LOGIN_REDIRECT_URL = "/admin/"
 EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasatlabs.test")
 
-# Base URL the customer portal (not yet built, Blueprint Section 5.2) would
-# use to build the clickable verification link; the console email includes
-# the raw token either way so this doesn't block testing the flow.
+# Base URL of the React Customer Portal (customer-portal/, Blueprint Section
+# 5.2), used to build the clickable verification link; the console email
+# includes the raw token either way so this doesn't block testing the flow.
 CUSTOMER_PORTAL_BASE_URL = os.environ.get("CUSTOMER_PORTAL_BASE_URL", "http://localhost:5173")
 
 # Base URL of the React Staff Console (frontend/, Blueprint Section 2.1 item
@@ -266,8 +266,8 @@ CUSTOMER_PORTAL_BASE_URL = os.environ.get("CUSTOMER_PORTAL_BASE_URL", "http://lo
 # can't send the browser from the Django dev server's port straight back to
 # the Vite dev server's port on its own -- this setting is the one place
 # that cross-port hop is expressed. Deliberately a different default port
-# (5174) than CUSTOMER_PORTAL_BASE_URL's 5173, since both dev servers may
-# run at once once the customer portal exists too.
+# (5174) than CUSTOMER_PORTAL_BASE_URL's 5173, since both dev servers
+# commonly run at once.
 STAFF_CONSOLE_BASE_URL = os.environ.get("STAFF_CONSOLE_BASE_URL", "http://localhost:5174")
 
 # Email verification token expiry (django.core.signing.TimestampSigner,
