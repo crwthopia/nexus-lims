@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  # Runs on every branch, not just main, so a feature branch is verified
+  # before a pull request exists. Same-repo pull requests therefore run
+  # twice; the concurrency group below cancels superseded runs.
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      # The schema's version-sensitive parts are the monthly-partitioned
+      # audit log (apps/audit/migrations/0003) and the RLS policies
+      # (apps/samples/migrations/0002, 0003).
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Django will not boot without these. config/urls.py imports
+      # django_auth_adfs.urls, which validates AUTH_ADFS at startup, so even
+      # collecting tests fails when they are absent. No test performs a real
+      # SSO handshake -- these values are never sent anywhere.
+      AZURE_AD_TENANT_ID: 00000000-0000-0000-0000-000000000000
+      AZURE_AD_CLIENT_ID: 00000000-0000-0000-0000-000000000000
+      AZURE_AD_CLIENT_SECRET: ci-placeholder-not-a-real-secret
+      DJANGO_SECRET_KEY: ci-placeholder-not-a-real-key
+      DJANGO_DEBUG: 'false'
+
+      POSTGRES_DB: nasat_lims
+      POSTGRES_USER: nasat_lims
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/1
+
+      OSS_BUCKET_NAME: nasat-lims-dev
+      OSS_ENDPOINT: http://localhost:9000
+      OSS_ACCESS_KEY_ID: minioadmin
+      OSS_ACCESS_KEY_SECRET: minioadmin
+      OSS_REGION: ap-southeast-6
+      # MinIO's default config only recognises STANDARD/REDUCED_REDUNDANCY;
+      # the AWS-standard enum values raise InvalidStorageClass. See the
+      # module docstring in apps/audit/oss.py.
+      OSS_ARCHIVE_STORAGE_CLASS: REDUCED_REDUNDANCY
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Create the application database role
+        # Deliberately NOT a superuser and NOT BYPASSRLS: Postgres exempts
+        # both from row-level security entirely. tests/test_row_level_security
+        # .py asserts the policy holds against the raw DB connection rather
+        # than through the ORM, so an over-privileged role here makes that
+        # test fail with one customer reading another customer's orders --
+        # a confusing failure that looks like a security regression in the
+        # application. CREATEDB is required because pytest-django creates
+        # test_nasat_lims itself.
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE nasat_lims LOGIN PASSWORD 'devpassword' CREATEDB NOSUPERUSER NOBYPASSRLS;"
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE nasat_lims OWNER nasat_lims;"
+
+      - name: Start MinIO
+        # Not a service container: the official image needs a "server /data"
+        # argument and the services: block has no way to supply a command.
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for _ in $(seq 1 30); do
+            if curl -fs http://localhost:9000/minio/health/live > /dev/null; then
+              echo "MinIO is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become healthy in time"
+          docker logs minio
+          exit 1
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Create the object storage bucket
+        # test_audit_retention.py's real-OSS test calls head_object against
+        # this bucket via apps/audit/oss.py; ensure_bucket() is the project's
+        # own dev/test provisioning helper.
+        working-directory: backend
+        run: |
+          python -c "
+          import django, os
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+          django.setup()
+          from apps.audit.oss import ensure_bucket
+          ensure_bucket()
+          "
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest
+
+  frontend:
+    name: ${{ matrix.app }} (lint + typecheck + build)
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Report both frontends independently rather than hiding the second
+      # failure behind the first.
+      fail-fast: false
+      matrix:
+        app: [frontend, customer-portal]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 8 requires ^20.19 || >=22.12.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      # npm ci, never npm install: it installs exactly what the lockfile
+      # pins and never rewrites it. An npm older than the one that wrote
+      # these lockfiles silently strips the libc fields from the
+      # platform-specific optional binaries when it rewrites them.
+      - name: Install dependencies
+        working-directory: ${{ matrix.app }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: ${{ matrix.app }}
+        run: npm run lint
+
+      # "tsc -b && vite build": typecheck and production build in one script.
+      - name: Typecheck and build
+        working-directory: ${{ matrix.app }}
+        run: npm run build
