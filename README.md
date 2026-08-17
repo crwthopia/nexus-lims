@@ -40,7 +40,7 @@ was invented outside that grounding.
   against live Postgres/Redis/MinIO service containers, plus lint,
   typecheck, and production build for both frontends — see Continuous
   integration below.
-- **Staff Console frontend, feature-complete for staff** (`frontend/`,
+- **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
   FSM action set (register → receive → prep → testing → review →
@@ -52,8 +52,10 @@ was invented outside that grounding.
   status sync), Training (courses, sessions, credit notes, attendee
   export), and Billing (invoices, manual payment reconciliation) — all
   driven against the real API, not a mockup, see "Staff Console" below.
-  Every staff-facing resource group in the Blueprint's API now has a
-  screen.
+  Every staff-facing resource group in the Blueprint's API has a screen
+  except Reports, which has none — nothing generates the PDF a `Report`
+  points at yet, so there is nothing for a screen to show (see Known
+  gaps).
 - **Customer Portal frontend** (`customer-portal/`, React + TypeScript +
   Vite, Blueprint Section 2.1 item 1's second frontend): register → verify
   email → login with optional TOTP MFA, My Orders/My Samples (RLS-scoped
@@ -622,9 +624,12 @@ nothing server-side. Fixed in `apps/billing/views.py`, regression-tested
 the two, never both, so this is the one case among all these
 display-convenience fields that couldn't just be a `source=` lookup.
 
-This is the 8th and last of the currently-planned Staff Console screens —
-the frontend now covers every staff-facing resource group in the
-Blueprint's API.
+This is the 8th and last of the currently-planned Staff Console screens.
+The frontend now covers every staff-facing resource group in the
+Blueprint's API except Reports (`/api/v1/reports/`), which has no screen:
+`Report` is metadata pointing at an OSS object key that nothing currently
+produces, so a Reports screen would list rows whose actual documents don't
+exist. It belongs with the PDF pipeline it depends on — see Known gaps.
 
 Verified live end to end: created an invoice against a real `Order`
 (`customer_email` resolved correctly), recorded a confirmed payment and
@@ -949,7 +954,11 @@ Genuinely not built yet, not just undocumented:
   (`file_id`) supplied by the caller; the decoupled WeasyPrint/Jinja2
   rendering pipeline described in Blueprint Section 2.1a hasn't been
   built. Nothing currently produces the PDF `file_id` is supposed to
-  point at.
+  point at. Consequently **Reports is the one staff-facing resource group
+  with no Staff Console screen** (`/api/v1/reports/` is create/list/
+  retrieve only, and no route in `frontend/src/App.tsx` reaches it), and
+  customers have no way to retrieve a report of their own from the
+  Customer Portal.
 - **No instrument file-parsing / raw-data ingestion.** `TestResult`
   references a raw file key but nothing parses instrument export files
   into results automatically (Blueprint Section 11).
