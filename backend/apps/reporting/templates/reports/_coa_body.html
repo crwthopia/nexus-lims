@@ -1,0 +1,36 @@
+{# Shared COA body: both COA types present the same sample/result structure. #}
+<h2>Sample</h2>
+<dl>
+  <dt>Sample code</dt><dd>{{ sample.unique_sample_code }}</dd>
+  <dt>Service line</dt><dd>{{ sample.service_line }}</dd>
+  <dt>Client reference</dt><dd>{{ sample.client_reference or "—" }}</dd>
+  <dt>Sampling point</dt><dd>{{ sample.sampling_point or "—" }}</dd>
+  <dt>Collected</dt><dd>{{ sample.collection_datetime | nasat_datetime }}</dd>
+  <dt>Received</dt><dd>{{ sample.created_at | nasat_datetime }}</dd>
+  <dt>Container</dt><dd>{{ sample.container_count }}× {{ sample.container_type or "unspecified" }}</dd>
+  <dt>Preservation</dt><dd>{{ sample.preservation_method or "—" }}</dd>
+</dl>
+
+<h2>Results</h2>
+{% if results %}
+  <table>
+    <thead>
+      <tr><th>Test method</th><th>Result</th><th>Unit</th><th>Spec</th><th>Analyst</th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+        <tr>
+          <td>{{ r.method }}</td>
+          <td{% if r.is_out_of_spec %} class="oos"{% endif %}>
+            {{ r.value }}{% if r.is_out_of_spec %} (OOS){% endif %}
+          </td>
+          <td>{{ r.unit or "—" }}</td>
+          <td>{{ r.spec or "—" }}</td>
+          <td>{{ r.analyst or "—" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No test results recorded against this sample.</p>
+{% endif %}

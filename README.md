@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **68-test automated regression suite** (`backend/tests/`, pytest +
+- **87-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -137,6 +137,9 @@ nasat-lims/
         ├── review/            <- ReviewAction, ApprovalAction
         │   └── services.py          <- segregation-of-duties guard (check_can_approve)
         ├── reporting/         <- Report (create/list/retrieve only, FR-C6-03 approved-sample guard)
+        │   ├── rendering.py         <- Jinja2 env for report templates (StrictUndefined, autoescape)
+        │   ├── tasks.py             <- Celery: generate_report_pdf (WeasyPrint -> OSS)
+        │   └── templates/reports/   <- report layouts; currently DRAFT placeholders pending QA
         ├── investigations/    <- Investigation/CAPA
         │   └── views.py             <- POST /investigations/{id}/close/ (closed_at set atomically)
         ├── training/          <- TrainingCourse, TrainingSession (FSM), Enrollment (FSM), CreditNote
@@ -808,6 +811,68 @@ app's own (non-superuser) DB role, zero RLS context returns zero rows;
 `rls.is_staff='true'` returns everything; two customers seeded with their
 own `Order`+`Sample` each see only their own row, with zero cross-visibility.
 
+## Report PDF generation
+
+The decoupled pipeline Blueprint Section 2.1a describes, and the thing
+`Report.file_id` has always pointed at. `POST /api/v1/reports/` creates a
+row in `pending` and enqueues `apps.reporting.tasks.generate_report_pdf`;
+the worker renders the Jinja2 template selected by `report_type`, hands the
+HTML to WeasyPrint, uploads the bytes to object storage, and moves the row
+to `ready` with `file_id` set. `GET /api/v1/reports/{id}/download/` returns
+a short-lived presigned URL.
+
+**Asynchronous, not inline.** A COA renders in hundreds of milliseconds for
+a small sample and seconds for one with many results; holding the request
+open for that makes the Reports screen the slowest page in the application.
+The client creates and polls.
+
+Six decisions in here are load-bearing:
+
+- **`Report.status` is a plain `CharField`, not a `django-fsm` `FSMField`**
+  like `Sample`/`TestRequest`. Those four model regulated processes where
+  every transition has a role gate and an audit consequence. This one is
+  moved only by the worker, has no operator-facing transitions, and gating
+  it would mean the worker needed a role to do its job.
+- **`file_id` and `status` are read-only on the serializer.** A
+  client-supplied `file_id` is a pointer into the shared bucket — including
+  at another customer's report — and a client-supplied `status` would let a
+  caller claim a report was ready before anything rendered.
+- **Object keys are versioned** (`reports/{type}/{id}-v{version}.pdf`).
+  Regenerating at the same version overwrites rather than orphaning
+  objects; a corrected report is a new row with an incremented version
+  (FR-E17-01/03) and so lands at its own key, and can never overwrite the
+  document already issued to a customer.
+- **A failure is recorded on the row *and* re-raised.** The row is what a
+  Reports screen reads (`status='failed'`, `failure_reason`); the exception
+  is what surfaces in Celery's own monitoring. Swallowing it would leave a
+  report stuck at `generating` with nothing anywhere saying why.
+- **The task is dispatched via `transaction.on_commit`.** Without it the
+  worker can pick the task up before the `Report` row is visible and fail
+  with `DoesNotExist` — the classic Celery-with-Django race, and one that
+  only appears under load.
+- **Jinja2 is configured with `StrictUndefined` and autoescaping.** A
+  template referencing a field the context doesn't supply fails loudly
+  rather than printing an empty string, because the silent version means
+  shipping a COA with a blank result column. Autoescaping matters because a
+  COA interpolates customer-supplied text, and an unescaped `<` corrupts
+  the document it lands in.
+
+**Templates live in `apps/reporting/templates/reports/`**, loaded by a
+Jinja2 environment local to `apps/reporting/rendering.py` rather than wired
+into Django's `TEMPLATES` setting — Blueprint Section 2.1a wants them
+outside application code so QA can revise them without a code change.
+Adding one is dropping a file in that directory. The five currently there
+are **pipeline placeholders**, each carrying a "DRAFT TEMPLATE — not valid
+for issue" banner; the context contract they write to is built explicitly
+in `tasks.build_report_context`, which is what a replacement should target.
+An unknown `report_type` raises `ReportTemplateMissing` rather than falling
+back to a generic layout, since substituting a different template produces
+an official-looking document that says the wrong thing.
+
+**WeasyPrint needs system libraries** (Pango, cairo, GDK-PixBuf) present at
+import time, not just the pip package — see `backend/requirements.txt` and
+the CI step that installs them.
+
 ## Async tasks: Celery + object storage
 
 Two Celery beat tasks (Blueprint Section 7.4a, Section 3.6/4.3), both
@@ -864,6 +929,13 @@ rather than silently losing the archival action.
 - **An S3-compatible object store** — a local [MinIO](https://min.io/)
   server works for dev (`minio.exe server <data-dir> --console-address
   ":9001"`); real Alibaba Cloud OSS in production.
+- **WeasyPrint's system libraries**, for report PDF generation. WeasyPrint
+  links against Pango, cairo and GDK-PixBuf *at import time*, so without
+  them `import weasyprint` fails and the whole app won't start. On
+  Debian/Ubuntu: `sudo apt-get install libpango-1.0-0 libpangoft2-1.0-0
+  libgdk-pixbuf-2.0-0 libcairo2`. On Windows, install the GTK runtime
+  (WeasyPrint documents the current installer); on macOS,
+  `brew install pango gdk-pixbuf libffi`.
 - **An Entra ID (Azure AD) App Registration**, if you want staff SSO to
   actually work — single tenant, Web platform redirect URI
   `http://localhost:8000/oauth2/callback`. The app **will not boot**
@@ -936,7 +1008,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-68 tests, organized by behavior rather than by app:
+87 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -954,6 +1026,7 @@ pytest
 | `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
+| `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 
@@ -1088,15 +1161,17 @@ exactly what the lockfile pins and never rewrites it, so CI can't drift
 
 Genuinely not built yet, not just undocumented:
 
-- **No report PDF generation.** `Report` is metadata + an OSS object key
-  (`file_id`) supplied by the caller; the decoupled WeasyPrint/Jinja2
-  rendering pipeline described in Blueprint Section 2.1a hasn't been
-  built. Nothing currently produces the PDF `file_id` is supposed to
-  point at. Consequently **Reports is the one staff-facing resource group
-  with no Staff Console screen** (`/api/v1/reports/` is create/list/
-  retrieve only, and no route in `frontend/src/App.tsx` reaches it), and
-  customers have no way to retrieve a report of their own from the
-  Customer Portal.
+- **No QA-authored report templates, and no Reports screen.** The PDF
+  pipeline itself is built (see Report PDF generation above), but the five
+  templates it renders are pipeline placeholders carrying a "DRAFT
+  TEMPLATE — not valid for issue" banner; the real layouts are QA's to
+  author per Blueprint Section 2.1a, and the Water/Environmental COA is
+  specified by Job Order LABW2410-238. Replacing one is a file swap in
+  `apps/reporting/templates/reports/`. Separately, **Reports is still the
+  one staff-facing resource group with no Staff Console screen** — the
+  API and the documents now exist, so this is a screen away rather than
+  blocked, and the Customer Portal has no route to a customer's own
+  reports either.
 - **No instrument file-parsing / raw-data ingestion.** `TestResult`
   references a raw file key but nothing parses instrument export files
   into results automatically (Blueprint Section 11).

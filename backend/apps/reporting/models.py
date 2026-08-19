@@ -23,6 +23,21 @@ class Report(models.Model):
     gap 6), or training_cpd_certificate.
     """
 
+    class Status(models.TextChoices):
+        """
+        Generation-job status, not a business workflow -- deliberately a plain
+        CharField rather than a django-fsm FSMField like Sample/TestRequest.
+        Those four model regulated processes where each transition has a role
+        gate and an audit consequence; this one is moved only by the Celery
+        worker, has no operator-facing transitions, and gating it would mean
+        the worker needed a role to do its job.
+        """
+
+        PENDING = "pending", "Pending"
+        GENERATING = "generating", "Generating"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
     class ReportType(models.TextChoices):
         FAILURE_ANALYSIS_COA = "failure_analysis_coa", "Failure Analysis COA"
         WATER_ENVIRONMENTAL_COA = "water_environmental_coa", "Water/Environmental COA (DOH/DENR)"
@@ -37,7 +52,17 @@ class Report(models.Model):
         "samples.Order", null=True, blank=True, on_delete=models.PROTECT, related_name="reports",
     )
     report_type = models.CharField(max_length=32, choices=ReportType.choices)
-    file_id = models.CharField(max_length=512, help_text="Alibaba Cloud OSS object key for the generated PDF.")
+    # Written by apps/reporting/tasks.generate_report_pdf, never by the client:
+    # a caller-supplied key could point at any object in the bucket, including
+    # another customer's report. Blank until the render succeeds.
+    file_id = models.CharField(
+        max_length=512, blank=True, default="",
+        help_text="Alibaba Cloud OSS object key for the generated PDF. Set by the generation task.",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    # Operator-facing reason a render failed, so a failure is diagnosable from
+    # the Reports screen without reading worker logs.
+    failure_reason = models.TextField(blank=True, default="")
     generated_at = models.DateTimeField(auto_now_add=True)
     generated_by = models.ForeignKey("accounts.StaffUser", on_delete=models.PROTECT, related_name="generated_reports")
     version = models.PositiveIntegerField(default=1)
@@ -52,7 +77,7 @@ class Report(models.Model):
                 name="report_target_required",
             )
         ]
-        indexes = [models.Index(fields=["report_type"])]
+        indexes = [models.Index(fields=["report_type"]), models.Index(fields=["status"])]
         ordering = ["-generated_at"]
 
     def __str__(self):

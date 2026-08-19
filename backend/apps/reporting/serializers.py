@@ -13,17 +13,24 @@ class ReportSerializer(serializers.ModelSerializer):
     Sample.status, which is itself FSM-protected, so this can't be spoofed
     by client input.
 
-    Actual PDF assembly (the decoupled WeasyPrint/Jinja2 pipeline, Blueprint
-    Section 2.1a) is a Celery task not yet wired (README "Known gaps");
-    file_id is accepted here as the OSS object key once that task has run.
+    file_id and status are read-only: the PDF pipeline
+    (apps/reporting/tasks.generate_report_pdf) writes both. A client-supplied
+    file_id would be a pointer to an arbitrary object in the bucket, including
+    another customer's report, and a client-supplied status would let a caller
+    claim a report was ready before anything had rendered.
     """
 
     generated_by = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Report
-        fields = ["id", "sample", "order", "report_type", "file_id", "generated_at", "generated_by", "version"]
-        read_only_fields = ["id", "generated_at", "generated_by", "version"]
+        fields = [
+            "id", "sample", "order", "report_type", "file_id", "status", "failure_reason",
+            "generated_at", "generated_by", "version",
+        ]
+        read_only_fields = [
+            "id", "file_id", "status", "failure_reason", "generated_at", "generated_by", "version",
+        ]
 
     def validate(self, attrs):
         sample = attrs.get("sample")

@@ -94,3 +94,40 @@ def archive_object(key, bucket=None):
     )
     logger.info("oss: archived %s/%s to %s storage class", bucket, key, storage_class)
     return True
+
+
+def upload_object(key, data, content_type="application/octet-stream", bucket=None):
+    """
+    Stores bytes at `key` and returns the key (Blueprint Section 2.2).
+
+    Used by the report pipeline (apps/reporting/tasks.py) to put a rendered
+    PDF where Report.file_id points. Deliberately takes bytes rather than a
+    file path: WeasyPrint hands back a bytestring, and writing it to a temp
+    file first would only add a failure mode on a Celery worker whose
+    filesystem is not guaranteed to outlive the task.
+    """
+    bucket = bucket or settings.OSS_BUCKET_NAME
+    client = get_client()
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+    logger.info("oss: uploaded %s/%s (%d bytes)", bucket, key, len(data))
+    return key
+
+
+def presigned_url(key, expires_in=None, bucket=None):
+    """
+    A time-limited GET URL for `key` (Blueprint Section 5.2, default 15 min
+    via OSS_PRESIGNED_URL_EXPIRY_SECONDS).
+
+    Reports are downloaded through one of these rather than proxied through
+    Django: a COA is a multi-megabyte PDF, and streaming it through the
+    application server would tie up a worker per download for no benefit.
+    The expiry is what keeps the URL from becoming a permanent unauthenticated
+    handle on a customer's report.
+    """
+    bucket = bucket or settings.OSS_BUCKET_NAME
+    client = get_client()
+    return client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in or settings.OSS_PRESIGNED_URL_EXPIRY_SECONDS,
+    )
