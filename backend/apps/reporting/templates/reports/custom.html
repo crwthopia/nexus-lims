@@ -1,0 +1,8 @@
+{% extends "_base.html" %}
+{% block title %}NASAT Laboratory Report{% endblock %}
+{% block heading %}Laboratory Report{% endblock %}
+{% block content %}
+  {% if sample %}{% include "_coa_body.html" %}{% else %}
+    <p>Custom report for order #{{ order.id }}.</p>
+  {% endif %}
+{% endblock %}
