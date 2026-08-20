@@ -21,15 +21,22 @@ class ReportSerializer(serializers.ModelSerializer):
     """
 
     generated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Read-only display fields, matching the convention used across the other
+    # serializers: a list UI would otherwise only see bare FK ids and have to
+    # issue a request per row to render a sample code.
+    generated_by_display_name = serializers.CharField(source="generated_by.display_name", read_only=True)
+    sample_code = serializers.CharField(source="sample.unique_sample_code", read_only=True, default=None)
 
     class Meta:
         model = Report
         fields = [
-            "id", "sample", "order", "report_type", "file_id", "status", "failure_reason",
-            "generated_at", "generated_by", "version",
+            "id", "sample", "sample_code", "order", "report_type", "file_id", "status",
+            "failure_reason", "generated_at", "generated_by", "generated_by_display_name",
+            "version",
         ]
         read_only_fields = [
-            "id", "file_id", "status", "failure_reason", "generated_at", "generated_by", "version",
+            "id", "file_id", "status", "failure_reason", "generated_at", "generated_by",
+            "generated_by_display_name", "sample_code", "version",
         ]
 
     def validate(self, attrs):

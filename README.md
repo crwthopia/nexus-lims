@@ -33,17 +33,17 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **87-test automated regression suite** (`backend/tests/`, pytest +
+- **88-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **49-test frontend suite** (Vitest + React Testing Library): 39 in the
+- **58-test frontend suite** (Vitest + React Testing Library): 48 in the
   Staff Console, 10 in the Customer Portal, covering role gating, the
-  route guards, the Sample FSM action set, and the customer MFA step-up —
-  see Frontend test suites below.
+  route guards, the Sample FSM action set, the Reports screen, and the
+  customer MFA step-up — see Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -56,10 +56,9 @@ was invented outside that grounding.
   status sync), Training (courses, sessions, credit notes, attendee
   export), and Billing (invoices, manual payment reconciliation) — all
   driven against the real API, not a mockup, see "Staff Console" below.
-  Every staff-facing resource group in the Blueprint's API has a screen
-  except Reports, which has none — nothing generates the PDF a `Report`
-  points at yet, so there is nothing for a screen to show (see Known
-  gaps).
+  Reports (generate from an approved sample, live generation status,
+  presigned download). Every staff-facing resource group in the
+  Blueprint's API now has a screen.
 - **Customer Portal frontend** (`customer-portal/`, React + TypeScript +
   Vite, Blueprint Section 2.1 item 1's second frontend): register → verify
   email → login with optional TOTP MFA, My Orders/My Samples (RLS-scoped
@@ -93,7 +92,7 @@ nasat-lims/
 │                                    InvestigationsList, InvestigationDetail,
 │                                    EquipmentList, InstrumentDetail,
 │                                    TrainingList, TrainingSessionDetail,
-│                                    BillingList, InvoiceDetail
+│                                    BillingList, InvoiceDetail, ReportsList
 ├── customer-portal/            <- Customer Portal (React + TypeScript + Vite) -- see "Customer Portal" below
 │   ├── vite.config.ts          <- dev server on :5173, proxies /api to Django on :8000
 │   └── src/
@@ -732,6 +731,37 @@ watched the invoice auto-transition to `paid` through this new UI exactly
 as the endpoint's own tests already proved server-side, and confirmed the
 status filter actually filters.
 
+### Reports screen
+
+`/reports` lists every generated report with its live generation status;
+`SampleDetail` grows a **Reports** card once a sample reaches `approved`,
+which is the only place a report can be created.
+
+Three things about it are deliberate:
+
+- **Creation lives on the sample, not on the Reports screen.** FR-C6-03
+  scopes generation to an approved sample, so the control belongs where
+  that sample already is; a "new report" button on a list screen would
+  need a sample picker that could only offer approved samples anyway. The
+  empty Reports screen says so rather than being a dead end.
+- **No client-side role gate on generating.** `ReportViewSet` requires only
+  authentication, and inventing a stricter rule in the UI would hide the
+  control from staff the API would have let through. Contrast the Sample
+  FSM buttons, which *do* mirror real server-side role gates.
+- **The presigned URL is fetched on click, never rendered into an `href`.**
+  It expires (15 minutes by default), so a link written when the table
+  rendered is one that quietly stops working while the page is open.
+
+The list polls (3s) only while something is `pending` or `generating`, and
+stops once nothing is in flight — generation is a background job, so a row
+becomes `ready` with no user action, but an idle screen shouldn't be
+issuing requests.
+
+Adding this eighth nav item pushed the header past the 1100px content
+container, so the header bar is now full-width while `<main>` stays
+constrained — a two-row header or a clipped nav link being the alternative.
+Below about 1100px the nav scrolls horizontally rather than wrapping.
+
 ## Customer Portal (React frontend)
 
 `customer-portal/` (Blueprint Section 2.1 item 1's second frontend, a
@@ -1008,7 +1038,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-87 tests, organized by behavior rather than by app:
+88 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1072,7 +1102,7 @@ beat schedule entries themselves (the task *logic* is tested directly;
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 49 tests: 39 in
+frontend (`npm run test:watch` while developing). 58 tests: 48 in
 `frontend/`, 10 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
@@ -1089,6 +1119,7 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/auth/AuthContext.test.tsx` | `hasRole` as a variadic OR, false for every role while unauthenticated; `logout` clearing the cached user to `null` **not** `undefined`, dropping other cached queries while keeping the `staff-me` entry, and posting to the endpoint rather than only clearing local state |
 | `frontend/src/components/ProtectedRoute.test.tsx` | The three-state guard: renders for an authenticated user, redirects on 401/403, and shows a loading state *instead of redirecting* while `staff-me` is still in flight |
 | `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
+| `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
@@ -1167,11 +1198,9 @@ Genuinely not built yet, not just undocumented:
   TEMPLATE — not valid for issue" banner; the real layouts are QA's to
   author per Blueprint Section 2.1a, and the Water/Environmental COA is
   specified by Job Order LABW2410-238. Replacing one is a file swap in
-  `apps/reporting/templates/reports/`. Separately, **Reports is still the
-  one staff-facing resource group with no Staff Console screen** — the
-  API and the documents now exist, so this is a screen away rather than
-  blocked, and the Customer Portal has no route to a customer's own
-  reports either.
+  `apps/reporting/templates/reports/`. The Staff Console's Reports screen
+  now exists, but **the Customer Portal still has no route to a customer's
+  own reports** — a customer cannot retrieve their own COA.
 - **No instrument file-parsing / raw-data ingestion.** `TestResult`
   references a raw file key but nothing parses instrument export files
   into results automatically (Blueprint Section 11).

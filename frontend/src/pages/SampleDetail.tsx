@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
+  useCreateReport,
   useInvestigationsForSample,
   useOpenInvestigation,
+  useReportDownloadUrl,
+  useReports,
   useSample,
   useSampleAction,
   useSampleReviewHistory,
@@ -12,12 +15,16 @@ import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
 import { describeApiError } from "../api/client";
 import {
+  REPORT_STATUS_LABELS,
+  REPORT_TYPE_LABELS,
+  SAMPLE_REPORT_TYPES,
   INVESTIGATION_STATUS_LABELS,
   INVESTIGATION_WRITE_ROLES,
   SAMPLE_ACTIONS_BY_STATUS,
   SAMPLE_ACTION_ROLES,
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
+import type { ReportType } from "../api/types";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -229,6 +236,7 @@ export function SampleDetail() {
               </ul>
             )}
           </div>
+          {sample.status === "approved" && <SampleReports sampleId={sampleId} />}
         </div>
 
         <div className="card" style={{ padding: 20, alignSelf: "start" }}>
@@ -305,6 +313,102 @@ export function SampleDetail() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Report generation for an approved sample.
+ *
+ * This is the only entry point that creates a Report: the Reports screen
+ * lists and downloads them, but FR-C6-03 scopes creation to an approved
+ * sample, so the control belongs where that sample already is. Rendered only
+ * for `approved` for the same reason -- offering it earlier would produce a
+ * guaranteed 400 from the serializer's guard.
+ *
+ * No client-side role gate, deliberately: ReportViewSet requires only
+ * authentication, and inventing a stricter rule here would hide the control
+ * from staff the API would have let through.
+ */
+function SampleReports({ sampleId }: { sampleId: number }) {
+  const { data } = useReports({ sample: sampleId });
+  const createReport = useCreateReport();
+  const download = useReportDownloadUrl();
+  const [reportType, setReportType] = useState<ReportType>("water_environmental_coa");
+
+  const reports = data?.results ?? [];
+
+  return (
+    <div className="card" style={{ padding: 20 }}>
+      <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Reports</h2>
+
+      {reports.length === 0 ? (
+        <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
+          No report generated for this sample yet.
+        </p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0, fontSize: "0.9rem" }}>
+          {reports.map((report) => (
+            <li
+              key={report.id}
+              style={{
+                padding: "8px 0",
+                borderTop: "1px solid var(--color-border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <span style={{ flex: 1 }}>
+                {REPORT_TYPE_LABELS[report.report_type]}{" "}
+                <span style={{ color: "var(--color-text-muted)" }}>v{report.version}</span>
+              </span>
+              <span style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>
+                {REPORT_STATUS_LABELS[report.status]}
+              </span>
+              <button
+                className="btn"
+                disabled={report.status !== "ready" || download.isPending}
+                onClick={() =>
+                  download.mutate(report.id, {
+                    onSuccess: ({ url }) => window.open(url, "_blank", "noopener,noreferrer"),
+                  })
+                }
+              >
+                Download
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <select
+          value={reportType}
+          onChange={(e) => setReportType(e.target.value as ReportType)}
+          className="btn"
+          style={{ cursor: "pointer", flex: 1 }}
+        >
+          {SAMPLE_REPORT_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {REPORT_TYPE_LABELS[type]}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn btn-primary"
+          disabled={createReport.isPending}
+          onClick={() => createReport.mutate({ sample: sampleId, report_type: reportType })}
+        >
+          Generate
+        </button>
+      </div>
+
+      {createReport.isError && (
+        <p style={{ color: "var(--color-danger)", fontSize: "0.85rem", marginTop: 10 }}>
+          {describeApiError(createReport.error)}
+        </p>
+      )}
     </div>
   );
 }
