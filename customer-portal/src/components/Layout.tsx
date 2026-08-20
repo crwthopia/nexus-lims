@@ -86,7 +86,10 @@ export function Layout() {
 
 function navStyle({ isActive }: { isActive: boolean }) {
   return {
-    color: isActive ? "var(--color-primary)" : "var(--color-text-muted)",
+    // --color-accent, not --color-primary: the primary blue is the button
+    // fill colour and only reaches 4.38:1 as text on this surface. Same fix
+    // as the Staff Console's Layout -- see the README's Theme section.
+    color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
     fontWeight: 600,
     fontSize: "0.9rem",
     textDecoration: "none",

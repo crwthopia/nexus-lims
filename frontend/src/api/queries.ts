@@ -15,6 +15,9 @@ import type {
   Investigation,
   Paginated,
   Payment,
+  Report,
+  ReportDownload,
+  ReportType,
   ReviewAction,
   Sample,
   SampleDetail,
@@ -492,5 +495,54 @@ export function useRecordPayment(invoiceId: number) {
       queryClient.invalidateQueries({ queryKey: ["invoices", invoiceId] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
+  });
+}
+
+/**
+ * GET /reports/ (apps/reporting/views.py). `refetchInterval` is what makes
+ * the Reports screen live: generation is a background job, so a row created
+ * as `pending` becomes `ready` without any user action, and without polling
+ * the screen would sit on stale rows until a manual refresh. Polling stops
+ * once nothing is in flight, so an idle screen is not issuing requests.
+ */
+export function useReports(params: { sample?: number; status?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.sample) query.set("sample", String(params.sample));
+  if (params.status) query.set("status", params.status);
+  const suffix = query.toString() ? `?${query}` : "";
+
+  return useQuery({
+    queryKey: ["reports", params],
+    queryFn: () => apiGet<Paginated<Report>>(`/reports/${suffix}`),
+    refetchInterval: (query) => {
+      const rows = query.state.data?.results ?? [];
+      const inFlight = rows.some((r) => r.status === "pending" || r.status === "generating");
+      return inFlight ? 3000 : false;
+    },
+  });
+}
+
+export function useCreateReport() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { sample?: number; order?: number; report_type: ReportType }) =>
+      apiPost<Report>("/reports/", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+}
+
+/**
+ * Fetches a presigned URL for a finished report.
+ *
+ * A mutation rather than a query because it is an action with a side effect
+ * in time: the URL expires, so it must be fetched at the moment of the click
+ * rather than cached against the row and handed out later, stale.
+ */
+export function useReportDownloadUrl() {
+  return useMutation({
+    mutationFn: (reportId: number) => apiGet<ReportDownload>(`/reports/${reportId}/download/`),
   });
 }

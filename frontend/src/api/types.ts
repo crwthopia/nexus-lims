@@ -531,3 +531,59 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 
 /** BILLING_WRITE_ROLES (backend/apps/billing/views.py) -- keep in sync by hand. */
 export const BILLING_WRITE_ROLES: RoleName[] = ["training_coordinator", "lab_supervisor", "system_administrator"];
+
+// --- Reports (backend/apps/reporting) --------------------------------------
+
+/** Report.Status -- generation-job state, moved by the Celery task, not by staff. */
+export type ReportStatus = "pending" | "generating" | "ready" | "failed";
+
+export type ReportType =
+  | "failure_analysis_coa"
+  | "water_environmental_coa"
+  | "training_cpd_certificate"
+  | "custom";
+
+export interface Report {
+  id: number;
+  sample: number | null;
+  sample_code: string | null;
+  order: number | null;
+  report_type: ReportType;
+  file_id: string;
+  status: ReportStatus;
+  failure_reason: string;
+  generated_at: string;
+  generated_by: number;
+  generated_by_display_name: string;
+  version: number;
+}
+
+export interface ReportDownload {
+  url: string;
+  expires_in: number;
+}
+
+export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
+  pending: "Pending",
+  generating: "Generating",
+  ready: "Ready",
+  failed: "Failed",
+};
+
+export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  failure_analysis_coa: "Failure Analysis COA",
+  water_environmental_coa: "Water/Environmental COA",
+  training_cpd_certificate: "Training CPD Certificate",
+  custom: "Custom",
+};
+
+/**
+ * Which report types a staff user may generate against a Sample. Training
+ * certificates hang off an Order, not a Sample, so they aren't offered from
+ * the sample screen.
+ */
+export const SAMPLE_REPORT_TYPES: ReportType[] = [
+  "failure_analysis_coa",
+  "water_environmental_coa",
+  "custom",
+];

@@ -340,3 +340,21 @@ def test_the_pipeline_uploads_a_retrievable_pdf():
     assert stored["ContentType"] == "application/pdf"
     report.refresh_from_db()
     assert report.status == Report.Status.READY
+
+
+def test_the_list_includes_display_fields_a_ui_can_render(login_as_staff):
+    # Without these a Reports screen sees only FK ids and has to issue a
+    # request per row to show a sample code.
+    staff = StaffUserFactory(display_name="R. Santos")
+    sample = approved_sample(unique_sample_code="WE-2026-0100")
+    Report.objects.create(
+        sample=sample,
+        report_type=Report.ReportType.WATER_ENVIRONMENTAL_COA,
+        generated_by=staff,
+    )
+    client = login_as_staff(StaffUserFactory())
+
+    row = client.get("/api/v1/reports/").json()["results"][0]
+
+    assert row["sample_code"] == "WE-2026-0100"
+    assert row["generated_by_display_name"] == "R. Santos"

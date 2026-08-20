@@ -25,15 +25,28 @@ export function Layout() {
           background: "var(--color-surface)",
         }}
       >
+        {/*
+          Full-width bar, unlike <main>, which stays in the 1100px reading
+          container. The nav outgrew 1100px once Reports was added, and a
+          constrained header would either wrap to two rows or clip a link.
+          A full-width top bar over constrained content is also what the
+          NexusCRM console this theme matches does.
+        */}
         <div
-          className="container"
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 20,
+            height: 60,
+            padding: "0 24px",
+          }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-            <Link to="/" style={{ fontWeight: 700, color: "var(--color-text)", textDecoration: "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 20, minWidth: 0 }}>
+            <Link to="/" style={{ fontWeight: 700, color: "var(--color-text)", textDecoration: "none", whiteSpace: "nowrap" }}>
               NASAT LIMS
             </Link>
-            <nav style={{ display: "flex", gap: 18 }}>
+            <nav style={{ display: "flex", gap: 14, overflowX: "auto", minWidth: 0 }}>
               <NavLink to="/samples" style={navStyle}>
                 Samples
               </NavLink>
@@ -48,6 +61,9 @@ export function Layout() {
               </NavLink>
               <NavLink to="/training" style={navStyle}>
                 Training
+              </NavLink>
+              <NavLink to="/reports" style={navStyle}>
+                Reports
               </NavLink>
               <NavLink to="/billing" style={navStyle}>
                 Billing
@@ -88,9 +104,16 @@ export function Layout() {
 
 function navStyle({ isActive }: { isActive: boolean }) {
   return {
-    color: isActive ? "var(--color-primary)" : "var(--color-text-muted)",
+    // --color-accent, not --color-primary: the primary blue is the button
+    // *fill* colour and only reaches 4.38:1 as text on the header surface.
+    // The accent is the text-on-dark variant (6.75:1). See the README's
+    // Theme section.
+    color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
     fontWeight: 600,
     fontSize: "0.9rem",
     textDecoration: "none",
+    // The nav is one line; without this, adding a link makes the labels
+    // themselves wrap and the header grows to two rows.
+    whiteSpace: "nowrap" as const,
   };
 }
