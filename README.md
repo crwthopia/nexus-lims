@@ -40,12 +40,13 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **118-test frontend suite** (Vitest + React Testing Library): 102 in the
-  Staff Console, 16 in the Customer Portal, covering role gating, the
-  route guards, the Sample and TrainingSession FSM action sets, payment
-  reconciliation, the Reports screen, Billing, Equipment and Training, the
-  customer report download flow, and the customer MFA step-up — see
-  Frontend test suites below.
+- **152-test frontend suite** (Vitest + React Testing Library): 136 in the
+  Staff Console — every screen with a server-side rule behind it — and 16
+  in the Customer Portal, covering role gating, the route guards, the
+  Sample and TrainingSession FSM action sets, payment reconciliation,
+  FR-E3-02 calibration, FR-D1-03 version approval, FR-E9-01 investigation
+  closure, the Reports screen, the customer report download flow, and the
+  customer MFA step-up — see Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -1199,6 +1200,9 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/TrainingList.test.tsx` | `TRAINING_WRITE_ROLES` gating course/session creation and the credit-note control; applying a note posting the typed enrollment; no control offered for an already-applied note; a click with no enrollment posting nothing rather than `NaN` |
 | `frontend/src/pages/InvoiceDetail.test.tsx` | The payment form's two gates (billing role, and not on a void invoice, while staying available on a paid one for reversals); optional `reference_number`/`notes` omitted rather than sent as empty strings; the invoice re-read after recording, since a confirmed payment flips its status server-side |
 | `frontend/src/pages/TrainingSessionDetail.test.tsx` | `TRAINING_SESSION_ACTIONS_BY_STATUS` offering only the legal FSM edges per status; the role gate showing actions disabled with the required role named; per-enrollment complete/cancel offered only while `confirmed`, and posted against the enrollment rather than the session |
+| `frontend/src/pages/InstrumentDetail.test.tsx` | `EQUIPMENT_WRITE_ROLES` gating the calibration form (and it staying available on an out-of-calibration instrument, since a passing calibration is how one returns to service); the instrument re-read after logging, because FR-E3-02 flips its status server-side |
+| `frontend/src/pages/DocumentDetail.test.tsx` | `DOCUMENT_WRITE_ROLES`; approval offered only on non-current versions and posted against the version; the document re-read afterwards, since FR-D1-03 archives a *different* row; exactly one version badged Current; the next version number re-suggested once the document loads |
+| `frontend/src/pages/InvestigationDetail.test.tsx` | `INVESTIGATION_WRITE_ROLES`; a closed investigation offering neither the edit form nor the close button while still displaying its findings; `close` posted as an action rather than a status patch (FR-E9-01); root cause and CAPA prefilled and sent together |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
@@ -1217,9 +1221,11 @@ Two things worth knowing before adding more:
   scheduler, not the code under test. `AuthContext.test.tsx`'s logout test
   checks `queryClient.getQueryData(["staff-me"])` for exactly this reason.
 
-Not covered: the remaining Staff Console detail screens
-(`InstrumentDetail`, `DocumentDetail`, `InvestigationDetail`) and the
-Customer Portal's catalog/enrollment/invoice screens. Coverage went where server-side rules exist for a screen to drift
+Not covered: the Customer Portal's catalog/enrollment/invoice screens, and
+the Staff Console's pure list views (`SamplesList`, `DocumentsList`,
+`InvestigationsList`), which render what the API returns with no
+client-side rule to drift from. Every Staff Console screen that gates on a
+role, mirrors an FSM, or moves money is covered. Coverage went where server-side rules exist for a screen to drift
 from — role gates, FSM action sets, filters, and money-moving controls —
 rather than spreading evenly across every screen. The three
 hand-maintained `*_WRITE_ROLES` constants in `api/types.ts` are each now
