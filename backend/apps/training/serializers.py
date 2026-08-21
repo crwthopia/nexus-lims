@@ -27,6 +27,33 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "status"]  # status only changes via the FSM (django-fsm-2 @transition methods)
 
+    def validate(self, attrs):
+        """
+        Both of these describe a session that cannot happen as written.
+
+        min_capacity is the threshold below which the session is cancelled
+        (apps/training/tasks.py), so setting it above capacity schedules a
+        session that is guaranteed to cancel itself however well it sells.
+        """
+        def field(name):
+            return attrs.get(name, getattr(self.instance, name, None))
+
+        start, end = field("start_date"), field("end_date")
+        capacity, min_capacity = field("capacity"), field("min_capacity")
+
+        if start is not None and end is not None and end < start:
+            raise serializers.ValidationError(
+                {"end_date": "A session cannot end before it starts."}
+            )
+        if capacity is not None and min_capacity is not None and min_capacity > capacity:
+            raise serializers.ValidationError(
+                {"min_capacity": (
+                    f"The minimum ({min_capacity}) is above the capacity ({capacity}), so the "
+                    f"session would cancel itself even when full."
+                )}
+            )
+        return attrs
+
     def get_confirmed_enrollment_count(self, obj):
         return obj.enrollments.filter(status=Enrollment.Status.CONFIRMED).count()
 

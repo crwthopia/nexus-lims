@@ -30,6 +30,22 @@ class InvoiceSerializer(serializers.ModelSerializer):
         # drift out of sync with what payments were actually recorded.
         read_only_fields = ["id", "status", "created_at"]
 
+    def validate_amount(self, value):
+        """
+        A negative invoice is a refund, and this system already has a
+        separate model for that (training.CreditNote). Allowing one here
+        would put money owed *to* a customer in the column that means money
+        owed *by* them, where every total downstream adds it the wrong way.
+
+        Zero is left alone deliberately: a fully discounted or fully
+        credit-noted enrollment is a real thing to invoice at 0.00.
+        """
+        if value < 0:
+            raise serializers.ValidationError(
+                "An invoice amount cannot be negative. Issue a credit note instead."
+            )
+        return value
+
     def get_customer_email(self, invoice):
         if invoice.order_id:
             return invoice.order.customer.email

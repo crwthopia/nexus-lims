@@ -11,6 +11,41 @@ class TestMethodSerializer(serializers.ModelSerializer):
         model = TestMethod
         fields = ["id", "name", "method_reference", "specification_limits", "holding_time", "active_sop_version"]
 
+    def validate_specification_limits(self, value):
+        """
+        FR-C3-08 depends on these being numbers that can be compared.
+
+        A JSONField accepts anything, so {"min": "abc"} stored cleanly and
+        then made every result entry and every ingestion for the method a
+        500 -- see compute_out_of_spec in apps/testing/ingestion.py. A
+        min above its max is the quieter failure of the two: nothing
+        crashes, and every result the method ever produces is flagged
+        out-of-spec, which reads as a process in crisis rather than as a
+        typo in a form.
+        """
+        if value in (None, {}):
+            return value
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Expected an object, e.g. {"min": 0, "max": 10}.')
+
+        bounds = {}
+        for key in ("min", "max"):
+            if key not in value:
+                continue
+            try:
+                bounds[key] = float(value[key])
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    f"'{key}' must be a number, got {value[key]!r}."
+                ) from None
+
+        if "min" in bounds and "max" in bounds and bounds["min"] > bounds["max"]:
+            raise serializers.ValidationError(
+                f"'min' ({value['min']}) is above 'max' ({value['max']}), so every "
+                f"result would be flagged out of spec."
+            )
+        return value
+
 
 class TestRequestSerializer(serializers.ModelSerializer):
     """sample_code/test_method_name/assigned_analyst_display_name: read-only convenience fields for list/detail UIs (e.g. the Staff Console's Testing Queue) that would otherwise only see bare FK ids."""
