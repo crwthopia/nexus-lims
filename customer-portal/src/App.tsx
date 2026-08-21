@@ -10,6 +10,7 @@ import { TrainingCatalog } from "./pages/TrainingCatalog";
 import { MyEnrollments } from "./pages/MyEnrollments";
 import { MyCreditNotes } from "./pages/MyCreditNotes";
 import { MyInvoices } from "./pages/MyInvoices";
+import { MyReports } from "./pages/MyReports";
 import { Account } from "./pages/Account";
 
 function App() {
@@ -26,6 +27,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Orders />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute>
+              <MyReports />
             </ProtectedRoute>
           }
         />
