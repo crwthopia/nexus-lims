@@ -1,17 +1,7 @@
-import { createContext, useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMe, logoutCustomer } from "../api/auth";
-import type { CustomerMe } from "../api/types";
-
-interface AuthContextValue {
-  user: CustomerMe | null | undefined;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  refetchUser: () => void;
-  logout: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+import { AuthContext, type AuthContextValue } from "./context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -43,10 +33,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth() must be used within an AuthProvider");
-  return ctx;
 }

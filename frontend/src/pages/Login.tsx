@@ -1,5 +1,5 @@
 import { Navigate } from "react-router-dom";
-import { useAuth, LOGIN_URL } from "../auth/AuthContext";
+import { useAuth, LOGIN_URL } from "../auth/context";
 
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();

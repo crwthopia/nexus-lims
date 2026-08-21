@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCloseInvestigation, useInvestigation, useUpdateInvestigation } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { INVESTIGATION_STATUS_LABELS, INVESTIGATION_TYPE_LABELS, INVESTIGATION_WRITE_ROLES } from "../api/types";
 

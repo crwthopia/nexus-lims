@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { confirmMfa, enableMfa } from "../api/auth";
 import { describeApiError } from "../api/client";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 
 export function Account() {
   const { user, refetchUser } = useAuth();

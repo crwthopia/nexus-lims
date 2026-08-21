@@ -11,7 +11,7 @@ import {
   useTestRequestAction,
   useTestResults,
 } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import {
   INVESTIGATION_STATUS_LABELS,

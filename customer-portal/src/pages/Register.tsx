@@ -3,7 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { registerCustomer } from "../api/auth";
 import { describeApiError } from "../api/client";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 
 export function Register() {
   const { isAuthenticated } = useAuth();

@@ -1,27 +1,8 @@
-import { createContext, useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "../api/client";
 import type { StaffMe } from "../api/types";
-
-/**
- * Login is a real full-page navigation to Django (Entra ID SSO), not
- * something this SPA can do via fetch(). ?next= routes django-auth-adfs's
- * OAuth2CallbackView to StaffLoginCompleteView (backend/apps/accounts/urls.py,
- * config/urls.py), which bounces the browser back here once SSO completes --
- * see config/settings.py STAFF_CONSOLE_BASE_URL for why that indirection
- * exists (the callback can't cross dev-server ports on its own).
- */
-export const LOGIN_URL = "http://localhost:8000/oauth2/login?next=/staff/login-complete/";
-
-interface AuthContextValue {
-  user: StaffMe | null | undefined;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  hasRole: (...roleNames: string[]) => boolean;
-  logout: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+import { AuthContext, type AuthContextValue } from "./context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -59,10 +40,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth() must be used within an AuthProvider");
-  return ctx;
 }

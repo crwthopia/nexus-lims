@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateInvoice, useInvoices } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { BILLING_WRITE_ROLES, INVOICE_STATUS_LABELS } from "../api/types";
 import type { InvoiceStatus } from "../api/types";
