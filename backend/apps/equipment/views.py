@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
+from apps.common.params import int_param
 from apps.equipment.models import CalibrationRecord, Instrument, StandardReagent
 from apps.equipment.serializers import (
     CalibrationRecordSerializer,
@@ -82,8 +83,8 @@ class CalibrationRecordViewSet(
 
     def get_queryset(self):
         qs = super().get_queryset()
-        instrument_id = self.request.query_params.get("instrument")
-        if instrument_id:
+        instrument_id = int_param(self.request.query_params.get("instrument"), "instrument")
+        if instrument_id is not None:
             qs = qs.filter(instrument_id=instrument_id)
         return qs
 

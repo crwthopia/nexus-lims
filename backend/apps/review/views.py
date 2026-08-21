@@ -10,6 +10,7 @@ write path.
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 
+from apps.common.params import int_param
 from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
 
@@ -21,8 +22,8 @@ class ReviewActionViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        sample_id = self.request.query_params.get("sample")
-        if sample_id:
+        sample_id = int_param(self.request.query_params.get("sample"), "sample")
+        if sample_id is not None:
             qs = qs.filter(sample_id=sample_id)
         return qs
 
@@ -34,7 +35,7 @@ class ApprovalActionViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        sample_id = self.request.query_params.get("sample")
-        if sample_id:
+        sample_id = int_param(self.request.query_params.get("sample"), "sample")
+        if sample_id is not None:
             qs = qs.filter(sample_id=sample_id)
         return qs
