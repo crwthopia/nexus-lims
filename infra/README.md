@@ -33,33 +33,31 @@ marked `sensitive`.
 
 ## What is verified, and what is not
 
-**Verified:** the HCL parses and `terraform fmt -check` is clean
-(Terraform 1.15.9).
+**Verified:** `terraform fmt -check` is clean and `terraform validate`
+passes against `aliyun/alicloud` v1.289.0 (Terraform 1.15.9). CI runs both
+on every pull request — see the `infra` job in
+`.github/workflows/ci.yml`. `validate` is a schema check against the
+provider rather than a call to Alibaba, so it needs no credentials.
 
-**Not verified:** that every resource type and attribute matches the
-`aliyun/alicloud` provider's actual schema. The environment this was written
-in cannot reach `registry.terraform.io`, so `terraform init` and therefore
-`terraform validate` could not run. The provider has reorganised its OSS
-resources across recent minor versions in particular — `alicloud_oss_bucket`
-sub-resources have moved in and out of the parent resource — so treat the
-following as the most likely places to need adjustment:
+That check earned its place immediately: the first version of this
+configuration failed it with four errors, all invisible to `fmt`.
+`alicloud_oss_bucket_lifecycle_rule` does not exist as a resource type (the
+rule is an inline `lifecycle_rule` block), and `alicloud_db_instance` takes
+none of `backup_period` / `backup_time` / `backup_retention_period` — those
+belong to `alicloud_db_backup_policy`, under different names. Two
+deprecations came with it: the bucket's `acl` argument moved to
+`alicloud_oss_bucket_acl` in provider 1.220.0, and
+`alicloud_security_group`'s `name` became `security_group_name` in 1.239.0.
 
-- `alicloud_oss_bucket_public_access_block`
-- the `versioning` / `server_side_encryption_rule` blocks on `alicloud_oss_bucket`
-- `alicloud_oss_bucket_lifecycle_rule` attribute names
-- `alicloud_db_instance` backup attribute names
-- the `alicloud_db_zones` data source arguments
+**Still not verified:** anything only a real account can answer — whether
+the chosen instance classes exist in the region, whether quotas allow them,
+and whether `plan` and `apply` succeed. `validate` checks shapes, not
+reality.
 
-**The first thing to do on a machine with registry access is:**
-
-```bash
-cd infra
-terraform init -backend=false
-terraform validate
-```
-
-Fix whatever that reports before going near `plan`. It is a schema check,
-not a network call to Alibaba, so it needs no credentials.
+**The `.terraform.lock.hcl` is not committed yet**, because the environment
+this was authored in cannot reach the provider registry to generate one.
+Run `terraform init` once on a machine that can, and commit the lock file
+it writes — it pins provider versions and hashes for everyone else.
 
 ## First apply
 

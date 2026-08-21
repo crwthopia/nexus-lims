@@ -68,9 +68,9 @@ resource "alicloud_vswitch" "data" {
 }
 
 resource "alicloud_security_group" "app" {
-  name   = "${local.name}-app"
-  vpc_id = alicloud_vpc.main.id
-  tags   = local.common_tags
+  security_group_name = "${local.name}-app"
+  vpc_id              = alicloud_vpc.main.id
+  tags                = local.common_tags
 }
 
 # --- Object storage --------------------------------------------------------
@@ -84,11 +84,7 @@ resource "random_id" "bucket_suffix" {
 
 resource "alicloud_oss_bucket" "main" {
   bucket = "${local.name}-${random_id.bucket_suffix.hex}"
-  # Private, always. Every object here is either a customer's report or a
-  # raw instrument export; both are reached through the presigned URLs
-  # apps/audit/oss.py mints, never by public read.
-  acl  = "private"
-  tags = local.common_tags
+  tags   = local.common_tags
 
   # Reports are immutable once issued (FR-E17-01/03) and raw exports are
   # evidence. Versioning is the backstop for an accidental overwrite of
@@ -100,6 +96,36 @@ resource "alicloud_oss_bucket" "main" {
   server_side_encryption_rule {
     sse_algorithm = "AES256"
   }
+
+  # Inline rather than a standalone resource, which the provider does not
+  # have. `dynamic` so raw_file_retention_days = 0 omits the rule entirely
+  # instead of writing a disabled one.
+  dynamic "lifecycle_rule" {
+    for_each = var.raw_file_retention_days > 0 ? [1] : []
+
+    content {
+      id = "archive-raw-instrument-exports"
+      # Scoped to the prefix apps/testing/ingestion.object_key_for writes
+      # to, so this cannot reach reports/ -- an issued COA must stay
+      # immediately retrievable for the customer holding it.
+      prefix  = "raw-instrument-exports/"
+      enabled = true
+
+      transitions {
+        days          = var.raw_file_retention_days
+        storage_class = "IA"
+      }
+    }
+  }
+}
+
+# Private, always. Every object here is either a customer's report or a raw
+# instrument export; both are reached through the presigned URLs
+# apps/audit/oss.py mints, never by public read. Its own resource since
+# provider 1.220.0 deprecated the bucket's `acl` argument.
+resource "alicloud_oss_bucket_acl" "main" {
+  bucket = alicloud_oss_bucket.main.bucket
+  acl    = "private"
 }
 
 # Blocks public access at the bucket level as well as via the ACL above.
@@ -108,24 +134,6 @@ resource "alicloud_oss_bucket" "main" {
 resource "alicloud_oss_bucket_public_access_block" "main" {
   bucket              = alicloud_oss_bucket.main.bucket
   block_public_access = true
-}
-
-resource "alicloud_oss_bucket_lifecycle_rule" "archive_raw_exports" {
-  count = var.raw_file_retention_days > 0 ? 1 : 0
-
-  bucket = alicloud_oss_bucket.main.bucket
-  # Scoped to the prefix apps/testing/ingestion.object_key_for writes to, so
-  # this cannot reach reports/ -- an issued COA must stay immediately
-  # retrievable for a customer.
-  prefix            = "raw-instrument-exports/"
-  lifecycle_rule_id = "archive-raw-instrument-exports"
-  status            = "Enabled"
-  expiration_days   = 0
-
-  transitions {
-    days          = var.raw_file_retention_days
-    storage_class = "IA"
-  }
 }
 
 # --- PostgreSQL ------------------------------------------------------------
@@ -153,10 +161,15 @@ resource "alicloud_db_instance" "postgres" {
   # defence rather than the only one.
   security_ips = [var.app_subnet_cidr]
 
-  # Point-in-time recovery. An audit trail that cannot be restored to a
-  # moment in time is not much of an audit trail.
-  backup_period           = ["Monday", "Wednesday", "Friday", "Sunday"]
-  backup_time             = "18:00Z-19:00Z"
+}
+
+# Backups are their own resource; alicloud_db_instance takes none of these
+# arguments. An audit trail that cannot be restored to a moment in time is
+# not much of an audit trail.
+resource "alicloud_db_backup_policy" "postgres" {
+  instance_id             = alicloud_db_instance.postgres.id
+  preferred_backup_period = ["Monday", "Wednesday", "Friday", "Sunday"]
+  preferred_backup_time   = "18:00Z-19:00Z"
   backup_retention_period = 30
 }
 
