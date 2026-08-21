@@ -49,6 +49,7 @@ export function TestRequestDetail() {
   const createResult = useCreateTestResult(testRequestId);
 
   const [dataType, setDataType] = useState<TestResultDataType>("float");
+  const [analyte, setAnalyte] = useState("");
   const [value, setValue] = useState("");
   const [unit, setUnit] = useState("");
   const [instrumentId, setInstrumentId] = useState("");
@@ -70,6 +71,7 @@ export function TestRequestDetail() {
     e.preventDefault();
     createResult.mutate(
       {
+        analyte,
         data_type: dataType,
         value,
         unit,
@@ -78,6 +80,10 @@ export function TestRequestDetail() {
       },
       {
         onSuccess: () => {
+          // Cleared like the others: consecutive entries against one request
+          // are usually *different* parameters, so keeping the last one would
+          // mislabel the next result rather than save typing.
+          setAnalyte("");
           setValue("");
           setUnit("");
           setInstrumentId("");
@@ -135,6 +141,7 @@ export function TestRequestDetail() {
               <table>
                 <thead>
                   <tr>
+                    <th>Parameter</th>
                     <th>Value</th>
                     <th>Entered by</th>
                     <th>Entered</th>
@@ -168,6 +175,15 @@ export function TestRequestDetail() {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label style={labelStyle}>
+                    Parameter
+                    <input
+                      value={analyte}
+                      onChange={(e) => setAnalyte(e.target.value)}
+                      placeholder="e.g. Lead — leave blank if the method reports one value"
+                      style={inputStyle}
+                    />
                   </label>
                   <label style={labelStyle}>
                     Value
@@ -268,6 +284,9 @@ function ResultRow({ result, canOpenInvestigation }: { result: TestResult; canOp
 
   return (
     <tr style={{ cursor: "default" }}>
+      {/* Blank for single-parameter methods, where the method name already
+          says what was measured. */}
+      <td>{result.analyte || "—"}</td>
       <td>
         {result.value} {result.unit}
         {result.is_out_of_spec && (

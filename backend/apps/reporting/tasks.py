@@ -49,6 +49,7 @@ def build_report_context(report):
                 limits = test_request.test_method.specification_limits or {}
                 results.append(
                     {
+                        "analyte": result.analyte,
                         "method": test_request.test_method.name,
                         "method_reference": test_request.test_method.method_reference,
                         "value": result.value,

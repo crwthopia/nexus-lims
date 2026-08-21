@@ -230,6 +230,8 @@ export type TestResultDataType = "float" | "int" | "text" | "date" | "list" | "f
 export interface TestResult {
   id: number;
   test_request: number;
+  /** Which parameter this measurement is of. Blank for single-parameter methods. */
+  analyte: string;
   data_type: TestResultDataType;
   value: string;
   unit: string;

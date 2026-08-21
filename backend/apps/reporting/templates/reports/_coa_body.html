@@ -15,12 +15,15 @@
 {% if results %}
   <table>
     <thead>
-      <tr><th>Test method</th><th>Result</th><th>Unit</th><th>Spec</th><th>Analyst</th></tr>
+      <tr><th>Test method</th><th>Parameter</th><th>Result</th><th>Unit</th><th>Spec</th><th>Analyst</th></tr>
     </thead>
     <tbody>
       {% for r in results %}
         <tr>
           <td>{{ r.method }}</td>
+          {# Blank for single-parameter methods, where the method name already
+             says what was measured. #}
+          <td>{{ r.analyte or "—" }}</td>
           <td{% if r.is_out_of_spec %} class="oos"{% endif %}>
             {{ r.value }}{% if r.is_out_of_spec %} (OOS){% endif %}
           </td>

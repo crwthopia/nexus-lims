@@ -116,6 +116,16 @@ class TestResult(models.Model):
 
     id = models.BigAutoField(primary_key=True)
     test_request = models.ForeignKey(TestRequest, on_delete=models.CASCADE, related_name="results")
+    # Which parameter this measurement is *of*. Optional, because one
+    # TestRequest is one TestMethod and a single-parameter method (pH, say)
+    # has nothing to disambiguate -- the method name already says what was
+    # measured. It earns its keep on multi-analyte runs: an ICP-MS export
+    # reporting twelve elements produces twelve results against one request,
+    # and without this they are twelve unlabelled numbers.
+    analyte = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Parameter measured, for methods reporting more than one (e.g. 'Lead', 'Cadmium'). Blank for single-parameter methods.",
+    )
     data_type = models.CharField(max_length=16, choices=DataType.choices)
     value = models.TextField(help_text="Stored as text; interpreted per data_type at the serializer layer.")
     unit = models.CharField(max_length=32, blank=True)
@@ -143,4 +153,5 @@ class TestResult(models.Model):
         ordering = ["-entered_at"]
 
     def __str__(self):
-        return f"TestResult #{self.id} = {self.value} {self.unit}".strip()
+        label = f"{self.analyte}: " if self.analyte else ""
+        return f"TestResult #{self.id} {label}{self.value} {self.unit}".strip()
