@@ -20,7 +20,7 @@ from rest_framework.response import Response
 from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.models import Role
 from apps.accounts.permissions import IsCustomerAuthenticated, roles_required
-from apps.common.params import int_param
+from apps.common.params import body_dict, int_param
 from apps.training import services
 from apps.training.models import CreditNote, Enrollment, TrainingCourse, TrainingSession
 from apps.training.serializers import (
@@ -44,7 +44,7 @@ def _run_transition(instance, method_name):
 
 
 def _get_target_enrollment(request):
-    enrollment_id = int_param(request.data.get("enrollment"), "enrollment")
+    enrollment_id = int_param(body_dict(request).get("enrollment"), "enrollment")
     if not enrollment_id:
         raise ValidationError("'enrollment' is required: the target Enrollment to apply this credit note to.")
     try:
