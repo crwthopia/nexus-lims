@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCalibrationRecordsForInstrument, useCreateCalibrationRecord, useInstrument } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { EQUIPMENT_WRITE_ROLES, INSTRUMENT_MODEL_LABELS, INSTRUMENT_STATUS_LABELS } from "../api/types";
 

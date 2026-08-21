@@ -11,7 +11,7 @@ import {
   useSampleReviewHistory,
   useTestRequestsForSample,
 } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { StatusBadge } from "../components/StatusBadge";
 import { describeApiError } from "../api/client";
 import {

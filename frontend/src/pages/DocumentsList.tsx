@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateDocument, useDocuments } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_WRITE_ROLES } from "../api/types";
 import type { DocumentType } from "../api/types";

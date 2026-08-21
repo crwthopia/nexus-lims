@@ -3,7 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import { loginCustomer, type CustomerAuthErrorBody } from "../api/auth";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 
 export function Login() {
   const { isAuthenticated, refetchUser } = useAuth();

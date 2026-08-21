@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCreateEnrollment, useEnrollmentAction, useEnrollmentsForSession, useTrainingSession, useTrainingSessionAction } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { ENROLLMENT_STATUS_LABELS, TRAINING_SESSION_ACTIONS_BY_STATUS, TRAINING_SESSION_STATUS_LABELS, TRAINING_WRITE_ROLES } from "../api/types";
 

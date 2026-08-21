@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **119-test automated regression suite** (`backend/tests/`, pytest +
+- **123-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -1112,7 +1112,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-119 tests, organized by behavior rather than by app:
+123 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1133,6 +1133,7 @@ pytest
 | `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
 | `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
+| `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 
@@ -1169,11 +1170,12 @@ before adding more tests:
   `refresh_from_db()` works again; `reload()` is kept as a convenience for
   new tests that don't need to mutate the same instance in place.
 
-Not covered yet: Entra ID SSO (needs a live Azure AD tenant, per the
-Authentication section above), report PDF generation and instrument
-file-parsing (neither is built — see Known gaps below), and the two Celery
-beat schedule entries themselves (the task *logic* is tested directly;
-`CELERY_BEAT_SCHEDULE`'s cron wiring isn't).
+Not covered yet: Entra ID SSO, which needs a live Azure AD tenant (per the
+Authentication section above). That is the only remaining hole — report PDF
+generation and instrument file-parsing are both built and tested
+(`test_report_generation.py`, `test_instrument_ingestion.py`), and
+`CELERY_BEAT_SCHEDULE`'s wiring is now covered by
+`test_celery_beat_schedule.py`.
 
 ## Frontend test suites
 
@@ -1253,7 +1255,7 @@ server's lists kept in sync by hand.
   registry, which is exactly why it lives in CI rather than being something
   a developer is relied on to have run.
 - **Frontend** — a matrix over `frontend/` and `customer-portal/` running
-  `npm ci`, `npm run lint` (oxlint), `npm run test` (Vitest, see Frontend
+  `npm ci`, `npm run lint` (oxlint, `--deny-warnings`), `npm run test` (Vitest, see Frontend
   test suites below), and `npm run build` (`tsc -b && vite build`, so a type
   error fails the build — test files live under `src/`, so they are
   typechecked too).

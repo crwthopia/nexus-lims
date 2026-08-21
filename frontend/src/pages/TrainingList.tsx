@@ -8,7 +8,7 @@ import {
   useTrainingCourses,
   useTrainingSessions,
 } from "../api/queries";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { TRAINING_SESSION_STATUS_LABELS, TRAINING_WRITE_ROLES } from "../api/types";
 
