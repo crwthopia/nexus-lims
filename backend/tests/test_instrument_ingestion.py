@@ -157,6 +157,44 @@ def test_an_unknown_data_type_is_rejected():
         parse_generic_csv(b"value,data_type\n1,quantum\n", method)
 
 
+def test_a_trailing_delimiter_is_tolerated():
+    # "Lead,0.42," -- one empty surplus field. csv.DictReader files anything
+    # past the header under the None key as a *list*, which used to reach
+    # a .strip() call and raise AttributeError: an unhandled 500 on the most
+    # ordinary formatting artifact a CSV export has.
+    method = TestMethodFactory(specification_limits={"max": 1.0})
+
+    rows = parse_generic_csv(b"analyte,value\nLead,0.42,\n", method)
+
+    assert len(rows) == 1
+    assert rows[0]["analyte"] == "Lead"
+    assert rows[0]["value"] == "0.42"
+
+
+def test_a_row_with_more_values_than_columns_is_rejected():
+    # Surplus with content in it means we cannot know which value belongs to
+    # which column. Refusing the file beats storing a guess in a regulated
+    # record -- and it must be the parser's own 400, not a 500.
+    method = TestMethodFactory()
+
+    with pytest.raises(IngestionError, match=r"Row 2: 3 values for 2 columns"):
+        parse_generic_csv(b"analyte,value\nLead,0.42,extra\n", method)
+
+
+def test_an_over_length_field_is_rejected_by_the_parser_not_the_database():
+    # TestResult.unit is a CharField(max_length=32). Without this check the
+    # row reaches Postgres during bulk_create and fails as "value too long
+    # for type character varying(32)" -- a 500 quoting a column name at
+    # someone who uploaded a file.
+    method = TestMethodFactory()
+
+    with pytest.raises(IngestionError, match=r"Row 2: 'unit' is longer than 32 characters"):
+        parse_generic_csv(f"value,unit\n1,{'x' * 33}\n".encode(), method)
+
+    with pytest.raises(IngestionError, match=r"Row 2: 'analyte' is longer than 255 characters"):
+        parse_generic_csv(f"analyte,value\n{'x' * 256},1\n".encode(), method)
+
+
 def test_an_instrument_without_a_vendor_parser_falls_back_to_csv():
     # Every instrument in NASAT's list can export CSV, so an unregistered
     # model means "no vendor parser yet", not "unusable".
