@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="NexusLIMS">
+  <title>NexusLIMS</title>
+  <defs>
+    <!-- Anchored on #06B6D4, the brand cyan. The lighter stop is a tint of
+         the same hue, so the tile reads as one colour under a light source
+         rather than as a two-colour blend. -->
+    <linearGradient id="nlTile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38DDEF"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="22" fill="url(#nlTile)"/>
+  <!-- Three connected nodes: the literal sense of "nexus", and the shape a
+       sample's life takes here. Received, tested, reported, each step
+       linked to the one before it. Heavy on purpose; the mark has to hold
+       together at 16px, where the triangular counter closes first. -->
+  <g stroke="#fff" stroke-width="7" stroke-linecap="round" fill="none">
+    <path d="M48 30 L29 63"/>
+    <path d="M48 30 L67 63"/>
+    <path d="M29 63 L67 63"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="48" cy="30" r="10"/>
+    <circle cx="29" cy="63" r="10"/>
+    <circle cx="67" cy="63" r="10"/>
+  </g>
+</svg>

@@ -33,6 +33,12 @@
                                      so the white label keeps 5.38:1 */
   --color-accent: #6f9bff;        /* links, active nav: 6.75:1 on surface */
 
+  /* Brand cyan (NexusLIMS wordmark, brand/). Two values across the themes,
+     for the same reason --color-primary and --color-accent are two tokens:
+     #06B6D4 is 7.96:1 here and 2.16:1 on the light canvas, under even the
+     3:1 WCAG allows large text. The light theme steps to a deeper cyan. */
+  --color-brand: #06B6D4;         /* 7.48:1 on surface */
+
   /* Semantic pairs: a bright foreground on a dark tint of the same hue. */
   --color-danger: #fb8b8b;        /* 7.93:1 on surface */
   --color-danger-bg: #2e1518;     /* danger fg on it: 7.41:1 */
@@ -98,6 +104,9 @@
   --color-primary: #2a5fd8;       /* white label on it: 5.63:1 */
   --color-primary-dark: #2450bb;  /* fill hover; deepens, white label 7.14:1 */
   --color-accent: #1f52c9;        /* links, active nav: 6.76:1 on surface */
+
+  /* Brand cyan, deepened for this ground -- see the dark theme's note. */
+  --color-brand: #0E7490;         /* 5.36:1 on surface, 4.77:1 on canvas */
 
   /* Semantic pairs: a deep foreground on a pale tint of the same hue. */
   --color-danger: #bd2f26;        /* 5.84:1 on surface */

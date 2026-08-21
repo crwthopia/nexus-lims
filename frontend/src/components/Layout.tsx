@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
 import { ThemeToggle } from "./ThemeToggle";
+import { Logo } from "./Logo";
 
 export function Layout() {
   const { user, logout, hasRole } = useAuth();
@@ -44,8 +45,8 @@ export function Layout() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 20, minWidth: 0 }}>
-            <Link to="/" style={{ fontWeight: 700, color: "var(--color-text)", textDecoration: "none", whiteSpace: "nowrap" }}>
-              NASAT LIMS
+            <Link to="/" style={{ textDecoration: "none", whiteSpace: "nowrap" }} aria-label="NexusLIMS home">
+              <Logo />
             </Link>
             <nav style={{ display: "flex", gap: 14, overflowX: "auto", minWidth: 0 }}>
               <NavLink to="/samples" style={navStyle}>

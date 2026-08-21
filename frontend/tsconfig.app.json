@@ -4,7 +4,10 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    // "node" is here for the tests that read index.css and
+    // index.html off disk; Vitest stubs CSS imports to empty at any
+    // ?query, so a raw import cannot be used for the stylesheet.
+    "types": ["vite/client", "node"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
