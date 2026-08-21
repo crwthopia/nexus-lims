@@ -90,3 +90,49 @@ def test_retention_sweep_archives_expired_raw_instrument_file_via_real_oss_clien
     assert AuditLogEntry.objects.filter(
         entity_type="TestResult", entity_id=old_result.id, field_changed="retention_archived",
     ).exists()
+
+
+def test_an_anonymize_policy_never_claims_pii_was_stripped():
+    """
+    The ledger is the compliance record, so an entry saying a record was
+    anonymized when nothing was is worse than the missing feature: it is a
+    false statement in the one system whose whole purpose is being
+    trustworthy. `retention_anonymized` is a claim; until a record type
+    actually carries PII, the sweep must not make it.
+    """
+    _set_policy(
+        RetentionPolicy.RecordType.CALIBRATION_RECORD,
+        retention_days=0,
+        action=RetentionPolicy.ActionAfterExpiry.ANONYMIZE,
+    )
+    record = CalibrationRecordFactory(performed_at=timezone.now() - datetime.timedelta(days=30))
+
+    run_retention_sweep()
+
+    entries = AuditLogEntry.objects.filter(entity_type="CalibrationRecord", entity_id=record.id)
+    assert entries.count() == 1
+    entry = entries.first()
+    assert entry.field_changed == "retention_anonymize_no_pii"
+    assert entry.field_changed != "retention_anonymized"
+    assert "nothing stripped" in entry.reason
+
+
+def test_the_anonymize_no_op_is_still_recorded_rather_than_skipped():
+    # An absent entry is indistinguishable from a sweep that never ran, so
+    # the policy having been applied and found nothing is itself worth
+    # recording -- and worth being idempotent about.
+    _set_policy(
+        RetentionPolicy.RecordType.CALIBRATION_RECORD,
+        retention_days=0,
+        action=RetentionPolicy.ActionAfterExpiry.ANONYMIZE,
+    )
+    record = CalibrationRecordFactory(performed_at=timezone.now() - datetime.timedelta(days=30))
+
+    first = run_retention_sweep()
+    second = run_retention_sweep()
+
+    assert first[RetentionPolicy.RecordType.CALIBRATION_RECORD] == 1
+    assert second[RetentionPolicy.RecordType.CALIBRATION_RECORD] == 0
+    assert AuditLogEntry.objects.filter(
+        entity_type="CalibrationRecord", entity_id=record.id
+    ).count() == 1

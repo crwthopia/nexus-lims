@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **123-test automated regression suite** (`backend/tests/`, pytest +
+- **125-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -1112,7 +1112,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-123 tests, organized by behavior rather than by app:
+125 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1127,7 +1127,7 @@ pytest
 | `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker), `TrainingSession` FSM actions reachable over the API, `?session=`/`?status=`/`?course=` filters |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't; `?status=` filter and `customer_email` resolution (order- and enrollment-based) |
-| `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, and the real boto3-against-MinIO archive path |
+| `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, the real boto3-against-MinIO archive path, and that an `anonymize` policy writes `retention_anonymize_no_pii` rather than claiming `retention_anonymized` when nothing was stripped |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
 | `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
@@ -1330,7 +1330,19 @@ Genuinely not built yet, not just undocumented:
   verification/MFA emails print to the server log rather than sending.
 - **No Odoo ERP integration** — explicitly out of scope for this phase
   per the Blueprint.
-- **Retention `anonymize` action is a documented no-op.** None of the 5
-  `RetentionPolicy` record types carry PII fields directly on themselves
-  under the current schema (it lives on `CustomerUser`); see
-  `apps/audit/tasks.py`.
+- **Retention `anonymize` is still a no-op, but an honest one.** None of
+  the 5 `RetentionPolicy` record types carry PII on themselves — it lives
+  on `CustomerUser`, which is not a retention-governed record type, and an
+  expired `Enrollment` does not mean that customer is gone. The sweep
+  therefore strips nothing, and **says so**: it writes
+  `retention_anonymize_no_pii` to the audit ledger, never
+  `retention_anonymized`. The distinction matters because the ledger is the
+  compliance record — an entry claiming a record was anonymized when
+  nothing was is a false statement in the one system whose purpose is being
+  trustworthy. When a record type does carry PII the label becomes
+  `retention_anonymized`, and every row marked with the old label is
+  reprocessed automatically, since idempotency matches on the label.
+  Closing this needs a decision the schema cannot make: what "last
+  activity" means for a customer, and how long after it their identity
+  should persist. ISO/IEC 17025's five-year clock governs *records*; RA
+  10173 governs *people*, and they are not the same clock.

@@ -37,7 +37,14 @@ logger = logging.getLogger(__name__)
 ACTION_LABELS = {
     RetentionPolicy.ActionAfterExpiry.ARCHIVE_TO_COLD_STORAGE: "retention_archived",
     RetentionPolicy.ActionAfterExpiry.LOCK_RECORD: "retention_locked",
-    RetentionPolicy.ActionAfterExpiry.ANONYMIZE: "retention_anonymized",
+    # Deliberately NOT "retention_anonymized": _anonymize() strips nothing
+    # under the current schema, and a ledger entry claiming otherwise is a
+    # false record in the one system whose purpose is being trustworthy.
+    # When a record type does carry PII, the label becomes
+    # "retention_anonymized" and every row marked with this one is
+    # reprocessed automatically -- _already_processed() matches on the
+    # label, so a change of label is a change of what counts as done.
+    RetentionPolicy.ActionAfterExpiry.ANONYMIZE: "retention_anonymize_no_pii",
 }
 
 
@@ -120,14 +127,25 @@ def _move_to_cold_storage_tier(entity_type, entity_id):
 def _anonymize(entity_type, entity_id):
     """
     Strips PII where the record type carries any (Blueprint Section 7.4a,
-    RA 10173 data minimization). None of the five RetentionPolicy record
-    types carry PII fields directly on themselves under the current schema
-    (it lives on CustomerUser, which is not itself a retention-governed
-    record type) -- this is a documented no-op pending a record type that
-    does, rather than reaching across to mutate a possibly-still-active
-    customer's profile from here.
+    RA 10173 data minimization), returning True if anything was actually
+    stripped -- the same contract as _move_to_cold_storage_tier, so the
+    caller can record what happened rather than what was attempted.
+
+    Always False today. None of the five RetentionPolicy record types carry
+    PII fields on themselves under the current schema: it lives on
+    CustomerUser, which is not itself a retention-governed record type, and
+    an expired Enrollment does not mean that customer is gone. Reaching
+    across to mutate a possibly-still-active customer's profile from a
+    per-record sweep would be worse than doing nothing.
+
+    Closing this properly needs a decision the schema cannot make -- what
+    "last activity" means for a customer, and how long after it their
+    identity should persist. ISO/IEC 17025's five-year clock governs
+    records; RA 10173 governs people, and they are not the same clock. See
+    the Known gaps section of the root README.
     """
     logger.info("retention: %s#%s has no PII fields to strip under the current schema", entity_type, entity_id)
+    return False
 
 
 def _already_processed(entity_type, entity_id, label):
@@ -156,8 +174,17 @@ def run_retention_sweep():
             elif policy.action_after_expiry == RetentionPolicy.ActionAfterExpiry.LOCK_RECORD:
                 reason = f"RetentionPolicy({policy.record_type}, {policy.retention_days}d): locked, no further modification permitted."
             else:  # ANONYMIZE
-                _anonymize(entity_type, entity_id)
-                reason = f"RetentionPolicy({policy.record_type}, {policy.retention_days}d): anonymization evaluated."
+                if _anonymize(entity_type, entity_id):
+                    reason = f"RetentionPolicy({policy.record_type}, {policy.retention_days}d): PII stripped."
+                else:
+                    # Logged rather than skipped silently, so the sweep's own
+                    # record shows the policy was applied and found nothing --
+                    # an absent entry is indistinguishable from a sweep that
+                    # never ran.
+                    reason = (
+                        f"RetentionPolicy({policy.record_type}, {policy.retention_days}d): "
+                        f"no PII on this record type under the current schema; nothing stripped."
+                    )
 
             AuditLogEntry.objects.create(
                 actor_id=None,
