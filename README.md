@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **125-test automated regression suite** (`backend/tests/`, pytest +
+- **128-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -83,6 +83,8 @@ nasat-lims/
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
 ├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, both frontends' lint/test/typecheck/build
+├── docs/                      <- external-facing specs
+│   └── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
 ├── infra/                     <- Terraform for Blueprint Section 2.2 (VPC, OSS, RDS, Redis) -- never applied, see infra/README.md
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
@@ -913,7 +915,21 @@ twelve elements becomes twelve *labelled* results against one
 method name already says what was measured.
 Headers are matched case- and whitespace-insensitively, and a UTF-8 BOM is
 tolerated because instrument software on Windows writes one often enough
-that failing on it would make the feature look broken.
+that failing on it would make the feature look broken. A trailing delimiter
+(`Lead,0.42,`) is tolerated as the formatting artifact it is; a row with a
+*non-empty* surplus field is refused, because when a row has more values
+than the header has columns there is no knowing which value belongs to which
+column, and a guess stored in a regulated record is worse than a refused
+file. Over-length `analyte`/`unit` values are refused by the parser too,
+rather than reaching Postgres as a `value too long for type character
+varying(32)` 500 quoting a column name at whoever uploaded the file.
+
+**The vendor-facing specification is
+[`docs/instrument-export-csv.md`](docs/instrument-export-csv.md)** — a
+self-contained document to hand to an instrument vendor or integrator,
+covering the format, every rejection message, what the LIMS deliberately
+refuses to read from the file (pass/fail flags above all), and what we would
+need from a vendor to write a native-format parser.
 
 ## Report PDF generation
 
@@ -1112,7 +1128,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-125 tests, organized by behavior rather than by app:
+128 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1132,7 +1148,7 @@ pytest
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
 | `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
-| `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
+| `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection, trailing delimiter tolerated, ragged and over-length rows refused as 400s rather than 500s); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
@@ -1309,7 +1325,8 @@ Genuinely not built yet, not just undocumented:
   a format nobody has produced a sample of yields code that looks finished
   and fails on first contact with the instrument. Registering one is a
   decorator on a function once real export files exist to write it
-  against.
+  against — [`docs/instrument-export-csv.md`](docs/instrument-export-csv.md)
+  §10 lists exactly what to ask a vendor for.
 - **`/my/orders/` and `/my/samples/` are still read-only.** Customers can
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —

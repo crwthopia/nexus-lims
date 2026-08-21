@@ -143,6 +143,22 @@ def parse_generic_csv(content, test_method):
 
     parsed = []
     for line_number, row in enumerate(reader, start=2):  # 1 is the header
+        # DictReader collects fields beyond the header under the None key, as
+        # a list. Two very different things arrive here. A trailing delimiter
+        # ("Lead,0.42,") yields one empty surplus field: a formatting artifact
+        # carrying no data, and common enough in instrument exports that
+        # rejecting it would fail files whose values are all perfectly good.
+        # A surplus field with content in it means the row has more values
+        # than the header has columns, so we do not actually know which value
+        # belongs to which column -- storing a guess into a regulated record
+        # is worse than refusing the file.
+        surplus = row.pop(None, None)
+        if surplus and any((extra or "").strip() for extra in surplus):
+            raise IngestionError(
+                f"Row {line_number}: {len(reader.fieldnames) + len(surplus)} values "
+                f"for {len(reader.fieldnames)} columns. Every row must have the same "
+                f"number of fields as the header."
+            )
         normalised = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         value = normalised.get("value", "")
         if not value:
@@ -164,6 +180,18 @@ def parse_generic_csv(content, test_method):
                 raise IngestionError(
                     f"Row {line_number}: value '{value}' is not numeric, but data_type is '{data_type}'."
                 ) from exc
+
+        # Checked here rather than left to the database. These are CharField
+        # limits on TestResult, so an over-length value reaches Postgres as
+        # "value too long for type character varying(32)" during bulk_create
+        # -- a 500 naming a column the uploader never typed, instead of the
+        # 400 with a row number that every other rejection in this parser
+        # gives them.
+        for column, limit in (("analyte", 255), ("unit", 32)):
+            if len(normalised.get(column, "")) > limit:
+                raise IngestionError(
+                    f"Row {line_number}: '{column}' is longer than {limit} characters."
+                )
 
         parsed.append(
             {
