@@ -21,7 +21,7 @@ from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.models import ESignature, Role
 from apps.accounts.permissions import IsCustomerAuthenticated, roles_required
 from apps.accounts.services import capture_esignature
-from apps.common.params import int_param, str_param
+from apps.common.params import body_dict, int_param, str_param
 from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
 from apps.review.services import SegregationOfDutiesError, check_can_approve
@@ -159,7 +159,7 @@ class SampleViewSet(viewsets.ModelViewSet):
         ChainOfCustodyEvent.objects.create(
             sample=sample,
             to_holder=request.user,
-            to_location=str_param(request.data.get("location"), "location", max_length=255),
+            to_location=str_param(body_dict(request).get("location"), "location", max_length=255),
             event_type=ChainOfCustodyEvent.EventType.RECEIPT,
         )
         return Response(SampleSerializer(sample).data)
@@ -202,7 +202,7 @@ class SampleViewSet(viewsets.ModelViewSet):
             sample=sample,
             reviewer=request.user,
             action=ReviewAction.Action.REVIEWED,
-            comments=request.data.get("comments", ""),
+            comments=str_param(body_dict(request).get("comments"), "comments"),
         )
         signature = capture_esignature(
             signer=request.user,

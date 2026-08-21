@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
 from apps.audit.oss import upload_object
-from apps.common.params import int_param
+from apps.common.params import body_dict, int_param
 from apps.equipment.models import Instrument
 from apps.testing.ingestion import (
     IngestionError,
@@ -109,7 +109,7 @@ class TestRequestViewSet(viewsets.ModelViewSet):
             return Response(TestResultSerializer(results, many=True, context={"request": request}).data)
 
         serializer = TestResultSerializer(
-            data={**request.data, "test_request": test_request.id},
+            data={**body_dict(request), "test_request": test_request.id},
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
@@ -158,7 +158,7 @@ class TestRequestViewSet(viewsets.ModelViewSet):
             )
 
         instrument = None
-        instrument_id = int_param(request.data.get("instrument"), "instrument")
+        instrument_id = int_param(body_dict(request).get("instrument"), "instrument")
         if instrument_id is not None:
             instrument = Instrument.objects.filter(pk=instrument_id).first()
             if instrument is None:
