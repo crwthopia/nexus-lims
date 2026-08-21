@@ -66,11 +66,17 @@ class CalibrationRecordSerializer(serializers.ModelSerializer):
                 {"performed_at": "A calibration cannot be recorded as performed in the future."}
             )
         if performed_at is not None and next_due_date is not None:
-            if next_due_date < performed_at.date():
+            # Compared in the lab's local timezone, not UTC. A calibration
+            # logged at 09:00 in Manila is due "today" on the Manila
+            # calendar, and for eight hours of every UTC day those two
+            # dates differ -- so a UTC comparison rejects a same-day recheck
+            # every evening and passes it every morning.
+            performed_date = timezone.localtime(performed_at).date()
+            if next_due_date < performed_date:
                 raise serializers.ValidationError(
                     {"next_due_date": (
                         f"The next calibration is due ({next_due_date}) before this one was "
-                        f"performed ({performed_at.date()})."
+                        f"performed ({performed_date})."
                     )}
                 )
         return attrs

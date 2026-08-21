@@ -25,6 +25,29 @@ STAFF_LOGIN_BACKEND = "django.contrib.auth.backends.ModelBackend"
 
 
 @pytest.fixture(autouse=True)
+def _no_ssl_redirect(settings):
+    """
+    Turn off SECURE_SSL_REDIRECT for the duration of every test.
+
+    The production hardening in config/settings.py is gated on DEBUG being
+    off, and it is off during tests -- so without this, SecurityMiddleware
+    answers every request from the Django test client with a 301 to
+    https://testserver, and the entire suite fails at the first assertion
+    about a status code.
+
+    Everything else in that block stays on, deliberately: secure cookies
+    and the security headers cost nothing here and are worth exercising.
+    Only the redirect is incompatible with a test client that speaks plain
+    HTTP by definition.
+
+    The probes are exempt from the redirect in production anyway (see
+    SECURE_REDIRECT_EXEMPT), which is what makes a load balancer able to
+    reach them at all.
+    """
+    settings.SECURE_SSL_REDIRECT = False
+
+
+@pytest.fixture(autouse=True)
 def _rls_staff_bypass_for_fixture_setup(db):
     """
     order/sample carry FORCE ROW LEVEL SECURITY (apps/samples/migrations

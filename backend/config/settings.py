@@ -9,6 +9,7 @@ Alibaba Cloud KMS-backed environment injection (Blueprint Section 7.6).
 """
 
 import os
+import sys
 from pathlib import Path
 
 from celery.schedules import crontab
@@ -69,6 +70,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Directly after SecurityMiddleware, per WhiteNoise's documented
+    # ordering: it has to see the request before anything that might
+    # short-circuit it, but after the redirects SecurityMiddleware issues.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -127,6 +132,15 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# collectstatic target inside the image. Only the Django admin and DRF's
+# browsable API have static files here -- both SPAs are built and served
+# separately -- but without these the admin renders unstyled in production,
+# which looks like a broken deployment and is usually diagnosed as one.
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Celery (Redis broker, Blueprint Section 2.1 item 4 / ApsaraDB for Redis in prod)
@@ -293,4 +307,115 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+}
+
+
+# --- Production hardening -------------------------------------------------
+#
+# Every setting here is what `manage.py check --deploy` asks for, and every
+# one is gated on DEBUG being off so local development over plain HTTP still
+# works. Turning them on unconditionally would make the dev server unusable:
+# a secure-only session cookie is never sent over http://localhost, so
+# nobody could log in.
+#
+# The proxy header comes first because the rest depend on it. Behind
+# Alibaba's SLB the application sees plain HTTP, so request.is_secure() is
+# False and SECURE_SSL_REDIRECT would bounce every request into an infinite
+# loop. SECURE_PROXY_SSL_HEADER tells Django to trust the load balancer's
+# X-Forwarded-Proto instead -- which is only safe because the app is not
+# directly reachable; anything that can set that header could otherwise
+# claim any request was HTTPS.
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "true").lower() == "true"
+    # The probes must answer over plain HTTP. A load balancer health check
+    # does not follow redirects, so without this exemption every probe gets
+    # a 301, every instance is marked unhealthy, and the deployment never
+    # comes up -- an outage caused entirely by the hardening above.
+    # Matched against the path with the leading slash stripped.
+    SECURE_REDIRECT_EXEMPT = [r"^healthz$", r"^readyz$"]
+
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # The customer portal is a separate origin, so Lax rather than Strict:
+    # Strict would drop the session cookie on the Entra ID SSO redirect back
+    # from Microsoft, and staff could never complete a login.
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_HTTPONLY = True
+
+    # One year, with subdomains and preload. HSTS is close to irreversible
+    # -- a browser that has seen this header refuses plain HTTP for the
+    # duration, so a misconfigured certificate cannot be worked around by
+    # falling back. Deliberately overridable for a first deploy, where a
+    # short max-age is the sane way in.
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+
+    # A regulated system must not run on the checked-in development key:
+    # the session cookies, password-reset tokens and the signed email
+    # verification tokens in apps/accounts/customer_auth.py are all only as
+    # trustworthy as this value. Failing at startup is the point -- a
+    # deployment that silently used the public default would issue
+    # forgeable tokens.
+    if SECRET_KEY == "dev-insecure-key-change-me":
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY is unset and DEBUG is off. Refusing to start with "
+            "the development key: every session cookie and signed token would be "
+            "forgeable by anyone who has read this repository."
+        )
+
+
+# --- Logging --------------------------------------------------------------
+#
+# Django's default logging configuration sends almost nothing to stdout when
+# DEBUG is off, which in a container means an operator sees silence during
+# an incident. Everything here writes to stdout, because a container's log
+# stream is the log: no files to rotate, no volume to mount.
+#
+# This is the operational log and it is a different thing from the audit
+# ledger in apps/audit/. The ledger is the regulated record of what happened
+# to a sample; this is for diagnosing why a request failed. Neither
+# substitutes for the other, and PII should not be written here.
+LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": sys.stdout,
+            "formatter": "verbose",
+        },
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        # Unhandled exceptions in a view. Django logs these at ERROR with a
+        # traceback; without an explicit handler they are swallowed once
+        # DEBUG is off, and a 500 leaves no trace anywhere.
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        # Every SQL statement, at DEBUG. Off by default: it is the fastest
+        # way to fill a log with the contents of the database, PII included.
+        "django.db.backends": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "celery": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        # WeasyPrint narrates every stylesheet it parses at INFO, so a root
+        # level of INFO turns one COA render into a dozen lines of "Step 2 -
+        # Fetching and parsing CSS". Its warnings are worth seeing (an
+        # unresolvable image or font is a visibly broken report); its
+        # progress is not.
+        "weasyprint": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "fontTools": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "apps": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+    },
 }

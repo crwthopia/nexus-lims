@@ -1,0 +1,12 @@
+# Keep the build context small and keep secrets out of the image.
+.env
+*.sqlite3
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+staticfiles/
+tests/
+pytest.ini
+requirements-dev.txt

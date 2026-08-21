@@ -172,8 +172,14 @@ def test_an_ordinary_calibration_is_still_accepted(any_staff):
 def test_a_calibration_due_the_same_day_it_was_performed_is_allowed(any_staff):
     # The boundary: same-day is degenerate but not contradictory, and a
     # strict > would reject a legitimate same-day recheck.
+    #
+    # "Today" is the lab's today. TIME_ZONE is Asia/Manila, so for the eight
+    # hours of each UTC day where the two calendars disagree, a UTC date
+    # here is yesterday as far as the serializer is concerned -- which made
+    # this test fail only between 16:00 and 24:00 UTC.
     instrument = InstrumentFactory()
     now = timezone.now()
+    today_local = timezone.localtime(now).date()
 
     response = any_staff.post(
         "/api/v1/calibration-records/",
@@ -181,7 +187,7 @@ def test_a_calibration_due_the_same_day_it_was_performed_is_allowed(any_staff):
             "instrument": instrument.id,
             "performed_at": (now - timedelta(hours=1)).isoformat(),
             "result": "pass",
-            "next_due_date": now.date().isoformat(),
+            "next_due_date": today_local.isoformat(),
         },
         format="json",
     )

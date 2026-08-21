@@ -163,6 +163,102 @@ jobs:
         working-directory: backend
         run: pytest
 
+  image:
+    name: Backend image (build + deploy check)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The point of this job. Nothing else in CI proves the application can
+      # actually be packaged: the pytest job installs into the runner
+      # directly, so a missing system library, a wheel that will not build,
+      # or a collectstatic that fails would all go unnoticed until a deploy.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: nexuslims-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # `check --deploy` inside the built image, with DEBUG off, which is
+      # the configuration that actually ships. Run here rather than in the
+      # pytest job because the pytest job runs with the test settings and
+      # would not exercise the production branch of settings.py at all.
+      - name: Django deployment checks
+        run: |
+          docker run --rm \
+            -e DJANGO_DEBUG=false \
+            -e DJANGO_SECRET_KEY=ci-check-only-not-a-real-secret-but-long-enough-to-pass \
+            -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_SECRET=ci-placeholder \
+            nexuslims-backend:ci \
+            python manage.py check --deploy --fail-level WARNING
+
+      # A container that starts is not the same as one that serves. This
+      # boots gunicorn exactly as the image's CMD does and probes liveness,
+      # which catches an import-time failure -- WeasyPrint's system
+      # libraries being the likeliest -- that a build alone would not.
+      - name: Boot the container and probe liveness
+        run: |
+          docker run -d --name nexuslims-ci -p 8000:8000 \
+            -e DJANGO_DEBUG=false \
+            -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass \
+            -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e DJANGO_SECURE_SSL_REDIRECT=false \
+            -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_SECRET=ci-placeholder \
+            nexuslims-backend:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/healthz | grep -q '"ok"'; then
+              echo "Container is live"
+              docker rm -f nexuslims-ci > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not become live in time"
+          docker logs nexuslims-ci
+          exit 1
+
+      # /readyz with nothing to be ready for: no Postgres, no Redis. It must
+      # answer 503 and name both, rather than hanging or raising -- a
+      # readiness probe that cannot report a failure is worse than none,
+      # because a deployment waits on it forever.
+      - name: Readiness reports degraded without dependencies
+        run: |
+          docker run -d --name nexuslims-degraded -p 8001:8000 \
+            -e DJANGO_DEBUG=false \
+            -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass \
+            -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e DJANGO_SECURE_SSL_REDIRECT=false \
+            -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT=1 \
+            -e CELERY_BROKER_URL=redis://127.0.0.1:1/0 \
+            -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
+            -e AZURE_AD_CLIENT_SECRET=ci-placeholder \
+            nexuslims-backend:ci
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /tmp/readyz.json -w '%{http_code}' http://localhost:8001/readyz || true)
+            if [ "$code" = "503" ]; then
+              cat /tmp/readyz.json
+              grep -q '"database": "unavailable"' /tmp/readyz.json
+              grep -q '"redis": "unavailable"' /tmp/readyz.json
+              echo "Readiness correctly reported degraded"
+              docker rm -f nexuslims-degraded > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Readiness did not report degraded (last code: $code)"
+          docker logs nexuslims-degraded
+          exit 1
+
   infra:
     name: Infra (terraform fmt + validate)
     runs-on: ubuntu-latest

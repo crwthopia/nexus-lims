@@ -24,3 +24,14 @@ boto3==1.34.144
 # see the README's Running it yourself section.
 weasyprint==69.0
 jinja2==3.1.4
+
+# Production serving. `manage.py runserver` is a development server and
+# Django says so explicitly; it is single-threaded, does not handle
+# concurrency, and has never been security-audited for public exposure.
+# gunicorn is what the container's CMD runs.
+gunicorn==23.0.0
+# Static files for the Django admin and DRF's browsable API, served by the
+# app itself rather than by a separate nginx. Both SPAs are built and
+# deployed separately, so this is a small surface -- but without it the
+# admin renders unstyled, which looks exactly like a broken deployment.
+whitenoise==6.7.0
