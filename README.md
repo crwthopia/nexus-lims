@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **128-test automated regression suite** (`backend/tests/`, pytest +
+- **166-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -132,6 +132,8 @@ nasat-lims/
         │   ├── permissions.py      <- HasRole / roles_required(), IsCustomerAuthenticated
         │   ├── serializers.py, views.py, urls.py  <- staff-facing read endpoints
         │   └── services.py         <- e-signature capture helper
+        ├── common/            <- cross-app helpers with no models of their own
+        │   └── params.py           <- int_param/str_param: client input coerced to a 400, never a 500
         ├── documents/         <- Document, DocumentVersion
         │   └── views.py             <- POST /document-versions/{id}/approve/ (FR-D1-03)
         ├── equipment/         <- StandardReagent, Instrument, CalibrationRecord
@@ -826,6 +828,41 @@ provisioning secret (the same library `backend/tests/test_customer_auth.py`
 already uses), logged out, and logged back in with the MFA-required flow
 correctly triggered and satisfied on the second attempt.
 
+## Client input is a 400, never a 500
+
+Every `get_queryset` override in this codebase reads its own query
+parameters by hand. That is deliberate — DRF silently ignores params it does
+not recognise, so a filter the client sends and the server never implements
+does nothing, quietly, which is a bug this project has already been bitten by
+more than once (see the `?status=`/`?sample=` notes above).
+
+The cost of reading them by hand is that nothing validates them. Django's ORM
+takes a lookup value to be already of the field's type: `.filter(sample_id=
+"abc")` raises `ValueError`, not `DoesNotExist`. So `?sample=abc` was a
+server error on eleven route/parameter pairs across eight apps, and a raw
+`request.data` read skipped straight past a `CharField`'s `max_length` and
+let Postgres enforce it — `value too long for type character varying(255)`,
+a database column name quoted at whoever filled in a form field.
+
+`apps/common/params.py` holds the two helpers that close this:
+
+- `int_param(value, name)` — an integer id or `None`, and a 400 keyed by the
+  parameter name for anything else.
+- `str_param(value, name, max_length=...)` — a bounded string, rejecting a
+  non-string and anything over the destination column's ceiling.
+
+**Guard the result with `is not None`, not truthiness.** `int_param("0")` is
+`0`, which is falsy: an `if sample_id:` guard would skip the filter entirely
+and return the whole table where the client asked for one row. That is the
+opposite of the requested query rather than a near miss, and
+`test_malformed_request_params.py` pins it along with the rest.
+
+These are small and explicit rather than a filter backend, because the fix
+that fits is one that wraps the existing hand-rolled read rather than one
+that replaces the pattern. New `get_queryset` overrides should use them, and
+new numeric filters should be added to `NUMERIC_FILTERS` in that test file,
+which walks the routes rather than asserting a single case.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -1128,7 +1165,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-128 tests, organized by behavior rather than by app:
+166 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1150,6 +1187,7 @@ pytest
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
 | `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection, trailing delimiter tolerated, ragged and over-length rows refused as 400s rather than 500s); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
+| `test_malformed_request_params.py` | Every numeric query-string filter across eight apps returns 400 rather than 500 for a non-numeric id, still filters for a valid one, ignores an empty one, and treats `0` as a filter rather than as "no filter"; over-length and non-string chain-of-custody locations refused before Postgres sees them |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 

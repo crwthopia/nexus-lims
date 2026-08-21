@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.models import Role
 from apps.accounts.permissions import IsCustomerAuthenticated, roles_required
+from apps.common.params import int_param
 from apps.training import services
 from apps.training.models import CreditNote, Enrollment, TrainingCourse, TrainingSession
 from apps.training.serializers import (
@@ -43,7 +44,7 @@ def _run_transition(instance, method_name):
 
 
 def _get_target_enrollment(request):
-    enrollment_id = request.data.get("enrollment")
+    enrollment_id = int_param(request.data.get("enrollment"), "enrollment")
     if not enrollment_id:
         raise ValidationError("'enrollment' is required: the target Enrollment to apply this credit note to.")
     try:
@@ -72,8 +73,8 @@ class TrainingSessionViewSet(viewsets.ModelViewSet):
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status__in=status_param.split(","))
-        course_id = self.request.query_params.get("course")
-        if course_id:
+        course_id = int_param(self.request.query_params.get("course"), "course")
+        if course_id is not None:
             qs = qs.filter(course_id=course_id)
         return qs
 
@@ -137,8 +138,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """?session=, ?status= -- needed by the Staff Console's Training Session detail enrollee list."""
         qs = super().get_queryset()
-        session_id = self.request.query_params.get("session")
-        if session_id:
+        session_id = int_param(self.request.query_params.get("session"), "session")
+        if session_id is not None:
             qs = qs.filter(session_id=session_id)
         status_param = self.request.query_params.get("status")
         if status_param:
@@ -193,8 +194,8 @@ class CreditNoteViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        customer_id = self.request.query_params.get("customer_id")
-        if customer_id:
+        customer_id = int_param(self.request.query_params.get("customer_id"), "customer_id")
+        if customer_id is not None:
             qs = qs.filter(customer_id=customer_id)
         return qs
 

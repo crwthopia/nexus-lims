@@ -14,6 +14,7 @@ from rest_framework.response import Response
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
+from apps.common.params import int_param
 from apps.investigations.models import Investigation
 from apps.investigations.serializers import InvestigationSerializer
 
@@ -40,11 +41,11 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status__in=status_param.split(","))
-        related_sample = self.request.query_params.get("related_sample")
-        if related_sample:
+        related_sample = int_param(self.request.query_params.get("related_sample"), "related_sample")
+        if related_sample is not None:
             qs = qs.filter(related_sample_id=related_sample)
-        related_test_result = self.request.query_params.get("related_test_result")
-        if related_test_result:
+        related_test_result = int_param(self.request.query_params.get("related_test_result"), "related_test_result")
+        if related_test_result is not None:
             qs = qs.filter(related_test_result_id=related_test_result)
         return qs
 

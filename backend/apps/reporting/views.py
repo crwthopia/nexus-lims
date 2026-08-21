@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.permissions import IsCustomerAuthenticated
 from apps.audit.oss import OSSNotConfiguredError, presigned_url
+from apps.common.params import int_param
 from apps.reporting.models import Report
 from apps.reporting.serializers import CustomerReportSerializer, ReportSerializer
 from apps.reporting.tasks import enqueue_generation
@@ -34,8 +35,8 @@ class ReportViewSet(
 
     def get_queryset(self):
         qs = super().get_queryset()
-        sample_id = self.request.query_params.get("sample")
-        if sample_id:
+        sample_id = int_param(self.request.query_params.get("sample"), "sample")
+        if sample_id is not None:
             qs = qs.filter(sample_id=sample_id)
         status_param = self.request.query_params.get("status")
         if status_param:
