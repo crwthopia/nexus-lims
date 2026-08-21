@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **97-test automated regression suite** (`backend/tests/`, pytest +
+- **115-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -134,6 +134,7 @@ nasat-lims/
         │   └── views.py             <- FSM transition actions, review/approve/reject,
         │                               CustomerOrderViewSet/CustomerSampleViewSet ("my/orders", "my/samples")
         ├── testing/           <- TestMethod, TestRequest (FSM), TestResult
+        │   └── ingestion.py         <- parser registry + generic CSV; shared competency/OOS rules
         │   └── views.py             <- FR-C3-02 competency check, FR-C3-08 OOS auto-flag
         ├── review/            <- ReviewAction, ApprovalAction
         │   └── services.py          <- segregation-of-duties guard (check_can_approve)
@@ -854,6 +855,58 @@ app's own (non-superuser) DB role, zero RLS context returns zero rows;
 `rls.is_staff='true'` returns everything; two customers seeded with their
 own `Order`+`Sample` each see only their own row, with zero cross-visibility.
 
+## Instrument raw-data ingestion
+
+`POST /api/v1/test-requests/{id}/ingest` (multipart, field `file`, optional
+`instrument`) takes an instrument export, stores it in object storage, and
+parses it into `TestResult` rows carrying `raw_file_id` and
+`raw_file_checksum_sha256` pointing back at the file they came from — ALCOA
+traceability, Blueprint Section 7.3 / Section 11.
+
+**Synchronous, unlike report generation.** An analyst uploading an export is
+standing at the instrument waiting to learn whether the file was accepted;
+answering "queued" and making them poll for a parse error they could have
+been told about immediately is worse than holding the request for the second
+it takes. Report rendering is genuinely slow and fire-and-forget, which is
+why that one is a Celery task and this one isn't.
+
+The rules that matter:
+
+- **The competency gate and the OOS computation are shared with manual
+  entry**, and now live in `apps/testing/ingestion.py` rather than on the
+  serializer that used to own them. An analyst who may not type a result in
+  may not upload one either, and a limit is read from
+  `TestMethod.specification_limits` in both paths. Two copies of "is this
+  result out of spec" is how a lab ends up with a hand-entered result
+  flagged and an ingested one not.
+- **Re-uploading an identical file is refused with 409**, matched on the
+  SHA-256 of the content. Double-ingesting would double every result on the
+  request, which in a regulated record is a data-integrity incident rather
+  than a nuisance.
+- **The raw file is stored before parsing, and stays stored if the parse
+  fails.** Traceability wants the artifact the lab actually received,
+  including the one that turned out to be malformed.
+- **A non-numeric value in a numeric column is rejected**, not stored: it
+  would skip the OOS check entirely and enter the record as in-spec.
+- **Parse errors carry the parser's own message** — "Row 2: value 'n/a' is
+  not numeric" is actionable, "could not parse file" is not.
+
+**Parsers are registered per `Instrument.model`** via `@register_parser`,
+falling back to the generic CSV reader for anything unregistered. Only the
+generic reader is implemented; see Known gaps for why, and for the
+`TestResult` schema limitation that multi-analyte exports run into. The
+documented interchange format is a header row plus one row per measurement:
+
+```csv
+value,unit,data_type
+0.42,mg/L,float
+```
+
+`value` is required; `unit` defaults to empty and `data_type` to `float`.
+Headers are matched case- and whitespace-insensitively, and a UTF-8 BOM is
+tolerated because instrument software on Windows writes one often enough
+that failing on it would make the feature look broken.
+
 ## Report PDF generation
 
 The decoupled pipeline Blueprint Section 2.1a describes, and the thing
@@ -1051,7 +1104,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-97 tests, organized by behavior rather than by app:
+115 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1071,6 +1124,7 @@ pytest
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
 | `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
+| `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 
@@ -1216,9 +1270,19 @@ Genuinely not built yet, not just undocumented:
   `apps/reporting/templates/reports/`. Both the Staff Console's Reports
   screen and the Customer Portal's My Reports route now exist, so what is
   missing here is the layouts themselves, not the plumbing.
-- **No instrument file-parsing / raw-data ingestion.** `TestResult`
-  references a raw file key but nothing parses instrument export files
-  into results automatically (Blueprint Section 11).
+- **No vendor-specific instrument parsers.** Ingestion itself is built
+  (see Instrument raw-data ingestion above) and the generic CSV format
+  works today, but no FESEM/EDX/TGA/XRF native export is parsed: those are
+  vendor-specific binary or semi-structured text, and writing a parser for
+  a format nobody has produced a sample of yields code that looks finished
+  and fails on first contact with the instrument. Registering one is a
+  decorator on a function once real export files exist to write it
+  against.
+- **`TestResult` has no analyte/parameter name field.** One `TestRequest`
+  is one `TestMethod`, so a multi-analyte export (an ICP-MS run reporting
+  twelve elements) has nowhere to record *which* element each row is.
+  Multi-analyte runs currently need splitting into one file per analyte.
+  Closing this is a schema change, not a parser change.
 - **`/my/orders/` and `/my/samples/` are still read-only.** Customers can
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —

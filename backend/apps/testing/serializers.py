@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.equipment.models import StandardReagent
+from apps.testing.ingestion import IngestionError, assert_certified, compute_out_of_spec
 from apps.testing.models import TestMethod, TestRequest, TestResult
 
 
@@ -66,34 +67,19 @@ class TestResultSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context["request"]
         test_request = attrs.get("test_request") or getattr(self.instance, "test_request", None)
-        test_method = test_request.test_method
-        if not request.user.is_superuser and not request.user.instrument_certifications.filter(
-            pk=test_method.pk
-        ).exists():
-            raise serializers.ValidationError(
-                f"'{request.user.display_name}' is not certified for test method "
-                f"'{test_method.name}' (FR-C3-02 competency check)."
-            )
+        try:
+            assert_certified(request.user, test_request.test_method)
+        except IngestionError as exc:
+            # Same rule, same message, one implementation -- see
+            # apps/testing/ingestion.py for why it lives there.
+            raise serializers.ValidationError(str(exc)) from exc
         return attrs
 
     def create(self, validated_data):
         validated_data["entered_by"] = self.context["request"].user
-        validated_data["is_out_of_spec"] = self._compute_out_of_spec(validated_data)
+        validated_data["is_out_of_spec"] = compute_out_of_spec(
+            validated_data["test_request"].test_method,
+            validated_data["data_type"],
+            validated_data["value"],
+        )
         return super().create(validated_data)
-
-    @staticmethod
-    def _compute_out_of_spec(validated_data):
-        limits = validated_data["test_request"].test_method.specification_limits or {}
-        if validated_data["data_type"] not in (TestResult.DataType.FLOAT, TestResult.DataType.INT):
-            return False
-        if "min" not in limits and "max" not in limits:
-            return False
-        try:
-            numeric_value = float(validated_data["value"])
-        except (TypeError, ValueError):
-            return False
-        if "min" in limits and numeric_value < limits["min"]:
-            return True
-        if "max" in limits and numeric_value > limits["max"]:
-            return True
-        return False
