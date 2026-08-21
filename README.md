@@ -82,7 +82,8 @@ nasat-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO) + both frontends' lint/test/typecheck/build
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, both frontends' lint/test/typecheck/build
+├── infra/                     <- Terraform for Blueprint Section 2.2 (VPC, OSS, RDS, Redis) -- never applied, see infra/README.md
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
 │   ├── vite.config.ts          <- dev server on :5174, proxies /api,/admin,/static to Django on :8000
@@ -1246,6 +1247,11 @@ server's lists kept in sync by hand.
   and MinIO service containers, the same stack the suite is written for
   (see Running the test suite above). Nothing is mocked in CI that isn't
   mocked locally.
+- **Infra** — `terraform fmt -check` and `terraform validate` over
+  `infra/`. `validate` is a schema check against the provider rather than a
+  call to Alibaba, so it needs no credentials — and it needs the provider
+  registry, which is exactly why it lives in CI rather than being something
+  a developer is relied on to have run.
 - **Frontend** — a matrix over `frontend/` and `customer-portal/` running
   `npm ci`, `npm run lint` (oxlint), `npm run test` (Vitest, see Frontend
   test suites below), and `npm run build` (`tsc -b && vite build`, so a type
@@ -1306,11 +1312,14 @@ Genuinely not built yet, not just undocumented:
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —
   walk-in/staff-initiated intake is still the only path onto a `Sample`.
-- **No CD, no IaC.** CI runs on every pull request (see Continuous integration
-  above), but nothing deploys: there is no release pipeline and no
-  Terraform for the Alibaba Cloud resources described in Blueprint
-  Section 2.2 — outside of CI, this still runs from a local dev
-  environment only.
+- **No CD, and the IaC has never been applied.** `infra/` now holds
+  Terraform for the Alibaba Cloud resources in Blueprint Section 2.2 — VPC,
+  OSS bucket, RDS PostgreSQL, Redis — and CI runs `terraform fmt` and
+  `terraform validate` against it on every pull request. But **no `plan` or
+  `apply` has ever run against a real account**, compute is deliberately
+  out of scope until someone decides between ECS/ACK/SAE, and nothing
+  deploys: there is still no release pipeline. Outside of CI this runs from
+  a local dev environment only. See `infra/README.md`.
 - **Real Alibaba Cloud OSS is unverified.** The object storage
   integration is proven against local MinIO; whether Alibaba's actual
   S3-compatible surface accepts the same storage-class values, auth

@@ -163,6 +163,38 @@ jobs:
         working-directory: backend
         run: pytest
 
+  infra:
+    name: Infra (terraform fmt + validate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The binary is fetched directly rather than via a setup action so the
+      # version is pinned to something this repository chose, and so the job
+      # has one fewer third-party dependency.
+      - name: Install Terraform
+        run: |
+          curl -fsSL -o /tmp/terraform.zip \
+            https://releases.hashicorp.com/terraform/1.15.9/terraform_1.15.9_linux_amd64.zip
+          sudo unzip -oq /tmp/terraform.zip -d /usr/local/bin
+          terraform version
+
+      - name: Check formatting
+        working-directory: infra
+        run: terraform fmt -check -diff -recursive
+
+      # `validate` is a schema check against the provider, not a call to
+      # Alibaba, so it needs no credentials -- but it does need the provider
+      # registry, which is why this runs here rather than being something a
+      # developer can be relied on to have done. It is the check that catches
+      # a resource or attribute that does not exist.
+      - name: Validate
+        working-directory: infra
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
   frontend:
     name: ${{ matrix.app }} (lint + test + typecheck + build)
     runs-on: ubuntu-latest
