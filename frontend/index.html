@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NASAT LIMS — Staff Console</title>
+    <script>
+      // Applied before first paint: setting data-theme from React instead
+      // would paint the default dark palette first and then swap, flashing
+      // on every load for anyone who chose light. Mirrors readTheme() in
+      // src/theme.ts -- the storage key is repeated here deliberately, and
+      // a test asserts the two agree.
+      (function () {
+        try {
+          var t = localStorage.getItem("nasat-theme");
+          document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
