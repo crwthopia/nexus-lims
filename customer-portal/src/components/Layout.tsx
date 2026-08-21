@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
 import { ThemeToggle } from "./ThemeToggle";
+import { Logo } from "./Logo";
 
 /**
  * One Layout for every page, public and private alike -- Training is
@@ -22,8 +23,8 @@ export function Layout() {
       <header style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
         <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-            <Link to="/" style={{ fontWeight: 700, color: "var(--color-text)", textDecoration: "none" }}>
-              NASAT Labs
+            <Link to="/" style={{ textDecoration: "none" }} aria-label="NexusLIMS home">
+              <Logo />
             </Link>
             <nav style={{ display: "flex", gap: 18 }}>
               {user && (

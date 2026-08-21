@@ -40,8 +40,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **200-test frontend suite** (Vitest + React Testing Library): 150 in the
-  Staff Console and 50 in the Customer Portal — every screen on either side
+- **212-test frontend suite** (Vitest + React Testing Library): 156 in the
+  Staff Console and 56 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -426,6 +426,31 @@ default `get_user` hook hands `request.user` straight to a FK hard-typed to
 history-tracked model. Fixed once, centrally, in
 `apps/accounts/history.py` (`get_history_user`), applied to every
 `HistoricalRecords()` declaration across all 10 apps.
+
+## Brand
+
+The product is **NexusLIMS**; the laboratory it was built for is **NASAT**.
+Two names, and which one belongs in a string depends on what the string is
+about: NexusLIMS goes in product chrome (the header lockup, the browser tab,
+the login card), NASAT stays wherever the text is about the lab itself, as
+in the portal's "Lab testing orders placed with NASAT."
+
+Assets live in [`brand/`](brand/) with their own README — the mark, a
+small-size favicon variant, and a full lockup per background. Inside the
+apps use the `Logo` component instead: the wordmark is live text there, so
+it takes the theme's colours and stays selectable.
+
+**`#06B6D4` is the brand cyan, and it is not usable as text on a light
+ground** — 2.16:1 on the light canvas, below even the 3:1 WCAG allows large
+text. So `--color-brand` is a per-theme token like `--color-primary` and
+`--color-accent` before it, stepping to `#0E7490` (5.36:1 on white) in the
+light theme. The tile keeps the brand cyan in both: a logotype is exempt
+under WCAG SC 1.4.3, and the glyph is heavy enough to read at every size.
+
+`themeTokens.test.tsx` asserts the dark and light blocks define exactly the
+same set of tokens. A token present in one and missing from the other throws
+nothing — the property is simply unset and the browser falls back to the
+inherited colour, which means unreadable text in precisely one theme.
 
 ## Theme
 
@@ -1300,8 +1325,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 200 tests: 150 in
-`frontend/`, 50 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 212 tests: 156 in
+`frontend/`, 56 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client

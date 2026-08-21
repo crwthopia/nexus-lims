@@ -54,7 +54,7 @@ export function Register() {
       >
         <div>
           <h1 style={{ fontSize: "1.3rem", margin: "0 0 4px" }}>Create an account</h1>
-          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.85rem" }}>NASAT Labs Customer Portal</p>
+          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.85rem" }}>Customer Portal</p>
         </div>
         <label className="field">
           Email

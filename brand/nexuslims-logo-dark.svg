@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-label="NexusLIMS — Laboratory Information Management">
+  <title>NexusLIMS</title>
+  <desc>For dark backgrounds. Colours match the dark theme's --color-text, --color-text-muted and --color-brand.</desc>
+  <defs>
+    <linearGradient id="nlTile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38DDEF"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <!--
+    Lockup: mark, wordmark, tagline. "Nexus" takes the ink colour and "LIMS"
+    the brand cyan, the same split NexusCRM uses, so the suite reads as one
+    family and the product name is what changes colour.
+
+    The wordmark is live text in the same system stack the apps set in
+    index.css, not outlines: no font file has to travel with the file, and
+    it stays selectable and searchable. A logo destined for print or for a
+    third party should have this converted to paths first ; see
+    brand/README.md.
+  -->
+  <g transform="translate(0 12)">
+    <rect width="96" height="96" rx="22" fill="url(#nlTile)"/>
+    <g stroke="#fff" stroke-width="7" stroke-linecap="round" fill="none">
+      <path d="M48 30 L29 63"/><path d="M48 30 L67 63"/><path d="M29 63 L67 63"/>
+    </g>
+    <g fill="#fff">
+      <circle cx="48" cy="30" r="10"/><circle cx="29" cy="63" r="10"/><circle cx="67" cy="63" r="10"/>
+    </g>
+  </g>
+  <text x="128" y="62" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="44" font-weight="700" letter-spacing="-0.8">
+    <tspan fill="#E7EDF5">Nexus</tspan><tspan fill="#06B6D4">LIMS</tspan>
+  </text>
+  <text x="130" y="94" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="19" font-weight="400" letter-spacing="0.2" fill="#93A1B3">Laboratory Information Management</text>
+</svg>
