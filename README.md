@@ -40,11 +40,12 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **93-test frontend suite** (Vitest + React Testing Library): 77 in the
+- **118-test frontend suite** (Vitest + React Testing Library): 102 in the
   Staff Console, 16 in the Customer Portal, covering role gating, the
-  route guards, the Sample FSM action set, the Reports screen, Billing,
-  Equipment and Training, the customer report download flow, and the
-  customer MFA step-up — see Frontend test suites below.
+  route guards, the Sample and TrainingSession FSM action sets, payment
+  reconciliation, the Reports screen, Billing, Equipment and Training, the
+  customer report download flow, and the customer MFA step-up — see
+  Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -1196,6 +1197,8 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/BillingList.test.tsx` | `BILLING_WRITE_ROLES` gating the invoice form (a hand-maintained mirror of the server's list); billing an order vs an enrollment sending exactly one of the two; the status filter reaching the API |
 | `frontend/src/pages/EquipmentList.test.tsx` | `EQUIPMENT_WRITE_ROLES` gating both write forms; filtering for `out_of_calibration`, the status FR-E3-02 sets automatically; a reagent's CRM reference and expiry being sent, since FR-C3-02 depends on both |
 | `frontend/src/pages/TrainingList.test.tsx` | `TRAINING_WRITE_ROLES` gating course/session creation and the credit-note control; applying a note posting the typed enrollment; no control offered for an already-applied note; a click with no enrollment posting nothing rather than `NaN` |
+| `frontend/src/pages/InvoiceDetail.test.tsx` | The payment form's two gates (billing role, and not on a void invoice, while staying available on a paid one for reversals); optional `reference_number`/`notes` omitted rather than sent as empty strings; the invoice re-read after recording, since a confirmed payment flips its status server-side |
+| `frontend/src/pages/TrainingSessionDetail.test.tsx` | `TRAINING_SESSION_ACTIONS_BY_STATUS` offering only the legal FSM edges per status; the role gate showing actions disabled with the required role named; per-enrollment complete/cancel offered only while `confirmed`, and posted against the enrollment rather than the session |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
@@ -1214,10 +1217,9 @@ Two things worth knowing before adding more:
   scheduler, not the code under test. `AuthContext.test.tsx`'s logout test
   checks `queryClient.getQueryData(["staff-me"])` for exactly this reason.
 
-Not covered: the remaining Staff Console detail screens (`InvoiceDetail`,
-`InstrumentDetail`, `TrainingSessionDetail`, `DocumentDetail`,
-`InvestigationDetail`) and the Customer Portal's catalog/enrollment/invoice
-screens. Coverage went where server-side rules exist for a screen to drift
+Not covered: the remaining Staff Console detail screens
+(`InstrumentDetail`, `DocumentDetail`, `InvestigationDetail`) and the
+Customer Portal's catalog/enrollment/invoice screens. Coverage went where server-side rules exist for a screen to drift
 from — role gates, FSM action sets, filters, and money-moving controls —
 rather than spreading evenly across every screen. The three
 hand-maintained `*_WRITE_ROLES` constants in `api/types.ts` are each now
