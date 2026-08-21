@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **115-test automated regression suite** (`backend/tests/`, pytest +
+- **119-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -893,16 +893,20 @@ The rules that matter:
 
 **Parsers are registered per `Instrument.model`** via `@register_parser`,
 falling back to the generic CSV reader for anything unregistered. Only the
-generic reader is implemented; see Known gaps for why, and for the
-`TestResult` schema limitation that multi-analyte exports run into. The
-documented interchange format is a header row plus one row per measurement:
+generic reader is implemented; see Known gaps for why. The documented
+interchange format is a header row plus one row per measurement:
 
 ```csv
-value,unit,data_type
-0.42,mg/L,float
+analyte,value,unit,data_type
+Lead,0.42,mg/L,float
 ```
 
-`value` is required; `unit` defaults to empty and `data_type` to `float`.
+`value` is required; `analyte`, `unit` and `data_type` are optional, the
+last defaulting to `float`. `analyte` names the parameter each row measures
+and is what makes a multi-analyte export usable — an ICP-MS run reporting
+twelve elements becomes twelve *labelled* results against one
+`TestRequest`. Leave it blank for a single-parameter method, where the
+method name already says what was measured.
 Headers are matched case- and whitespace-insensitively, and a UTF-8 BOM is
 tolerated because instrument software on Windows writes one often enough
 that failing on it would make the feature look broken.
@@ -1104,7 +1108,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-115 tests, organized by behavior rather than by app:
+119 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1278,11 +1282,6 @@ Genuinely not built yet, not just undocumented:
   and fails on first contact with the instrument. Registering one is a
   decorator on a function once real export files exist to write it
   against.
-- **`TestResult` has no analyte/parameter name field.** One `TestRequest`
-  is one `TestMethod`, so a multi-analyte export (an ICP-MS run reporting
-  twelve elements) has nowhere to record *which* element each row is.
-  Multi-analyte runs currently need splitting into one file per analyte.
-  Closing this is a schema change, not a parser change.
 - **`/my/orders/` and `/my/samples/` are still read-only.** Customers can
   self-enroll in training (`POST /my/enrollments/`) and apply their own
   credit notes, but there's no customer-initiated *order* creation yet —

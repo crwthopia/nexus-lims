@@ -100,7 +100,7 @@ def parser_for(instrument):
 
 
 REQUIRED_COLUMNS = {"value"}
-OPTIONAL_COLUMNS = {"unit", "data_type"}
+OPTIONAL_COLUMNS = {"analyte", "unit", "data_type"}
 
 
 def parse_generic_csv(content, test_method):
@@ -108,18 +108,17 @@ def parse_generic_csv(content, test_method):
     The documented interchange format: a header row, then one row per
     measurement.
 
-        value,unit,data_type
-        0.42,mg/L,float
+        analyte,value,unit,data_type
+        Lead,0.42,mg/L,float
 
     `value` is required; `unit` defaults to empty and `data_type` to float,
     which is what a numeric instrument export almost always is.
 
-    Note a real schema limitation rather than a parser one: TestResult has
-    no analyte/parameter name field, so a multi-analyte export (an ICP-MS
-    run reporting twelve elements) cannot record *which* element each row
-    is. One TestRequest is one TestMethod. Until the schema grows that
-    field, split multi-analyte runs into one file per analyte, or the
-    reported values lose their labels.
+    `analyte` names the parameter each row measures, which is what makes a
+    multi-analyte export usable: an ICP-MS run reporting twelve elements
+    becomes twelve labelled results against one TestRequest. It stays
+    optional because a single-parameter method (pH, say) has nothing to
+    disambiguate -- the method name already says what was measured.
     """
     try:
         text = content.decode("utf-8-sig")
@@ -168,6 +167,7 @@ def parse_generic_csv(content, test_method):
 
         parsed.append(
             {
+                "analyte": normalised.get("analyte", ""),
                 "data_type": data_type,
                 "value": value,
                 "unit": normalised.get("unit", ""),

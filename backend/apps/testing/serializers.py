@@ -46,7 +46,7 @@ class TestResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestResult
         fields = [
-            "id", "test_request", "data_type", "value", "unit", "entered_by", "entered_by_display_name",
+            "id", "test_request", "analyte", "data_type", "value", "unit", "entered_by", "entered_by_display_name",
             "entered_at", "is_out_of_spec", "instrument", "standard_reagents", "raw_file_id", "raw_file_checksum_sha256",
         ]
         read_only_fields = ["id", "entered_by", "entered_at", "is_out_of_spec"]

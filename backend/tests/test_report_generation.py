@@ -119,6 +119,24 @@ def test_a_coa_renders_the_sample_and_its_results():
     assert "≤ 1.1" in html
 
 
+def test_a_multi_analyte_coa_labels_each_row():
+    # The reason the analyte field exists reaches the document: a COA listing
+    # twelve numbers without saying which element each one is would be
+    # unusable to the customer receiving it.
+    sample = approved_sample()
+    method = TestMethodFactory(name="Heavy Metals (ICP-MS)")
+    request = TestRequestFactory(sample=sample, test_method=method)
+    TestResultFactory(test_request=request, analyte="Lead", value="0.4", unit="mg/L")
+    TestResultFactory(test_request=request, analyte="Cadmium", value="0.1", unit="mg/L")
+    report = make_report(sample=sample)
+
+    html = render_report_html(report, build_report_context(report))
+
+    assert "Lead" in html
+    assert "Cadmium" in html
+    assert "Parameter" in html  # the column header
+
+
 def test_an_out_of_spec_result_is_marked_in_the_document():
     # A COA that doesn't distinguish an OOS result from a passing one is
     # actively misleading, so assert it on the rendered output.

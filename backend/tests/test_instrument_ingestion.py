@@ -65,6 +65,33 @@ def test_a_well_formed_export_becomes_results():
     assert all(r["data_type"] == TestResult.DataType.FLOAT for r in rows)
 
 
+def test_a_multi_analyte_export_keeps_each_row_labelled():
+    """
+    The case the analyte field exists for: one TestRequest, one TestMethod,
+    twelve elements. Without the label these are twelve unattributable
+    numbers on a certificate.
+    """
+    method = TestMethodFactory(specification_limits={"max": 1.0})
+
+    rows = parse_generic_csv(
+        b"analyte,value,unit\nLead,0.4,mg/L\nCadmium,9.9,mg/L\nMercury,0.1,mg/L\n", method
+    )
+
+    assert [r["analyte"] for r in rows] == ["Lead", "Cadmium", "Mercury"]
+    # The OOS rule still applies per row, independent of the label.
+    assert [r["is_out_of_spec"] for r in rows] == [False, True, False]
+
+
+def test_analyte_is_optional_for_a_single_parameter_method():
+    # A pH method reports one number; the method name already says what was
+    # measured, so requiring a label would be noise.
+    method = TestMethodFactory()
+
+    rows = parse_generic_csv(b"value,unit\n7.2,pH\n", method)
+
+    assert rows[0]["analyte"] == ""
+
+
 def test_out_of_spec_is_computed_from_the_method_not_the_file():
     # The instrument does not get a vote: the limit comes from TestMethod.
     method = TestMethodFactory(specification_limits={"max": 1.0})
@@ -160,6 +187,23 @@ def test_ingesting_creates_results_linked_to_the_stored_file(login_as_staff, oss
     assert {r.raw_file_checksum_sha256 for r in results} == {body["checksum_sha256"]}
     assert body["checksum_sha256"] == hashlib.sha256(b"value,unit\n0.4,mg/L\n9.9,mg/L\n").hexdigest()
     assert sorted(r.is_out_of_spec for r in results) == [False, True]
+
+
+def test_ingesting_a_multi_analyte_file_persists_the_labels(login_as_staff, oss_bucket):
+    method = TestMethodFactory(specification_limits={"max": 1.0})
+    test_request = TestRequestFactory(test_method=method)
+    client = login_as_staff(certified_analyst(method))
+
+    response = client.post(
+        f"/api/v1/test-requests/{test_request.pk}/ingest/",
+        {"file": csv_upload("analyte,value,unit\nLead,0.4,mg/L\nCadmium,9.9,mg/L\n")},
+    )
+
+    assert response.status_code == 201
+    stored = {r.analyte: r for r in test_request.results.all()}
+    assert set(stored) == {"Lead", "Cadmium"}
+    assert stored["Cadmium"].is_out_of_spec is True
+    assert stored["Lead"].is_out_of_spec is False
 
 
 def test_an_uncertified_analyst_cannot_ingest(login_as_staff):
