@@ -1,11 +1,14 @@
 # NexusLIMS brand assets
 
-The product is **NexusLIMS**. The lab it was built for is **NASAT** — those
-are two different names, and the distinction decides which one belongs in a
-given string. NexusLIMS goes in product chrome: the header lockup, the
-browser tab, the login card. NASAT stays wherever the text is about the
-laboratory itself, as in the customer portal's "Lab testing orders placed
-with NASAT."
+The product is **NexusLIMS**, and that is the name in every string a person
+reads: the header lockup, the browser tab, the login card, the emails, the
+authenticator entry, the report PDFs.
+
+`NASAT` still appears in the tree, but never as copy — only as
+infrastructure identifiers (the database and role, the storage bucket, the
+theme storage key), in migrations, and in engineering comments where it
+names the laboratory as an actor rather than the software. See the root
+README's Brand section for the full rule.
 
 ## Files
 

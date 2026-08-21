@@ -75,7 +75,7 @@ def check_session_capacity():
                     )
 
                 send_mail(
-                    subject=f"NASAT Labs: {session.course.title} session rescheduled",
+                    subject=f"NexusLIMS: {session.course.title} session rescheduled",
                     message=(
                         f"The {session.course.title} session scheduled for "
                         f"{session.start_date:%Y-%m-%d} did not meet the minimum enrollment "

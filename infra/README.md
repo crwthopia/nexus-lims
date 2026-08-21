@@ -1,6 +1,6 @@
 # Infrastructure (Blueprint Section 2.2)
 
-Terraform for the Alibaba Cloud resources NASAT LIMS needs. **Nothing here
+Terraform for the Alibaba Cloud resources NexusLIMS needs. **Nothing here
 has been applied against a real account.** See "What is verified" below
 before trusting it.
 

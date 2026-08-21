@@ -1,5 +1,5 @@
 """
-Django settings for NASAT LIMS.
+Django settings for NexusLIMS.
 
 This settings module targets PostgreSQL on Alibaba Cloud ApsaraDB RDS (Manila
 region, ap-southeast-6) per Blueprint Section 2.2, with Redis-backed Celery
@@ -53,7 +53,7 @@ INSTALLED_APPS = [
     "django_fsm",  # django-fsm-2 (the maintained fork) keeps the original module name
     "simple_history",
     "django_auth_adfs",  # ships templates/django_auth_adfs/login_failed.html; needs APP_DIRS discovery
-    # NASAT LIMS apps, one per ASTM function-map domain (Blueprint Section 10)
+    # NexusLIMS apps, one per ASTM function-map domain (Blueprint Section 10)
     "apps.accounts",
     "apps.samples",
     "apps.testing",

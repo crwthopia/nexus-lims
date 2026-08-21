@@ -8,7 +8,7 @@ export function Orders() {
     <div>
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>My Orders</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>Lab testing orders placed with NASAT.</p>
+        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>Lab testing orders placed through NexusLIMS.</p>
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>

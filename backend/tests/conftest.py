@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for the NASAT LIMS test suite.
+Shared pytest fixtures for the NexusLIMS test suite.
 
 Staff auth uses client.force_login(..., backend=...) rather than DRF's
 force_authenticate(): force_authenticate only patches the DRF-wrapped
