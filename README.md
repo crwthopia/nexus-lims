@@ -40,11 +40,11 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **64-test frontend suite** (Vitest + React Testing Library): 48 in the
+- **93-test frontend suite** (Vitest + React Testing Library): 77 in the
   Staff Console, 16 in the Customer Portal, covering role gating, the
-  route guards, the Sample FSM action set, the Reports screen, the
-  customer report download flow, and the customer MFA step-up — see
-  Frontend test suites below.
+  route guards, the Sample FSM action set, the Reports screen, Billing,
+  Equipment and Training, the customer report download flow, and the
+  customer MFA step-up — see Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -1193,6 +1193,9 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
 | `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
+| `frontend/src/pages/BillingList.test.tsx` | `BILLING_WRITE_ROLES` gating the invoice form (a hand-maintained mirror of the server's list); billing an order vs an enrollment sending exactly one of the two; the status filter reaching the API |
+| `frontend/src/pages/EquipmentList.test.tsx` | `EQUIPMENT_WRITE_ROLES` gating both write forms; filtering for `out_of_calibration`, the status FR-E3-02 sets automatically; a reagent's CRM reference and expiry being sent, since FR-C3-02 depends on both |
+| `frontend/src/pages/TrainingList.test.tsx` | `TRAINING_WRITE_ROLES` gating course/session creation and the credit-note control; applying a note posting the typed enrollment; no control offered for an already-applied note; a click with no enrollment posting nothing rather than `NaN` |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
@@ -1211,11 +1214,15 @@ Two things worth knowing before adding more:
   scheduler, not the code under test. `AuthContext.test.tsx`'s logout test
   checks `queryClient.getQueryData(["staff-me"])` for exactly this reason.
 
-Not covered: the remaining 14 Staff Console screens beyond `SampleDetail`,
-and the Customer Portal's catalog/enrollment/invoice screens. The suite
-deliberately starts at the two places bugs have actually come from — the
-role/FSM gating, and the auth wiring — rather than spreading thin across
-every screen.
+Not covered: the remaining Staff Console detail screens (`InvoiceDetail`,
+`InstrumentDetail`, `TrainingSessionDetail`, `DocumentDetail`,
+`InvestigationDetail`) and the Customer Portal's catalog/enrollment/invoice
+screens. Coverage went where server-side rules exist for a screen to drift
+from — role gates, FSM action sets, filters, and money-moving controls —
+rather than spreading evenly across every screen. The three
+hand-maintained `*_WRITE_ROLES` constants in `api/types.ts` are each now
+pinned by tests, since their own comments admit they are copies of the
+server's lists kept in sync by hand.
 
 ## Continuous integration
 
@@ -1265,7 +1272,7 @@ exactly what the lockfile pins and never rewrites it, so CI can't drift
 
 Genuinely not built yet, not just undocumented:
 
-- **No QA-authored report templates, and no Reports screen.** The PDF
+- **No QA-authored report templates.** The PDF
   pipeline itself is built (see Report PDF generation above), but the five
   templates it renders are pipeline placeholders carrying a "DRAFT
   TEMPLATE — not valid for issue" banner; the real layouts are QA's to
