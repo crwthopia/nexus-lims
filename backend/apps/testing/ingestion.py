@@ -64,9 +64,33 @@ def compute_out_of_spec(test_method, data_type, value):
         numeric_value = float(value)
     except (TypeError, ValueError):
         return False
-    if "min" in limits and numeric_value < limits["min"]:
+
+    # A malformed limit refuses the result rather than skipping the check.
+    # Comparing a float against a non-numeric limit raises TypeError, so a
+    # TestMethod carrying {"min": "abc"} used to make every result entry and
+    # every file ingestion for that method a 500 -- a stored payload that
+    # broke a whole method until someone corrected the data. Degrading to
+    # "no limit" instead would be worse than the crash: the result would
+    # enter the record unflagged, which is precisely the outcome FR-C3-08
+    # exists to prevent. TestMethodSerializer validates limits on the way
+    # in; this guards rows written before that existed, and any written
+    # around the API.
+    bounds = {}
+    for key in ("min", "max"):
+        if key not in limits:
+            continue
+        try:
+            bounds[key] = float(limits[key])
+        except (TypeError, ValueError):
+            raise IngestionError(
+                f"Test method '{test_method.name}' has a malformed specification "
+                f"limit: '{key}' is {limits[key]!r}, which is not a number. A result "
+                f"cannot be checked against it. Correct the method before entering results."
+            ) from None
+
+    if "min" in bounds and numeric_value < bounds["min"]:
         return True
-    if "max" in limits and numeric_value > limits["max"]:
+    if "max" in bounds and numeric_value > bounds["max"]:
         return True
     return False
 

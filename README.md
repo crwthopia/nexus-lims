@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **194-test automated regression suite** (`backend/tests/`, pytest +
+- **217-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
@@ -877,6 +877,32 @@ an FSM guard rejected the request before the body was ever read. Anything
 checking this has to put the object into the state that lets execution reach
 the body, which is what `test_malformed_request_bodies.py` does.
 
+### Past shape and type: input that is nonsense anyway
+
+A third tier sits past both of those — input that passes every type check
+and still describes something that cannot be true. `test_semantic_invariants
+.py` covers it, and the line it draws is worth stating, because it is a line
+about authority rather than about code:
+
+**A value is refused when no reading of the business makes it valid, and
+left alone when refusing it would be inventing policy.** A negative invoice
+is the first kind — money owed *to* a customer sitting in the column that
+means money owed *by* them, when `CreditNote` already exists for that. A
+zero invoice is the second: a fully discounted enrollment is a real thing to
+bill at 0.00, and blocking it would be a business decision made by whoever
+happened to be editing a serializer.
+
+The consequential find was `TestMethod.specification_limits`. It is a
+JSONField, so it accepted `{"min": "abc"}` and stored it cleanly — and then
+every result entry and every file ingestion for that method raised
+`TypeError` comparing a float to a string. One bad write broke a whole test
+method until somebody corrected the data. It is now validated on the way in,
+and `compute_out_of_spec` refuses a malformed limit rather than skipping the
+check, because degrading to "no limit" would be worse than the crash it
+replaces: the result would enter the record *unflagged*, which is exactly
+what FR-C3-08 exists to prevent. A min above its max is the quieter half —
+nothing crashes, and every result the method ever produces comes out flagged.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -1179,7 +1205,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-194 tests, organized by behavior rather than by app:
+217 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1201,6 +1227,7 @@ pytest
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
 | `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection, trailing delimiter tolerated, ragged and over-length rows refused as 400s rather than 500s); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
+| `test_semantic_invariants.py` | Well-typed input that is nonsense anyway: unusable `specification_limits` (non-numeric, or a min above its max) refused on write and refused again at result entry for rows already carrying them; a calibration due before it was performed or performed in the future; a session ending before it starts or with a minimum above its capacity; a negative invoice. Each paired with the boundary case that must still be accepted (same-day calibration, single-day session, minimum equal to capacity, zero invoice) |
 | `test_malformed_request_bodies.py` | A non-object JSON body (array, string, null, number) is a 400 on every write route, walked from the router rather than listed; the five hand-rolled actions that read `request.data` as a dict individually pinned, including the customer-reachable credit-note apply; a bodyless POST still works and a long review comment is still accepted |
 | `test_malformed_request_params.py` | Every numeric query-string filter across eight apps returns 400 rather than 500 for a non-numeric id, still filters for a valid one, ignores an empty one, and treats `0` as a filter rather than as "no filter"; over-length and non-string chain-of-custody locations refused before Postgres sees them |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
@@ -1361,6 +1388,30 @@ exactly what the lockfile pins and never rewrites it, so CI can't drift
 ## Known gaps / next steps
 
 Genuinely not built yet, not just undocumented:
+
+- **Five business rules are deliberately unenforced, pending NASAT's
+  decision.** The semantic sweep (see "Past shape and type" above) refused
+  everything internally contradictory and stopped there. These five are
+  each defensible in both directions, so a developer picking one would be
+  writing policy rather than enforcing it:
+  - **Staff can enroll past a session's capacity, and into a cancelled or
+    completed session.** The *customer* path already refuses both
+    (`CustomerEnrollmentSerializer.validate_session`); the staff path does
+    not. Whether a coordinator registering a walk-in should be able to
+    override capacity, or backfill attendance onto a session that has
+    finished, is a question about how NASAT actually runs its front desk.
+  - **The same customer can enroll twice in one session.** Refusing
+    outright would break a legitimate re-enrollment after a cancellation;
+    doing it properly means deciding which prior states block a new
+    enrollment.
+  - **A session may be created with a capacity of zero.** Nonsense as a
+    live session, plausible as a draft awaiting a room booking.
+  - **An invoice may be issued for 0.00.** A fully discounted or fully
+    credit-noted enrollment is a real thing to bill at zero.
+  - **A payment may be recorded against a void invoice.** The code already
+    declines to mark a void invoice paid, so the case was thought about;
+    whether recording the payment at all should be refused is a
+    reconciliation question.
 
 - **No QA-authored report templates.** The PDF
   pipeline itself is built (see Report PDF generation above), but the five
