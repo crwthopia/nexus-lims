@@ -40,6 +40,17 @@ Thumbs.db
 # Logs
 *.log
 
+# Terraform (infra/). State can contain database passwords in plain text,
+# and .terraform/ holds downloaded provider binaries.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions
+# and hashes, and belongs in version control so every machine and CI run
+# resolves the same provider build.
+
 # Test artifacts
 .pytest_cache/
 htmlcov/
