@@ -1,6 +1,6 @@
-# NASAT Labs — Customer Portal
+# NexusLIMS — Customer Portal
 
-React + TypeScript + Vite frontend for the NASAT LIMS Customer Portal
+React + TypeScript + Vite frontend for the NexusLIMS Customer Portal
 (Blueprint Section 2.1 item 1, the second of the two segregated-identity
 frontends — see [`frontend/`](../frontend) for the Staff Console). See the
 repo root [`README.md`](../README.md#customer-portal-react-frontend) for the

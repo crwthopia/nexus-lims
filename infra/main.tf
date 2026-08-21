@@ -1,5 +1,5 @@
 /**
- * NASAT LIMS infrastructure (Blueprint Section 2.2).
+ * NexusLIMS infrastructure (Blueprint Section 2.2).
  *
  * Provisions the four things the application cannot run without: object
  * storage for reports and raw instrument exports, a PostgreSQL database,

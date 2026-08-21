@@ -160,7 +160,10 @@ def test_every_report_type_has_a_template():
 
         html = render_report_html(report, build_report_context(report))
 
-        assert "NASAT" in html
+        # The product name, which every template inherits from _base.html.
+        # Its absence means the type resolved to something that is not one
+        # of ours, which is the failure this walk exists to catch.
+        assert "NexusLIMS" in html
 
 
 def test_an_unknown_report_type_raises_rather_than_falling_back():

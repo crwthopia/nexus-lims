@@ -1,9 +1,9 @@
-# NASAT LIMS
+# NexusLIMS
 
 A working Django/DRF backend, plus both React/TypeScript frontends the
-Blueprint calls for — a Staff Console and a Customer Portal — for the
-NASAT Laboratory Information Management System, built directly from the
-locked-in decisions in the NASAT LIMS Blueprint (all 12 gaps in Blueprint
+Blueprint calls for — a Staff Console and a Customer Portal. **NexusLIMS**
+is a laboratory information management system, built directly from the
+locked-in decisions in the NexusLIMS Blueprint (all 12 gaps in Blueprint
 Section 13 resolved). This is not a schema mockup — every piece described
 below has been exercised against a live PostgreSQL 18 database, a live
 Redis broker, a live S3-compatible object store, and (for staff SSO) a
@@ -76,7 +76,7 @@ was invented outside that grounding.
 ## What is in this package
 
 ```
-nasat-lims/
+nexus-lims/
 ├── README.md                  <- this file
 ├── nasat_erd_core.png         <- rendered ERD: core sample-to-report workflow (12 entities)
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
@@ -429,11 +429,24 @@ history-tracked model. Fixed once, centrally, in
 
 ## Brand
 
-The product is **NexusLIMS**; the laboratory it was built for is **NASAT**.
-Two names, and which one belongs in a string depends on what the string is
-about: NexusLIMS goes in product chrome (the header lockup, the browser tab,
-the login card), NASAT stays wherever the text is about the lab itself, as
-in the portal's "Lab testing orders placed with NASAT."
+**Everything a person reads says NexusLIMS** — the header lockup, the browser
+tab, the login card, verification and rescheduling emails, the authenticator
+entry a customer enrols, and the generated report PDFs.
+
+Three kinds of `NASAT` survive in the tree on purpose, and none of them is
+copy:
+
+- **Infrastructure identifiers**: the Postgres database and role
+  (`nasat_lims`), the object-storage bucket (`nasat-lims-dev`), the Celery
+  app name, the `nasat_datetime` Jinja filter, and the `nasat-theme`
+  localStorage key. Renaming any of these is a migration with downtime, not
+  a copy change, and nobody sees them. The theme key is the sharpest: rename
+  it and every user's saved theme silently resets on their next visit.
+- **Migrations.** Applied history is never edited.
+- **NASAT as an actor** — "per NASAT's stated decision", "NASAT QA authors
+  the templates", "NASAT's accredited methods". These describe a laboratory
+  making decisions, and substituting a product name would make the sentence
+  false.
 
 Assets live in [`brand/`](brand/) with their own README — the mark, a
 small-size favicon variant, and a full lockup per background. Inside the

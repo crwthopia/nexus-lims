@@ -1,8 +1,8 @@
-# NASAT LIMS — Instrument Export CSV Format
+# NexusLIMS — Instrument Export CSV Format
 
 **Version 1 · Interchange format for instrument raw-data ingestion**
 
-This document specifies the CSV file format the NASAT LIMS accepts as an
+This document specifies the CSV file format NexusLIMS accepts as an
 instrument export. It is written to be handed to an instrument vendor, an
 integrator, or whoever configures the export template in the instrument's own
 software.
@@ -123,8 +123,8 @@ would skip the out-of-spec check entirely and enter the record as in-spec.
 
 If your instrument emits `<0.01`, `n/a`, `ND`, `--`, or `LOD` for a
 non-detect, you must either send it with `data_type` of `text` (in which case
-no out-of-spec check applies) or agree a numeric convention with NASAT QA
-first. Do not send it as `float`.
+no out-of-spec check applies) or agree a numeric convention with the lab's
+QA team first. Do not send it as `float`.
 
 ---
 
@@ -279,7 +279,7 @@ before it can be written:
    whether the file can contain more than one run.
 
 Until then the generic CSV path above is fully supported, and every
-instrument in NASAT's register can export to it from its own software.
+instrument in the register can export to it from its own software.
 
 ---
 

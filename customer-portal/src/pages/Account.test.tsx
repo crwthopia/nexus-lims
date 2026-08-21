@@ -17,7 +17,7 @@ import { customerUser, renderWithProviders, stubApi } from "../test/helpers";
 
 const PROVISIONING = {
   secret: "JBSWY3DPEHPK3PXP",
-  provisioning_uri: "otpauth://totp/NASAT:client@example.test?secret=JBSWY3DPEHPK3PXP",
+  provisioning_uri: "otpauth://totp/NexusLIMS:client@example.test?secret=JBSWY3DPEHPK3PXP",
 };
 
 function render(user = customerUser(), extra = {}) {

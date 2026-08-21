@@ -68,9 +68,9 @@ def send_verification_email(customer):
     token = generate_email_verification_token(customer)
     verify_url = f"{settings.CUSTOMER_PORTAL_BASE_URL}/verify-email?token={token}"
     send_mail(
-        subject="Verify your NASAT Labs account",
+        subject="Verify your NexusLIMS account",
         message=(
-            f"Welcome to NASAT Labs. Verify your email to activate your account:\n\n"
+            f"Welcome to NexusLIMS. Verify your email to activate your account:\n\n"
             f"{verify_url}\n\n"
             f"(Raw token, valid {settings.CUSTOMER_EMAIL_VERIFICATION_MAX_AGE_SECONDS // 3600}h: {token})"
         ),
@@ -137,7 +137,7 @@ def generate_mfa_secret(customer):
     secret = pyotp.random_base32()
     customer.mfa_secret = secret
     customer.save(update_fields=["mfa_secret", "updated_at"])
-    provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(name=customer.email, issuer_name="NASAT Labs")
+    provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(name=customer.email, issuer_name="NexusLIMS")
     return secret, provisioning_uri
 
 

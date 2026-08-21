@@ -1,6 +1,6 @@
-# NASAT LIMS — Staff Console
+# NexusLIMS — Staff Console
 
-React + TypeScript + Vite frontend for the NASAT LIMS Staff Console
+React + TypeScript + Vite frontend for the NexusLIMS Staff Console
 (Blueprint Section 2.1 item 1). See the repo root [`README.md`](../README.md#staff-console-react-frontend)
 for the full picture — architecture decisions, the login-flow port hop,
 CSRF setup, and what's verified live vs. not yet built.
