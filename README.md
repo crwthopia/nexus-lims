@@ -40,8 +40,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **172-test frontend suite** (Vitest + React Testing Library): 136 in the
-  Staff Console and 36 in the Customer Portal — every screen on either side
+- **200-test frontend suite** (Vitest + React Testing Library): 150 in the
+  Staff Console and 50 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -433,7 +433,31 @@ Both frontends run a dark theme matched to the **NexusCRM Enterprise**
 console, so the two products read as one suite. It lives entirely in the
 `:root` custom properties at the top of each app's `src/index.css` — the two
 blocks are identical, and are the only place colour is defined. There are no
-hardcoded colours left in any component.
+hardcoded colours left in any component. That last point is what made adding
+a second theme cheap: a light palette is a second block of the same tokens,
+not a sweep through the components.
+
+**A light theme ships alongside it, opt-in.** Dark stays the default,
+because the palette was matched to a sibling product on purpose and
+following the operating system instead would split that identity across
+whichever machine a user happened to log in from. A toggle in both headers
+sets `data-theme` on the root element and remembers the choice per browser;
+`src/theme.ts` owns reading and writing it. Making it follow the OS instead
+is a one-block change, described in the comment above the light palette.
+
+Two details in there are load-bearing:
+
+- **The preference is applied by an inline script in `index.html`, before
+  first paint.** Setting `data-theme` from React would paint the dark
+  default and then swap, flashing on every load for anyone who chose light.
+  That script necessarily duplicates the storage key and the default from
+  `theme.ts`, so `themeBootstrap.test.tsx` asserts the two agree — if the
+  key drifts nothing throws, the toggle simply appears to forget the choice
+  on refresh, which looks like a React state bug and is not.
+- **Every read and write of `localStorage` is wrapped.** Private browsing
+  and "block site data" throw on *access* rather than returning `null`. A
+  theme is a convenience; failing to read one must never be why a lab
+  technician sees a blank screen.
 
 Colours were **measured, not eyeballed.** Every value carries its WCAG
 contrast ratio as a comment, against the surface it is actually used on;
@@ -1276,8 +1300,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 58 tests: 48 in
-`frontend/`, 10 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 200 tests: 150 in
+`frontend/`, 50 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client

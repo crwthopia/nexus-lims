@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
+import { ThemeToggle } from "./ThemeToggle";
 
 /**
  * One Layout for every page, public and private alike -- Training is
@@ -57,6 +58,10 @@ export function Layout() {
             </nav>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Outside the auth branches: a visitor reading the public course
+                catalogue can choose a theme too, and it persists into the
+                session they may go on to create. */}
+            <ThemeToggle />
             {!isLoading && user && (
               <>
                 <Link to="/account" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", textDecoration: "none" }}>

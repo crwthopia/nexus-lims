@@ -62,6 +62,75 @@
   color-scheme: dark;
 }
 
+/*
+ * Light theme. Opt-in: dark stays the default, because the palette above was
+ * matched to the NexusCRM Enterprise console so the two products read as one
+ * suite, and following the operating system instead would split that identity
+ * across whichever machine a user happened to log in from. The toggle in the
+ * header sets data-theme and remembers the choice. To follow the OS instead,
+ * wrap this block in @media (prefers-color-scheme: light) guarded as
+ * :root:not([data-theme="dark"]) and keep this one for the explicit choice.
+ *
+ * Same measuring discipline as the dark palette: every ratio below is real,
+ * computed against the surface the colour is actually used on, and nothing is
+ * below AA. The two-token accent split survives the flip for the same reason
+ * it exists -- a blue dark enough to read as link text on white is too dark
+ * to be a comfortable button fill, so --color-accent is deeper than
+ * --color-primary here, exactly inverting the dark theme's relationship.
+ */
+:root[data-theme="light"] {
+  /* Surfaces. Inverted in role, not merely in value: the card is the lightest
+     thing on screen and the canvas sits behind it, where in dark the canvas is
+     darkest and cards lift off it. */
+  --color-bg: #eef2f7;            /* app canvas */
+  --color-surface: #ffffff;       /* cards, panels */
+  --color-surface-hover: #eef2f7; /* row/button hover -- sinks towards the
+                                     canvas, which is the light-theme
+                                     equivalent of the dark theme's lift */
+  --color-border: #d7dfea;
+  --color-border-strong: #7c8ba1; /* 3.46:1 on surface (WCAG 1.4.11) */
+
+  /* Text. */
+  --color-text: #0e1620;          /* 18.19:1 on surface */
+  --color-text-muted: #586a80;    /* 5.54:1 on surface, 4.93:1 on canvas */
+
+  /* Primary blue: fill vs text, inverted from dark -- see the note above. */
+  --color-primary: #2a5fd8;       /* white label on it: 5.63:1 */
+  --color-primary-dark: #2450bb;  /* fill hover; deepens, white label 7.14:1 */
+  --color-accent: #1f52c9;        /* links, active nav: 6.76:1 on surface */
+
+  /* Semantic pairs: a deep foreground on a pale tint of the same hue. */
+  --color-danger: #bd2f26;        /* 5.84:1 on surface */
+  --color-danger-bg: #fdeceb;     /* danger fg on it: 5.11:1 */
+  --color-danger-fill: #c2372c;   /* white label: 5.42:1 (unchanged from dark:
+                                     a saturated mid-red carries white on
+                                     either ground) */
+  --color-danger-fill-hover: #a82b21;
+  --color-success: #0d7346;       /* 5.90:1 on surface */
+  --color-success-bg: #e4f5ec;    /* success fg on it: 5.22:1 */
+  --color-warning: #875200;       /* 6.49:1 on surface. Amber cannot carry AA
+                                     as text on white at any recognisably
+                                     "warning" lightness, so this goes brown-
+                                     amber; the pale tint behind it keeps the
+                                     badge legible as a warning. */
+  --color-warning-bg: #fcf1dd;    /* warning fg on it: 5.80:1 */
+
+  /* Sample status badges, measured against their own -bg as in dark. */
+  --color-status-neutral: #455468;    /* 6.44:1 on its bg */
+  --color-status-neutral-bg: #e6ebf2;
+  --color-status-muted: #5d6b7d;      /* 4.54:1 on status-neutral-bg, which is
+                                         what StatusBadge pairs it with -- the
+                                         lowest in this theme, as in dark, and
+                                         only used for `disposed` */
+  --color-status-info: #1a54a8;       /* 6.18:1 on its bg */
+  --color-status-info-bg: #e3edfb;
+  --color-status-review: #5b3fb8;     /* 6.21:1 on its bg */
+  --color-status-review-bg: #eee9fc;
+
+  /* Makes the UA style native controls, scrollbars and the like light. */
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }

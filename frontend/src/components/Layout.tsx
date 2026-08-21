@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Layout() {
   const { user, logout, hasRole } = useAuth();
@@ -88,6 +89,7 @@ export function Layout() {
                   {user.roles.map((r) => r.name).join(", ") || "no roles assigned"}
                 </div>
               </div>
+              <ThemeToggle />
               <button className="btn" onClick={handleLogout}>
                 Log out
               </button>
