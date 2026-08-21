@@ -172,3 +172,38 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   paid: "Paid",
   void: "Void",
 };
+
+export type ReportType =
+  | "failure_analysis_coa"
+  | "water_environmental_coa"
+  | "training_cpd_certificate"
+  | "custom";
+
+export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  failure_analysis_coa: "Certificate of Analysis — Failure Analysis",
+  water_environmental_coa: "Certificate of Analysis — Water/Environmental",
+  training_cpd_certificate: "CPD Certificate",
+  custom: "Laboratory Report",
+};
+
+/**
+ * The customer-facing shape of a report (GET /my/reports/). Narrower than the
+ * Staff Console's: no file_id, no generated_by, no failure_reason -- the API
+ * doesn't send them, deliberately. Only `ready` reports are ever returned, so
+ * there is no status to branch on here.
+ */
+export interface MyReport {
+  id: number;
+  sample: number | null;
+  sample_code: string | null;
+  order: number | null;
+  report_type: ReportType;
+  status: "ready";
+  generated_at: string;
+  version: number;
+}
+
+export interface ReportDownload {
+  url: string;
+  expires_in: number;
+}

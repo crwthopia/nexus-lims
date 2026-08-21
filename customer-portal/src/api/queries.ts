@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
-import type { CreditNote, Enrollment, Invoice, Order, Paginated, Sample, TrainingCourse, TrainingSession } from "./types";
+import type {
+  CreditNote,
+  Enrollment,
+  Invoice,
+  MyReport,
+  Order,
+  Paginated,
+  ReportDownload,
+  Sample,
+  TrainingCourse,
+  TrainingSession,
+} from "./types";
 
 export function useMyOrders() {
   return useQuery({
@@ -74,5 +85,24 @@ export function useMyInvoices() {
   return useQuery({
     queryKey: ["my-invoices"],
     queryFn: () => apiGet<Paginated<Invoice>>("/my/invoices/"),
+  });
+}
+
+export function useMyReports() {
+  return useQuery({
+    queryKey: ["my-reports"],
+    queryFn: () => apiGet<Paginated<MyReport>>("/my/reports/"),
+  });
+}
+
+/**
+ * Fetches a fresh presigned URL at click time rather than one per row on
+ * load. The links expire (15 minutes by default, see the backend's
+ * OSS_PRESIGNED_URL_EXPIRY_SECONDS), so minting them up front means a link
+ * that silently 403s on a page left open over lunch.
+ */
+export function useReportDownloadUrl() {
+  return useMutation({
+    mutationFn: (reportId: number) => apiGet<ReportDownload>(`/my/reports/${reportId}/download/`),
   });
 }

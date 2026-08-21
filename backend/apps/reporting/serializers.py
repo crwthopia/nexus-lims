@@ -54,3 +54,26 @@ class ReportSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["generated_by"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class CustomerReportSerializer(serializers.ModelSerializer):
+    """
+    The customer-facing view of a Report (GET /my/reports/).
+
+    A deliberately narrower field set than ReportSerializer: `file_id` is an
+    internal object-storage key and `generated_by` names a member of NASAT
+    staff -- neither is something a customer needs, and both leak detail
+    about how the lab is run. The document itself comes from the download
+    endpoint, which mints a presigned URL rather than exposing the key.
+
+    `failure_reason` is omitted for the same reason: a customer seeing
+    "TemplateSyntaxError" learns nothing useful and something we would
+    rather they didn't. The portal shows a plain "not available yet".
+    """
+
+    sample_code = serializers.CharField(source="sample.unique_sample_code", read_only=True, default=None)
+
+    class Meta:
+        model = Report
+        fields = ["id", "sample", "sample_code", "order", "report_type", "status", "generated_at", "version"]
+        read_only_fields = fields

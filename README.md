@@ -33,17 +33,18 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **88-test automated regression suite** (`backend/tests/`, pytest +
+- **97-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **58-test frontend suite** (Vitest + React Testing Library): 48 in the
-  Staff Console, 10 in the Customer Portal, covering role gating, the
-  route guards, the Sample FSM action set, the Reports screen, and the
-  customer MFA step-up — see Frontend test suites below.
+- **64-test frontend suite** (Vitest + React Testing Library): 48 in the
+  Staff Console, 16 in the Customer Portal, covering role gating, the
+  route guards, the Sample FSM action set, the Reports screen, the
+  customer report download flow, and the customer MFA step-up — see
+  Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -64,7 +65,8 @@ was invented outside that grounding.
   email → login with optional TOTP MFA, My Orders/My Samples (RLS-scoped
   read-only), a public Training catalog with self-enrollment, My
   Enrollments, My Credit Notes (redeem to a future session), My Invoices,
-  and an Account page with MFA enrollment — see "Customer Portal" below.
+  My Reports (download your own COA via a presigned URL), and an Account
+  page with MFA enrollment — see "Customer Portal" below.
   Needed **zero backend changes** to build; every endpoint it uses already
   existed and was already tested.
 
@@ -102,7 +104,7 @@ nasat-lims/
 │       ├── test/                <- Vitest setup + helpers (own copy, not shared)
 │       └── pages/               <- Register, VerifyEmail, Login, Orders, Samples,
 │                                    TrainingCatalog, MyEnrollments, MyCreditNotes,
-│                                    MyInvoices, Account
+│                                    MyInvoices, MyReports, Account
 └── backend/
     ├── manage.py
     ├── requirements.txt
@@ -821,7 +823,7 @@ correctly triggered and satisfied on the second attempt.
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
 `rls.is_staff`/`rls.customer_id` Postgres session variables on every
-request, which the RLS policies on `order`/`sample` check via
+request, which the RLS policies on `order`, `sample` and `report` check via
 `current_setting(...)`. Key design points, documented in the file:
 
 - `set_config(..., is_local=false)` (connection-scoped), not `true`
@@ -835,6 +837,17 @@ request, which the RLS policies on `order`/`sample` check via
   `request.user` — customer identity only resolves to `request.user`
   later, inside DRF's per-view authentication, which runs *after* this
   middleware.
+
+`report` joined this set when the Customer Portal gained a reports route
+(`apps/reporting/migrations/0003`). Until then the table was staff-only, so
+a viewset filter was the whole story — and a customer-facing list endpoint
+filtered only in Python is one dropped `.filter()` away from returning every
+customer's report metadata. The policy reaches the customer through
+whichever parent the report hangs off (a COA joins `sample`, a training
+certificate joins `order`), which is why it is two subqueries rather than
+one column comparison; the `report_target_required` check constraint
+guarantees at least one is non-null, so a row can never end up invisible to
+its own owner.
 
 Verified directly against Postgres, not just via HTTP status codes: as the
 app's own (non-superuser) DB role, zero RLS context returns zero rows;
@@ -1038,7 +1051,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-88 tests, organized by behavior rather than by app:
+97 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1057,6 +1070,7 @@ pytest
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
 | `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
+| `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
 
@@ -1123,6 +1137,7 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
+| `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
 
 Two things worth knowing before adding more:
 
@@ -1198,9 +1213,9 @@ Genuinely not built yet, not just undocumented:
   TEMPLATE — not valid for issue" banner; the real layouts are QA's to
   author per Blueprint Section 2.1a, and the Water/Environmental COA is
   specified by Job Order LABW2410-238. Replacing one is a file swap in
-  `apps/reporting/templates/reports/`. The Staff Console's Reports screen
-  now exists, but **the Customer Portal still has no route to a customer's
-  own reports** — a customer cannot retrieve their own COA.
+  `apps/reporting/templates/reports/`. Both the Staff Console's Reports
+  screen and the Customer Portal's My Reports route now exist, so what is
+  missing here is the layouts themselves, not the plumbing.
 - **No instrument file-parsing / raw-data ingestion.** `TestResult`
   references a raw file key but nothing parses instrument export files
   into results automatically (Blueprint Section 11).
