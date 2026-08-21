@@ -40,13 +40,14 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **152-test frontend suite** (Vitest + React Testing Library): 136 in the
-  Staff Console — every screen with a server-side rule behind it — and 16
-  in the Customer Portal, covering role gating, the route guards, the
-  Sample and TrainingSession FSM action sets, payment reconciliation,
-  FR-E3-02 calibration, FR-D1-03 version approval, FR-E9-01 investigation
-  closure, the Reports screen, the customer report download flow, and the
-  customer MFA step-up — see Frontend test suites below.
+- **172-test frontend suite** (Vitest + React Testing Library): 136 in the
+  Staff Console and 36 in the Customer Portal — every screen on either side
+  with a server-side rule behind it — covering role gating, the route
+  guards, the Sample and TrainingSession FSM action sets, payment
+  reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
+  FR-E9-01 investigation closure, the Reports screen, the customer report
+  download flow, TOTP MFA enrollment, and credit-note redemption — see
+  Frontend test suites below.
 - **Staff Console frontend** (`frontend/`,
   React + TypeScript + Vite, Blueprint Section 2.1 item 1): real Entra ID
   SSO login through Django, a live samples worklist with the full Sample
@@ -1205,6 +1206,8 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/InvestigationDetail.test.tsx` | `INVESTIGATION_WRITE_ROLES`; a closed investigation offering neither the edit form nor the close button while still displaying its findings; `close` posted as an action rather than a status patch (FR-E9-01); root cause and CAPA prefilled and sent together |
 | `customer-portal/src/pages/Login.test.tsx` | The MFA step-up: `mfa_code` omitted (not `""`) on the first attempt, the authenticator field revealed only when the server answers `code: "MFARequiredError"`, the retry carrying `mfa_code` to the same endpoint, the field staying visible on a wrong code, and the server's own message shown for bad credentials |
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
+| `customer-portal/src/pages/Account.test.tsx` | The three states of TOTP enrollment: no secret revealed before one is requested, `mfa_enabled` **not** claimed between issuing the secret and confirming a code, the account re-read after confirming rather than set locally, and the code field surviving a wrong code so the customer isn't sent back to a secret they already stored |
+| `customer-portal/src/pages/MyCreditNotes.test.tsx` | Redemption posting the entered enrollment; no control offered on an already-applied note; a click with nothing entered posting nothing rather than `NaN`; per-row entry state, so typing against one note cannot redeem another |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
 
 Two things worth knowing before adding more:
@@ -1221,11 +1224,13 @@ Two things worth knowing before adding more:
   scheduler, not the code under test. `AuthContext.test.tsx`'s logout test
   checks `queryClient.getQueryData(["staff-me"])` for exactly this reason.
 
-Not covered: the Customer Portal's catalog/enrollment/invoice screens, and
-the Staff Console's pure list views (`SamplesList`, `DocumentsList`,
-`InvestigationsList`), which render what the API returns with no
-client-side rule to drift from. Every Staff Console screen that gates on a
-role, mirrors an FSM, or moves money is covered. Coverage went where server-side rules exist for a screen to drift
+Not covered: the pure list and read views on either side — the Staff
+Console's `SamplesList`/`DocumentsList`/`InvestigationsList`, and the
+Customer Portal's `Orders`/`Samples`/`TrainingCatalog`/`MyEnrollments`/
+`MyInvoices` — which render what the API returns with no client-side rule
+to drift from, and whose filters are covered where they exist. Every screen
+on either side that gates on a role, mirrors an FSM, moves money, or
+handles credentials is covered. Coverage went where server-side rules exist for a screen to drift
 from — role gates, FSM action sets, filters, and money-moving controls —
 rather than spreading evenly across every screen. The three
 hand-maintained `*_WRITE_ROLES` constants in `api/types.ts` are each now
