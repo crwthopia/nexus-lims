@@ -33,9 +33,12 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **217-test automated regression suite** (`backend/tests/`, pytest +
+- **224-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
+- **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
+  static files, liveness/readiness probes, structured stdout logging, and a
+  clean `manage.py check --deploy` — see Deployment below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
@@ -115,12 +118,14 @@ nexus-lims/
     ├── manage.py
     ├── requirements.txt
     ├── requirements-dev.txt       <- adds pytest, pytest-django, factory_boy
+    ├── Dockerfile                 <- two-stage build, non-root, gunicorn CMD -- see Deployment
+    ├── .dockerignore
     ├── pytest.ini
     ├── .env.example
     ├── tests/                     <- see "Running the test suite" below
     ├── config/
     │   ├── settings.py        <- Postgres, Celery/Redis, OSS, Entra ID, DRF, TIME_ZONE=Asia/Manila
-    │   ├── urls.py             <- /admin/, /api/v1/, /api-auth/, /oauth2/ (Entra ID SSO)
+    │   ├── urls.py             <- /healthz, /readyz, /admin/, /api/v1/, /api-auth/, /oauth2/ (Entra ID SSO)
     │   └── celery.py           <- Celery app + CELERY_BEAT_SCHEDULE consumer
     └── apps/
         ├── accounts/          <- Role, StaffUser, CustomerUser, ESignature
@@ -133,7 +138,8 @@ nexus-lims/
         │   ├── serializers.py, views.py, urls.py  <- staff-facing read endpoints
         │   └── services.py         <- e-signature capture helper
         ├── common/            <- cross-app helpers with no models of their own
-        │   └── params.py           <- int_param/str_param/body_dict: client input coerced to a 400, never a 500
+        │   ├── params.py           <- int_param/str_param/body_dict: client input coerced to a 400, never a 500
+        │   └── health.py           <- /healthz (liveness, no deps) and /readyz (Postgres + Redis)
         ├── documents/         <- Document, DocumentVersion
         │   └── views.py             <- POST /document-versions/{id}/approve/ (FR-D1-03)
         ├── equipment/         <- StandardReagent, Instrument, CalibrationRecord
@@ -1267,7 +1273,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-217 tests, organized by behavior rather than by app:
+224 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1291,6 +1297,7 @@ pytest
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
 | `test_semantic_invariants.py` | Well-typed input that is nonsense anyway: unusable `specification_limits` (non-numeric, or a min above its max) refused on write and refused again at result entry for rows already carrying them; a calibration due before it was performed or performed in the future; a session ending before it starts or with a minimum above its capacity; a negative invoice. Each paired with the boundary case that must still be accepted (same-day calibration, single-day session, minimum equal to capacity, zero invoice) |
 | `test_malformed_request_bodies.py` | A non-object JSON body (array, string, null, number) is a 400 on every write route, walked from the router rather than listed; the five hand-rolled actions that read `request.data` as a dict individually pinned, including the customer-reachable credit-note apply; a bodyless POST still works and a long review comment is still accepted |
+| `test_health_probes.py` | Liveness answers without touching Postgres or Redis (asserted by making both checks raise), readiness names the dependency that failed rather than only 503-ing, a database failure is reported instead of 500-ing, neither probe leaks a connection string into an unauthenticated response |
 | `test_malformed_request_params.py` | Every numeric query-string filter across eight apps returns 400 rather than 500 for a non-numeric id, still filters for a valid one, ignores an empty one, and treats `0` as a filter rather than as "no filter"; over-length and non-string chain-of-custody locations refused before Postgres sees them |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
 | `test_test_request_filters.py` | `TestRequestViewSet`'s `?sample=`/`?status=` filters (same class of bug, found the same way, building the Testing Queue) |
@@ -1398,15 +1405,111 @@ hand-maintained `*_WRITE_ROLES` constants in `api/types.ts` are each now
 pinned by tests, since their own comments admit they are copies of the
 server's lists kept in sync by hand.
 
+## Deployment
+
+The application is packaged as a container and served by gunicorn. Before
+this existed there was no way to deploy it at all: `infra/` provisioned a
+VPC, RDS, Redis and OSS, and there was nothing to run on any of it.
+
+`backend/Dockerfile` is a two-stage build. Wheels are built in a stage that
+carries a compiler so the runtime image does not have to, WeasyPrint's
+system libraries (Pango, cairo, GDK-PixBuf) are installed explicitly because
+it links against them *at import time* — a missing one fails the process on
+startup, not on the first PDF — and the image runs as a non-root user, which
+matters for a service that accepts file uploads and renders HTML to PDF.
+`collectstatic` runs at build time and WhiteNoise serves the result, so the
+Django admin and DRF's browsable API are styled without a separate nginx.
+
+**`manage.py runserver` is not a deployment.** It is single-threaded,
+unaudited for public exposure, and Django says so in its own output. The
+image's `CMD` is gunicorn.
+
+### Health probes
+
+Two endpoints, and the distinction is load-bearing:
+
+| Endpoint | Answers | Checks |
+|---|---|---|
+| `GET /healthz` | Is this process alive? | Nothing |
+| `GET /readyz` | Can it serve traffic? | Postgres, Redis |
+
+**`/healthz` deliberately checks no dependency.** A load balancer uses it to
+decide whether an instance stays in rotation; if it checked Postgres, one
+slow database would make every instance report unhealthy at the same moment
+and a partial degradation would become a total outage. That is the classic
+way a health check causes the incident it was added to prevent. The
+container's `HEALTHCHECK` points here for the same reason — pointing it at
+`/readyz` would restart the app every time Redis hiccuped.
+
+`/readyz` returns 503 and names the failing dependency, so an operator can
+tell "the app is broken" from "the database is unreachable". Neither probe
+authenticates, because a load balancer cannot, so neither returns anything
+beyond a dependency name — no versions, no hostnames, no connection strings.
+
+### Production hardening
+
+Everything `manage.py check --deploy` asks for is now set, and all of it is
+gated on `DEBUG` being off so local development over plain HTTP still works.
+Turning these on unconditionally would make the dev server unusable: a
+secure-only session cookie is never sent over `http://localhost`, so nobody
+could log in.
+
+Three of them are worth knowing about before changing:
+
+- **`SECURE_PROXY_SSL_HEADER` comes first, and the rest depend on it.**
+  Behind a load balancer the application sees plain HTTP, so
+  `request.is_secure()` is False and `SECURE_SSL_REDIRECT` would bounce
+  every request into an infinite loop. Trusting `X-Forwarded-Proto` is only
+  safe because the app is not directly reachable — anything that can set
+  that header could otherwise claim any request arrived over HTTPS.
+- **`SECURE_REDIRECT_EXEMPT` covers the probes.** A load balancer health
+  check does not follow redirects, so without the exemption every probe gets
+  a 301, every instance is marked unhealthy, and the deployment never comes
+  up. The hardening would have caused the outage.
+- **An unset `DJANGO_SECRET_KEY` with `DEBUG` off refuses to start.** Session
+  cookies, password-reset tokens and the signed email-verification tokens in
+  `apps/accounts/customer_auth.py` are all only as trustworthy as that value,
+  and the development default is in this repository for anyone to read.
+  Failing loudly at startup is the point.
+
+### Logging
+
+`LOGGING` writes everything to stdout, because in a container the log stream
+*is* the log — no files to rotate, no volume to mount. Django's default
+configuration sends almost nothing to stdout once `DEBUG` is off, which
+means an operator sees silence during an incident.
+
+This is the **operational** log and it is a different thing from the audit
+ledger in `apps/audit/`. The ledger is the regulated record of what happened
+to a sample; this is for diagnosing why a request failed. Neither
+substitutes for the other, and PII does not belong here. `django.db.backends`
+is pinned at INFO for exactly that reason — at DEBUG it logs every SQL
+statement, which is the fastest way to fill a log with the contents of the
+database.
+
+WeasyPrint and fontTools are pinned to WARNING: WeasyPrint narrates every
+stylesheet it parses at INFO, so one COA render would otherwise produce a
+dozen lines of progress.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every pull request, and on pushes to
-`main`, in two jobs:
+`main`, in four jobs:
 
 - **Backend** — the full `pytest` suite against live PostgreSQL 18, Redis,
   and MinIO service containers, the same stack the suite is written for
   (see Running the test suite above). Nothing is mocked in CI that isn't
   mocked locally.
+- **Image** — builds `backend/Dockerfile`, runs `manage.py check --deploy
+  --fail-level WARNING` inside the built image, boots the container exactly
+  as its `CMD` does and probes `/healthz`, then boots a second one with no
+  Postgres and no Redis and asserts `/readyz` answers 503 naming both.
+  Nothing else in CI proves the application can be *packaged*: the pytest
+  job installs into the runner directly, so a missing system library, a
+  wheel that will not build, or a failing `collectstatic` would all go
+  unnoticed until a deploy. The deploy check runs here rather than in the
+  pytest job because the pytest job runs with `DEBUG` off but never
+  exercises the production branch the way a real container does.
 - **Infra** — `terraform fmt -check` and `terraform validate` over
   `infra/`. `validate` is a schema check against the provider rather than a
   call to Alibaba, so it needs no credentials — and it needs the provider

@@ -19,6 +19,7 @@ from django.urls import include, path
 from django.views.generic.base import RedirectView
 
 from apps.accounts.views import StaffLoginCompleteView
+from apps.common.health import healthz, readyz
 
 # Versioned under /api/v1/ per Blueprint Section 6. Each app owns its own
 # urls.py (a SimpleRouter of ModelViewSets/ReadOnlyModelViewSets) so the
@@ -38,6 +39,12 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
+    # Probes first, and outside /api/v1/: they are infrastructure, not part
+    # of the versioned API contract, and an operator or load balancer
+    # should never have to know the API's version to ask whether the
+    # process is alive. See apps/common/health.py for why there are two.
+    path('healthz', healthz),
+    path('readyz', readyz),
     # Django serves no frontend itself: both React SPAs (Blueprint Section
     # 2.1 item 1 -- ../../frontend Staff Console on :5174, ../../customer-portal
     # Customer Portal on :5173) are separate apps with their own dev servers,
