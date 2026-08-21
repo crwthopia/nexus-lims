@@ -4,10 +4,12 @@ terraform {
   required_providers {
     alicloud = {
       source = "aliyun/alicloud"
-      # Pinned to a major line rather than floating: an IaC change should be
-      # a deliberate commit, not something a provider release does to you
-      # between one apply and the next.
-      version = "~> 1.230"
+      # Pinned near the version this was validated against (1.289.0). A
+      # looser floor lets a provider release change resource schemas out
+      # from under an apply -- which is exactly what happened here: an
+      # initial "~> 1.230" resolved to 1.289 and surfaced two deprecations
+      # and a resource type that no longer exists.
+      version = "~> 1.289"
     }
     random = {
       source  = "hashicorp/random"
