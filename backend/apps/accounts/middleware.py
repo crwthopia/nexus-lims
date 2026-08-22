@@ -45,12 +45,28 @@ a transaction-local set_config resets before the next statement even runs.
 
 from django.db import connection
 
+# The health probes must not open a database connection. This middleware
+# runs before every view, so without this exemption /healthz executes a
+# SELECT before reaching a handler whose entire purpose is to answer
+# without touching the database -- and the liveness probe then reports
+# unhealthy during precisely the outage it exists to survive, taking every
+# instance out of the load balancer at once. /readyz is exempt for a
+# related reason: it checks the database itself and reports the failure as
+# a clean 503, which it cannot do if the middleware raises first.
+#
+# Neither path reads or writes tenant-scoped data, so skipping the RLS
+# session variables costs nothing: there is no query for them to scope.
+RLS_EXEMPT_PATHS = frozenset({"/healthz", "/readyz"})
+
 
 class RLSContextMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
+        if request.path in RLS_EXEMPT_PATHS:
+            return self.get_response(request)
+
         is_staff_authenticated = bool(
             getattr(request, "user", None) and request.user.is_authenticated
         )

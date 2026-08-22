@@ -10,7 +10,7 @@ dependency checking belongs, and it has to report *which* dependency failed
 or it tells an operator nothing the 503 did not already.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,6 +33,51 @@ def test_liveness_does_not_touch_any_dependency(client):
         response = client.get("/healthz")
 
     assert response.status_code == 200
+
+
+def test_liveness_answers_when_the_database_is_actually_down(client):
+    """
+    The regression this exists for, and the one the unit tests above missed.
+
+    Patching the view's own helpers proves the *view* does not query. It
+    says nothing about the middleware stack in front of it, and
+    RLSContextMiddleware opened a cursor on every request -- so in a real
+    outage /healthz returned 500, not 200, and a load balancer would have
+    pulled every instance during exactly the incident liveness is meant to
+    survive. CI caught it by booting the container with no Postgres; this
+    catches it without one.
+
+    Patched at the module the middleware imports, so the whole request path
+    is exercised rather than just the handler.
+    """
+    from django.db.utils import OperationalError
+
+    broken = MagicMock()
+    broken.cursor.side_effect = OperationalError("connection refused")
+
+    with patch("apps.accounts.middleware.connection", broken):
+        response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    broken.cursor.assert_not_called()
+
+
+def test_readiness_reports_a_down_database_rather_than_500ing_in_middleware(client):
+    # Same stack, the other probe: readiness must reach its own checks and
+    # report a clean 503, not blow up in middleware first.
+    from django.db.utils import OperationalError
+
+    broken = MagicMock()
+    broken.cursor.side_effect = OperationalError("connection refused")
+
+    with patch("apps.accounts.middleware.connection", broken), \
+         patch("apps.common.health._check_database", side_effect=OperationalError("connection refused")), \
+         patch("apps.common.health._check_redis", return_value=None):
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["database"] == "unavailable"
 
 
 def test_readiness_is_ok_when_everything_answers(client):
