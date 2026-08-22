@@ -167,6 +167,45 @@ jobs:
     name: Backend image (build + deploy check)
     runs-on: ubuntu-latest
 
+    # Real Postgres and Redis, because the roles this job boots need them:
+    # migrate applies a schema, and a Celery worker will not report ready
+    # without a broker. The web-tier steps below deliberately run without
+    # them, to prove liveness survives their absence.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Reached from inside a container, so the host rather than localhost.
+      PGHOST: 172.17.0.1
+      COMMON_ENV: >-
+        -e DJANGO_DEBUG=false
+        -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass
+        -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+        -e DJANGO_SECURE_SSL_REDIRECT=false
+        -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000
+        -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000
+        -e AZURE_AD_CLIENT_SECRET=ci-placeholder
+
     steps:
       - uses: actions/checkout@v7
 
@@ -214,13 +253,8 @@ jobs:
       - name: Boot the container and probe liveness
         run: |
           docker run -d --name nexuslims-ci -p 8000:8000 \
-            -e DJANGO_DEBUG=false \
-            -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass \
-            -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
-            -e DJANGO_SECURE_SSL_REDIRECT=false \
-            -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000 \
-            -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
-            -e AZURE_AD_CLIENT_SECRET=ci-placeholder \
+            -e NEXUSLIMS_MIGRATE_ON_START=false \
+            $COMMON_ENV \
             nexuslims-backend:ci
           for _ in $(seq 1 30); do
             if curl -fsS http://localhost:8000/healthz | grep -q '"ok"'; then
@@ -241,15 +275,10 @@ jobs:
       - name: Readiness reports degraded without dependencies
         run: |
           docker run -d --name nexuslims-degraded -p 8001:8000 \
-            -e DJANGO_DEBUG=false \
-            -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass \
-            -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
-            -e DJANGO_SECURE_SSL_REDIRECT=false \
+            -e NEXUSLIMS_MIGRATE_ON_START=false \
             -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT=1 \
             -e CELERY_BROKER_URL=redis://127.0.0.1:1/0 \
-            -e AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000 \
-            -e AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
-            -e AZURE_AD_CLIENT_SECRET=ci-placeholder \
+            $COMMON_ENV \
             nexuslims-backend:ci
           for _ in $(seq 1 30); do
             code=$(curl -s -o /tmp/readyz.json -w '%{http_code}' http://localhost:8001/readyz || true)
@@ -265,6 +294,85 @@ jobs:
           done
           echo "Readiness did not report degraded (last code: $code)"
           docker logs nexuslims-degraded
+          exit 1
+
+      # From here on the roles that need a schema and a broker. This is the
+      # half of the application that gunicorn does not run -- report PDF
+      # generation, the retention sweep, the training capacity check -- and
+      # until now nothing proved any of it could even start.
+      - name: Create the application database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE nasat_lims LOGIN PASSWORD 'devpassword' CREATEDB NOSUPERUSER NOBYPASSRLS;"
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE nasat_lims OWNER nasat_lims;"
+
+      - name: Migrations apply from the image
+        run: |
+          docker run --rm --network host \
+            -e NEXUSLIMS_ROLE=migrate \
+            -e POSTGRES_HOST=127.0.0.1 \
+            $COMMON_ENV \
+            nexuslims-backend:ci
+
+      # Twice, because a deploy runs this from every replica at once. The
+      # second must be a clean no-op rather than a race, which is what the
+      # advisory lock in deploy_migrate is for.
+      - name: Migrations are safe to re-run
+        run: |
+          docker run --rm --network host \
+            -e NEXUSLIMS_ROLE=migrate \
+            -e POSTGRES_HOST=127.0.0.1 \
+            $COMMON_ENV \
+            nexuslims-backend:ci 2>&1 | tee /tmp/second-migrate.log
+          grep -q "No migrations to apply" /tmp/second-migrate.log
+
+      - name: The Celery worker starts and answers a ping
+        run: |
+          docker run -d --name nexuslims-worker --network host \
+            -e NEXUSLIMS_ROLE=worker \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e CELERY_BROKER_URL=redis://127.0.0.1:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1 \
+            $COMMON_ENV \
+            nexuslims-backend:ci
+          # `inspect ping` over the broker, so this proves the worker is
+          # consuming rather than merely that the process exists.
+          for _ in $(seq 1 30); do
+            if docker exec nexuslims-worker /app/docker-healthcheck.sh 2>/dev/null; then
+              echo "Worker is consuming"
+              docker rm -f nexuslims-worker > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Worker never answered a ping"
+          docker logs nexuslims-worker
+          exit 1
+
+      - name: Celery beat starts and writes its schedule
+        run: |
+          docker run -d --name nexuslims-beat --network host \
+            -e NEXUSLIMS_ROLE=beat \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e CELERY_BROKER_URL=redis://127.0.0.1:6379/0 \
+            $COMMON_ENV \
+            nexuslims-backend:ci
+          for _ in $(seq 1 30); do
+            if docker exec nexuslims-beat /app/docker-healthcheck.sh 2>/dev/null; then
+              echo "Beat is scheduling"
+              # The schedule it loaded must be the real one: a beat that
+              # starts with an empty schedule is running and doing nothing.
+              docker logs nexuslims-beat 2>&1 | grep -q "retention-sweep-daily"
+              docker rm -f nexuslims-beat > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Beat never wrote a schedule file"
+          docker logs nexuslims-beat
           exit 1
 
   infra:

@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **224-test automated regression suite** (`backend/tests/`, pytest +
+- **244-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -118,7 +118,9 @@ nexus-lims/
     ├── manage.py
     ├── requirements.txt
     ├── requirements-dev.txt       <- adds pytest, pytest-django, factory_boy
-    ├── Dockerfile                 <- two-stage build, non-root, gunicorn CMD -- see Deployment
+    ├── Dockerfile                 <- two-stage build, non-root -- see Deployment
+    ├── docker-entrypoint.sh       <- NEXUSLIMS_ROLE: web / worker / beat / migrate
+    ├── docker-healthcheck.sh      <- role-aware liveness (HTTP, celery ping, schedule file)
     ├── .dockerignore
     ├── pytest.ini
     ├── .env.example
@@ -1273,7 +1275,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-224 tests, organized by behavior rather than by app:
+244 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1297,6 +1299,8 @@ pytest
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
 | `test_semantic_invariants.py` | Well-typed input that is nonsense anyway: unusable `specification_limits` (non-numeric, or a min above its max) refused on write and refused again at result entry for rows already carrying them; a calibration due before it was performed or performed in the future; a session ending before it starts or with a minimum above its capacity; a negative invoice. Each paired with the boundary case that must still be accepted (same-day calibration, single-day session, minimum equal to capacity, zero invoice) |
 | `test_malformed_request_bodies.py` | A non-object JSON body (array, string, null, number) is a 400 on every write route, walked from the router rather than listed; the five hand-rolled actions that read `request.data` as a dict individually pinned, including the customer-reachable credit-note apply; a bodyless POST still works and a long review comment is still accepted |
+| `test_deploy_migrate.py` | Migrations run under a Postgres advisory lock: a second instance waits rather than migrating concurrently, a timeout is an error rather than a silent boot against the wrong schema, and the lock is released even when the migration itself raises |
+| `test_container_entrypoint.py` | The entrypoint and healthcheck shell scripts, run against stubbed binaries: which command each `NEXUSLIMS_ROLE` resolves to, that web and worker migrate *before* starting while beat does not, that the worker's ping targets its own node rather than any worker on the broker, and that an unknown role is unhealthy rather than silently ok |
 | `test_health_probes.py` | Liveness answers without touching Postgres or Redis (asserted by making both checks raise), readiness names the dependency that failed rather than only 503-ing, a database failure is reported instead of 500-ing, neither probe leaks a connection string into an unauthenticated response |
 | `test_malformed_request_params.py` | Every numeric query-string filter across eight apps returns 400 rather than 500 for a non-numeric id, still filters for a valid one, ignores an empty one, and treats `0` as a filter rather than as "no filter"; over-length and non-string chain-of-custody locations refused before Postgres sees them |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |
@@ -1421,8 +1425,92 @@ matters for a service that accepts file uploads and renders HTML to PDF.
 Django admin and DRF's browsable API are styled without a separate nginx.
 
 **`manage.py runserver` is not a deployment.** It is single-threaded,
-unaudited for public exposure, and Django says so in its own output. The
-image's `CMD` is gunicorn.
+unaudited for public exposure, and Django says so in its own output.
+
+### One image, three process roles
+
+Half of what this system does runs outside the request cycle — report PDF
+generation, the RA 10173 retention sweep, the training capacity check — so a
+deployment that only starts gunicorn is a deployment where reports sit in
+`pending` forever and a compliance sweep never fires.
+
+`NEXUSLIMS_ROLE` selects which process a container is, and
+`docker-entrypoint.sh` dispatches. One image rather than three, so they
+cannot drift apart:
+
+| `NEXUSLIMS_ROLE` | Runs | Migrates first |
+|---|---|---|
+| `web` (default) | gunicorn | yes |
+| `worker` | Celery worker | yes |
+| `beat` | Celery beat | no |
+| `migrate` | migrations, then exits | — |
+
+Anything else is exec'd as given, so `docker run <image> python manage.py
+shell` still works.
+
+**`beat` must be exactly one replica.** It is a scheduler, not a worker: two
+of them both fire every entry, so the retention sweep would run twice a
+night against the audit ledger. (That sweep is idempotent — see the
+`_already_processed` note above — but relying on that to paper over a
+misconfigured deployment is not a plan.) Beat is also the one role that does
+*not* migrate: it owns no schema, and racing the web tier to apply one buys
+nothing.
+
+Beat's schedule file records when each entry last ran. It lives at
+`/app/beat/` so it can be mounted; on ephemeral storage a restart makes beat
+re-evaluate from scratch, which for a daily entry can mean firing again the
+same day.
+
+### Migrations
+
+**Nothing used to run them.** On a first deploy the database was empty and
+every request 500'd; on later deploys a migration in the release simply
+never applied.
+
+`web` and `worker` now run `manage.py deploy_migrate` before starting.
+That command is not `migrate` with extra steps — it takes a **Postgres
+session-level advisory lock** first, because Django's `migrate` is not
+concurrency-safe and a platform that starts N identical containers races all
+N of them through it. Two processes applying the same migration collide on
+the `django_migrations` insert and on the DDL, and this schema's migrations
+create partitions and RLS policies, where a partial double-apply is a bad
+thing to be debugging against a regulated database mid-deploy.
+
+The first instance migrates; the rest wait, then find nothing to apply. The
+lock is session-level rather than transaction-level for two reasons: it has
+to span the whole `migrate` call, and Postgres drops it automatically when
+the connection dies, so a container killed mid-migration does not wedge
+every later deploy behind a lock nobody holds.
+
+Two behaviours worth knowing:
+
+- **A wait that times out is an error, not a shrug.** Booting anyway would
+  serve traffic against a schema the release was not built for — the deploy
+  looks successful and the failures surface later, somewhere else.
+- **The lock is released in a `finally`.** Without it one failed migration
+  leaves the lock held and every subsequent deploy hangs.
+
+Set `NEXUSLIMS_MIGRATE_ON_START=false` for a platform that runs migrations
+as its own release step and would rather app containers not touch the
+schema; use the `migrate` role for that step.
+
+### Healthchecks
+
+`docker-healthcheck.sh` is role-aware, because `HEALTHCHECK` is baked into
+the image and an HTTP probe against a Celery worker would fail forever — a
+worker listens on no port.
+
+| Role | Check |
+|---|---|
+| `web` | `GET /healthz` |
+| `worker` | `celery inspect ping -d celery@$(hostname)` |
+| `beat` | its schedule file exists |
+
+The worker's ping is targeted at *that* node with `-d`. Without it, a reply
+from any worker on the broker satisfies the check, and a wedged worker in a
+pool looks healthy. Beat's check is deliberately weak: the alternative is
+asserting a task ran, which belongs in monitoring rather than in a
+healthcheck that restarts things.
 
 ### Health probes
 
@@ -1501,9 +1589,15 @@ dozen lines of progress.
   (see Running the test suite above). Nothing is mocked in CI that isn't
   mocked locally.
 - **Image** — builds `backend/Dockerfile`, runs `manage.py check --deploy
-  --fail-level WARNING` inside the built image, boots the container exactly
-  as its `CMD` does and probes `/healthz`, then boots a second one with no
-  Postgres and no Redis and asserts `/readyz` answers 503 naming both.
+  --fail-level WARNING` inside the built image, then boots **every process
+  role** against live Postgres and Redis: `web` (probes `/healthz`, and a
+  second instance with no dependencies to assert `/readyz` answers 503
+  naming both), `migrate` (twice, so the second proves the advisory lock
+  makes a re-run a clean no-op rather than a race), `worker` (answers
+  `celery inspect ping` over the broker, so it is consuming and not merely
+  running), and `beat` (writes its schedule file, and its log names a real
+  scheduled entry — a beat that starts with an empty schedule is running
+  and doing nothing).
   Nothing else in CI proves the application can be *packaged*: the pytest
   job installs into the runner directly, so a missing system library, a
   wheel that will not build, or a failing `collectstatic` would all go
