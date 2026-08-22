@@ -51,6 +51,13 @@ RUN pip install --no-index --find-links=/wheels /wheels/*.whl && rm -rf /wheels
 
 COPY --chown=nexus:nexus . .
 
+# Set explicitly rather than inherited from the build context. Git records
+# the executable bit, but a Windows checkout does not reproduce it and
+# neither does a tree pushed through the GitHub API -- and a non-executable
+# entrypoint fails at container start with a permission error that reads
+# like a broken image.
+RUN chmod +x /app/docker-entrypoint.sh /app/docker-healthcheck.sh
+
 # Baked into the image so the running container serves them without a
 # writable volume. Needs a SECRET_KEY because settings.py refuses to import
 # without one when DEBUG is off -- this build-time value never leaves the
@@ -62,22 +69,25 @@ RUN DJANGO_SECRET_KEY=build-time-only-not-a-runtime-secret \
     python manage.py collectstatic --noinput \
     && chown -R nexus:nexus /app/staticfiles
 
+# Beat's schedule file lives here so it can be mounted. On ephemeral
+# storage beat re-evaluates its schedule from scratch after a restart,
+# which for a daily entry can mean firing again the same day. Created
+# before dropping privileges: chown needs root.
+RUN mkdir -p /app/beat && chown nexus:nexus /app/beat
+
 USER nexus
 
 EXPOSE 8000
 
-# Liveness only. The deep check is /readyz, and pointing a container
-# healthcheck at it would restart the app whenever Postgres hiccuped.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -fsS http://localhost:8000/healthz || exit 1
+# Liveness only, and role-aware: this image runs as web, worker or beat,
+# and an HTTP probe against a worker would fail forever. The deep check is
+# /readyz, which a container healthcheck must not use -- restarting the app
+# because Postgres hiccuped fixes nothing.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=20s --retries=3 \
+    CMD ["/app/docker-healthcheck.sh"]
 
-# gunicorn, not runserver. Workers are sync rather than async because the
-# work is database-bound Django with a blocking psycopg2 driver; the
-# request that actually takes time (instrument file ingestion) is
-# deliberately synchronous, so the timeout is generous.
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--timeout", "60", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# The role comes from NEXUSLIMS_ROLE; the entrypoint starts gunicorn, a
+# Celery worker, or beat accordingly, and applies migrations under an
+# advisory lock first for the roles that need the schema. One image, three
+# process types, so they cannot drift apart.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -55,6 +55,10 @@ INSTALLED_APPS = [
     "simple_history",
     "django_auth_adfs",  # ships templates/django_auth_adfs/login_failed.html; needs APP_DIRS discovery
     # NexusLIMS apps, one per ASTM function-map domain (Blueprint Section 10)
+    # apps.common holds no models -- it is here so Django discovers its
+    # management commands (deploy_migrate), which it only does for apps in
+    # this list.
+    "apps.common",
     "apps.accounts",
     "apps.samples",
     "apps.testing",
