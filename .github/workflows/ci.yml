@@ -170,6 +170,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Required for the GitHub Actions cache backend below. Without it,
+      # buildx uses the default `docker` driver, which cannot export a
+      # cache at all -- the build fails before reading the Dockerfile with
+      # "Cache export is not supported for the docker driver". This action
+      # sets up the docker-container driver, which supports both the cache
+      # and `load: true`.
+      - uses: docker/setup-buildx-action@v3
+
       # The point of this job. Nothing else in CI proves the application can
       # actually be packaged: the pytest job installs into the runner
       # directly, so a missing system library, a wheel that will not build,
