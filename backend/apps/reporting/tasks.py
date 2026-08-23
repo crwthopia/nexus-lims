@@ -119,9 +119,15 @@ def generate_report_pdf(report_id):
     """
     report = Report.objects.select_related("sample", "order", "generated_by").get(pk=report_id)
 
-    Report.objects.filter(pk=report.pk).update(
-        status=Report.Status.GENERATING, failure_reason=""
-    )
+    # save(update_fields=...) rather than QuerySet.update(): .update() sends
+    # no signals, so these transitions were invisible to both the audit log
+    # (apps/audit/signals.py) and simple-history -- a report went pending ->
+    # generating -> ready and left exactly one history row, recording only
+    # 'pending'. update_fields keeps the narrow write .update() gave us, so a
+    # concurrent change to another column is still not clobbered.
+    report.status = Report.Status.GENERATING
+    report.failure_reason = ""
+    report.save(update_fields=["status", "failure_reason"])
 
     try:
         html = render_report_html(report, build_report_context(report))
@@ -138,17 +144,18 @@ def generate_report_pdf(report_id):
         logger.exception("report %s failed to generate", report.pk)
         raise
 
-    Report.objects.filter(pk=report.pk).update(
-        file_id=key, status=Report.Status.READY, failure_reason=""
-    )
+    report.file_id = key
+    report.status = Report.Status.READY
+    report.failure_reason = ""
+    report.save(update_fields=["file_id", "status", "failure_reason"])
     logger.info("report %s ready at %s (%d bytes)", report.pk, key, len(pdf_bytes))
     return key
 
 
 def _mark_failed(report, reason):
-    Report.objects.filter(pk=report.pk).update(
-        status=Report.Status.FAILED, failure_reason=reason[:2000]
-    )
+    report.status = Report.Status.FAILED
+    report.failure_reason = reason[:2000]
+    report.save(update_fields=["status", "failure_reason"])
 
 
 def enqueue_generation(report):

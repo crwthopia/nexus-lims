@@ -41,6 +41,13 @@ def _set_rls_context(**kwargs):
     connections across tasks, and re-setting is a single cheap statement
     against being wrong about a connection's history.
     """
+    from apps.audit.context import set_actor
     from apps.common.rls import apply_system_rls_context
 
     apply_system_rls_context()
+    # The audit counterpart, set here for the same reason: a task writing to
+    # a regulated entity is the lab acting on its own behalf, and
+    # apps/audit/signals.py needs something to name in the row. Not reset
+    # afterwards -- a worker process has no caller to restore the previous
+    # actor for, and the next task overwrites it before doing any work.
+    set_actor("system", None)

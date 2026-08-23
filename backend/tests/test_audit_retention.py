@@ -109,7 +109,16 @@ def test_an_anonymize_policy_never_claims_pii_was_stripped():
 
     run_retention_sweep()
 
-    entries = AuditLogEntry.objects.filter(entity_type="CalibrationRecord", entity_id=record.id)
+    # Scoped to the sweep's own entries. Since FR-E17-01 landed
+    # (apps/audit/signals.py) an ordinary create or field change on a
+    # regulated entity also writes a row, so a bare count here would measure
+    # both mechanisms at once and mean nothing about either. Every entry the
+    # sweep writes is labelled retention_*.
+    entries = AuditLogEntry.objects.filter(
+        entity_type="CalibrationRecord",
+        entity_id=record.id,
+        field_changed__startswith="retention_",
+    )
     assert entries.count() == 1
     entry = entries.first()
     assert entry.field_changed == "retention_anonymize_no_pii"
@@ -134,5 +143,7 @@ def test_the_anonymize_no_op_is_still_recorded_rather_than_skipped():
     assert first[RetentionPolicy.RecordType.CALIBRATION_RECORD] == 1
     assert second[RetentionPolicy.RecordType.CALIBRATION_RECORD] == 0
     assert AuditLogEntry.objects.filter(
-        entity_type="CalibrationRecord", entity_id=record.id
-    ).count() == 1
+        entity_type="CalibrationRecord",
+        entity_id=record.id,
+        field_changed__startswith="retention_",
+    ).count() == 1, "the sweep recorded itself twice despite being idempotent"

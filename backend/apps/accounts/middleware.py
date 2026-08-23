@@ -45,6 +45,8 @@ a transaction-local set_config resets before the next statement even runs.
 
 from django.db import connection
 
+from apps.audit.context import reset_actor, set_actor
+
 # The health probes must not open a database connection. This middleware
 # runs before every view, so without this exemption /healthz executes a
 # SELECT before reaching a handler whose entire purpose is to answer
@@ -78,4 +80,32 @@ class RLSContextMiddleware:
                 ["true" if is_staff_authenticated else "false", str(customer_id)],
             )
 
-        return self.get_response(request)
+        # The same two facts, carried a second way. The session variables
+        # above scope what the database will *show* this request; the actor
+        # below names who to record when it writes (apps/audit/signals.py).
+        # Both are set here for the same reason -- one place per entry point,
+        # before any view code runs.
+        token = set_actor(*_actor_for(request, is_staff_authenticated, customer_id))
+        try:
+            return self.get_response(request)
+        finally:
+            # Reset even though a ContextVar set inside a request does not
+            # leak between requests under WSGI: it does under ASGI, where
+            # one task can outlive the response, and an audit row attributed
+            # to whoever happened to run before is worse than no row.
+            reset_actor(token)
+
+
+def _actor_for(request, is_staff_authenticated, customer_id):
+    """(actor_type, actor_id) -- the same three-way split RLS makes above."""
+    if is_staff_authenticated:
+        return "staff", request.user.pk
+    if customer_id:
+        return "customer", customer_id
+    # Unauthenticated. `system` is the least-wrong of the three actor types
+    # the model offers -- there is no "anonymous" -- and in practice nothing
+    # reaches an audited write from here: every AUDITED_MODELS route requires
+    # authentication, so DRF refuses the request first. If an unauthenticated
+    # write is ever added, this is the line that needs a fourth actor type
+    # rather than a silent mislabel.
+    return "system", None
