@@ -13,12 +13,14 @@ test_audit_retention.py.
 
 import pytest
 
+from apps.accounts.models import Role
 from apps.reporting.models import Report
 from apps.reporting.rendering import ReportTemplateMissing, render_report_html
 from apps.reporting.tasks import build_report_context, generate_report_pdf, object_key_for
 from apps.samples.models import Sample
 from tests.factories import (
     OrderFactory,
+    RoleFactory,
     SampleFactory,
     StaffUserFactory,
     TestMethodFactory,
@@ -37,6 +39,19 @@ def approved_sample(**kwargs):
     return sample
 
 
+def report_issuer():
+    """
+    Staff who may issue a report. POST /reports/ takes REPORT_WRITE_ROLES
+    (apps/reporting/views.py) -- issuing a certificate is the lab publishing
+    a result, not something any authenticated account should do. The read and
+    download tests below deliberately keep using a bare StaffUserFactory,
+    since those stay open to any staff member.
+    """
+    issuer = StaffUserFactory()
+    issuer.roles.add(RoleFactory(name=Role.RoleName.APPROVER))
+    return issuer
+
+
 def make_report(sample=None, order=None, report_type=Report.ReportType.WATER_ENVIRONMENTAL_COA):
     return Report.objects.create(
         sample=sample, order=order, report_type=report_type, generated_by=StaffUserFactory(),
@@ -47,7 +62,7 @@ def make_report(sample=None, order=None, report_type=Report.ReportType.WATER_ENV
 
 def test_report_cannot_be_created_for_an_unapproved_sample(login_as_staff):
     sample = SampleFactory()  # pre_registered
-    client = login_as_staff(StaffUserFactory())
+    client = login_as_staff(report_issuer())
 
     response = client.post(
         "/api/v1/reports/",
@@ -64,7 +79,7 @@ def test_creating_a_report_starts_it_pending_with_no_file(login_as_staff):
     # The POST returns before any rendering happens -- the whole reason this
     # is a background job rather than inline in the request.
     sample = approved_sample()
-    client = login_as_staff(StaffUserFactory())
+    client = login_as_staff(report_issuer())
 
     response = client.post(
         "/api/v1/reports/",
@@ -82,7 +97,7 @@ def test_a_client_supplied_file_id_and_status_are_ignored(login_as_staff):
     # file_id is a pointer into the shared bucket; honouring a caller's value
     # would let one customer's report be attached to another's.
     sample = approved_sample()
-    client = login_as_staff(StaffUserFactory())
+    client = login_as_staff(report_issuer())
 
     response = client.post(
         "/api/v1/reports/",

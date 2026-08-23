@@ -309,6 +309,10 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # Without this, a delete refused by on_delete=PROTECT escapes as an
+    # unhandled ProtectedError and the client gets a 500 for what is really
+    # a 409. See apps/common/exception_handler.py.
+    "EXCEPTION_HANDLER": "apps.common.exception_handler.protected_aware_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
     # Rates for the unauthenticated customer auth surface (see

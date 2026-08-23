@@ -39,10 +39,34 @@ def _run_transition(test_request, method_name):
     test_request.save()
 
 
+# Methods are controlled data, not ordinary master data: specification_limits
+# decide whether a result is in or out of specification. Same pair as
+# DOCUMENT_WRITE_ROLES -- QA owns the controlled set, the supervisor can act
+# when QA is unavailable.
+TEST_METHOD_WRITE_ROLES = (RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR)
+
+
 class TestMethodViewSet(viewsets.ModelViewSet):
+    """
+    Master data (Blueprint Section 3.2, D-1-5), and controlled data: a
+    TestMethod carries the specification_limits a result is judged against,
+    so editing one changes which results pass. ISO/IEC 17025 Section 7.2
+    puts methods under the same control as documented procedures, which is
+    why writes here take the same roles as DocumentViewSet rather than the
+    bare IsAuthenticated this had.
+
+    Reading stays open to any authenticated staff member -- an analyst needs
+    to see the method they are running.
+    """
+
     queryset = TestMethod.objects.all()
     serializer_class = TestMethodSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), roles_required(*TEST_METHOD_WRITE_ROLES)()]
 
 
 class TestResultViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
