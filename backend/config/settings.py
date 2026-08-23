@@ -160,7 +160,21 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 # there's no benefit to a tighter interval, and the capacity check only
 # needs to catch a session crossing its cancellation_threshold_days boundary
 # sometime today, not to the minute.
+# How far ahead apps.audit.tasks.ensure_audit_partitions keeps
+# audit_log_entry's monthly partitions. Three months is slack for a worker
+# being down or a deploy freeze: partitions only have to exist before rows
+# arrive for them, and a row that arrives early lands in the default
+# partition, where it has to be rescued under an ACCESS EXCLUSIVE lock.
+AUDIT_PARTITION_MONTHS_AHEAD = int(os.environ.get("AUDIT_PARTITION_MONTHS_AHEAD", "3"))
+
 CELERY_BEAT_SCHEDULE = {
+    # Daily, not monthly. It is a no-op once the partitions exist, and the
+    # cost of missing the single monthly run is rows silently accumulating
+    # in the default partition.
+    "audit-partitions-daily": {
+        "task": "apps.audit.tasks.ensure_audit_partitions",
+        "schedule": crontab(hour=1, minute=0),
+    },
     "retention-sweep-daily": {
         "task": "apps.audit.tasks.run_retention_sweep",
         "schedule": crontab(hour=2, minute=0),

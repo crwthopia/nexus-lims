@@ -27,6 +27,7 @@ than silently losing the archival action.
 import logging
 
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone
 
 from apps.audit.models import AuditLogEntry, RetentionPolicy
@@ -200,3 +201,30 @@ def run_retention_sweep():
         logger.info("retention sweep: %s -> %s (%d newly processed)", policy.record_type, policy.action_after_expiry, processed)
 
     return summary
+
+
+@shared_task(name="apps.audit.tasks.ensure_audit_partitions")
+def ensure_audit_partitions(months_ahead=None):
+    """
+    Keeps audit_log_entry's monthly partitions ahead of need (Blueprint
+    Section 2.1 item 5a).
+
+    Scheduled daily rather than monthly. It is a no-op once the partitions
+    exist, so the cost of running it often is a handful of catalogue
+    lookups, while the cost of missing the one monthly run -- beat down for
+    a day, a deploy at the wrong moment -- is rows silently accumulating in
+    the default partition and needing to be rescued later under a lock.
+    """
+    from apps.audit.partitions import ensure_partitions
+
+    created, rescued = ensure_partitions(
+        months_ahead=months_ahead
+        if months_ahead is not None
+        else settings.AUDIT_PARTITION_MONTHS_AHEAD
+    )
+    if created:
+        logger.info(
+            "audit partitions: created %s (%d row(s) rescued from the default partition)",
+            ", ".join(created), rescued,
+        )
+    return {"created": created, "rescued_rows": rescued}
