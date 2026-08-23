@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **244-test automated regression suite** (`backend/tests/`, pytest +
+- **246-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -1275,7 +1275,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-244 tests, organized by behavior rather than by app:
+246 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1445,8 +1445,13 @@ cannot drift apart:
 | `beat` | Celery beat | no |
 | `migrate` | migrations, then exits | — |
 
-Anything else is exec'd as given, so `docker run <image> python manage.py
-shell` still works.
+**A command passed to `docker run` wins over the role**, so `docker run
+<image> python manage.py shell` runs the shell rather than starting a web
+server. That precedence is not cosmetic: with an `ENTRYPOINT` in place every
+`docker run <image> <cmd>` arrives as `"$@"`, and a role-first entrypoint
+swallows the command. CI found it by running `docker run <image> python
+manage.py check --deploy` and watching the default `web` role try to migrate
+against a database that step deliberately does not provide.
 
 **`beat` must be exactly one replica.** It is a scheduler, not a worker: two
 of them both fire every entry, so the retention sweep would run twice a

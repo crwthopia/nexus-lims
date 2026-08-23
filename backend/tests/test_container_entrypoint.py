@@ -125,14 +125,44 @@ def test_the_migrate_role_migrates_and_does_not_serve(fake_bin):
     assert "CALLED celery" not in result.stdout
 
 
-def test_an_unknown_role_runs_the_command_it_was_given(fake_bin):
-    # `docker run <image> python manage.py shell` has to keep working.
-    result = run_script(
-        ENTRYPOINT, fake_bin, {"NEXUSLIMS_ROLE": "python"},
-        args=("python", "manage.py", "shell"),
-    )
+def test_an_explicit_command_wins_over_the_role(fake_bin):
+    """
+    `docker run <image> python manage.py shell` has to work.
+
+    This test used to set NEXUSLIMS_ROLE to a bogus value and pass a
+    command, which took the unknown-role branch and proved nothing about
+    real usage. Nobody sets a fake role; they just pass a command, and the
+    role stays at its default. CI found the gap the hard way: with an
+    ENTRYPOINT in place, `docker run <image> python manage.py check
+    --deploy` arrived here as "$@", the default web role swallowed it, and
+    the entrypoint tried to migrate against a database that step does not
+    provide.
+    """
+    result = run_script(ENTRYPOINT, fake_bin, args=("python", "manage.py", "shell"))
 
     assert "CALLED python manage.py shell" in result.stdout
+    assert "CALLED gunicorn" not in result.stdout
+    assert "deploy_migrate" not in result.stdout
+
+
+def test_a_command_beats_an_explicitly_set_role_too(fake_bin):
+    # Even with a real role set, an explicit command is what was asked for.
+    result = run_script(
+        ENTRYPOINT, fake_bin, {"NEXUSLIMS_ROLE": "worker"},
+        args=("python", "manage.py", "check"),
+    )
+
+    assert "CALLED python manage.py check" in result.stdout
+    assert "CALLED celery" not in result.stdout
+
+
+def test_an_unknown_role_with_no_command_fails_loudly(fake_bin):
+    # Starting nothing quietly would look like a healthy deploy that never
+    # serves anything.
+    result = run_script(ENTRYPOINT, fake_bin, {"NEXUSLIMS_ROLE": "nonsense"})
+
+    assert result.returncode == 1
+    assert "unknown NEXUSLIMS_ROLE" in result.stderr
 
 
 def test_gunicorn_settings_come_from_the_environment(fake_bin):

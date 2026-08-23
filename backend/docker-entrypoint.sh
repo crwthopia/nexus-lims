@@ -11,10 +11,25 @@
 #   migrate apply migrations and exit; for a platform with a
 #           release/one-shot task
 #
-# Anything else is passed through and exec'd as given, so
-# `docker run <image> python manage.py shell` still works.
+# A command passed to `docker run` wins over the role, so
+# `docker run <image> python manage.py shell` runs the shell rather than
+# starting a web server.
 
 set -eu
+
+# An explicit command wins over the role, and is checked before anything
+# else so it runs against no assumptions at all.
+#
+# ENTRYPOINT makes every `docker run <image> <cmd>` arrive here as "$@". A
+# role-first entrypoint therefore swallows the command and starts gunicorn
+# instead -- which is exactly what happened to CI's
+# `docker run <image> python manage.py check --deploy`: the default role
+# ran deploy_migrate against a database that step deliberately does not
+# provide, and the check never executed. `docker run <image> python
+# manage.py shell` was broken the same way.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
 
 ROLE="${NEXUSLIMS_ROLE:-web}"
 
@@ -78,6 +93,11 @@ case "$ROLE" in
         ;;
 
     *)
-        exec "$@"
+        # An unrecognised role with no command to fall back on. Reaching
+        # here means NEXUSLIMS_ROLE was set to something this script does
+        # not know, which is a configuration error worth failing on rather
+        # than quietly starting nothing.
+        echo "entrypoint: unknown NEXUSLIMS_ROLE '$ROLE'" >&2
+        exit 1
         ;;
 esac
