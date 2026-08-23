@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts import customer_auth
+from apps.common import throttling
 from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.permissions import IsCustomerAuthenticated
 from apps.accounts.serializers import (
@@ -31,11 +32,23 @@ class CustomerRegisterView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
 
+    throttle_classes = [throttling.RegisterIPThrottle, throttling.RegisterAccountThrottle]
+
     def post(self, request):
         serializer = CustomerRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        customer = customer_auth.register_customer(**serializer.validated_data)
-        return Response(CustomerUserSerializer(customer).data, status=status.HTTP_201_CREATED)
+        # Return value deliberately ignored: it is None when the address was
+        # already registered, and this response must not vary either way.
+        # Returning the created user for one case and an error for the other
+        # is what made registration an enumeration oracle -- the body cannot
+        # describe an account without answering the question. The real owner
+        # is told by email instead; see register_customer.
+        customer_auth.register_customer(**serializer.validated_data)
+
+        return Response(
+            {"detail": "Check your email to continue."},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class CustomerVerifyEmailView(APIView):
@@ -43,6 +56,7 @@ class CustomerVerifyEmailView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [throttling.VerifyEmailThrottle]
 
     def post(self, request):
         serializer = CustomerVerifyEmailSerializer(data=request.data)
@@ -74,6 +88,7 @@ class CustomerLoginView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [throttling.LoginIPThrottle, throttling.LoginAccountThrottle]
 
     def post(self, request):
         serializer = CustomerLoginSerializer(data=request.data)
@@ -122,6 +137,10 @@ class CustomerMFAConfirmView(APIView):
 
     authentication_classes = [CustomerSessionAuthentication]
     permission_classes = [IsCustomerAuthenticated]
+    # The tightest limit on the surface: a TOTP code is six digits, so
+    # unthrottled this is a million guesses against a window that stays
+    # open for about ninety seconds.
+    throttle_classes = [throttling.MFAConfirmThrottle]
 
     def post(self, request):
         serializer = CustomerMFACodeSerializer(data=request.data)

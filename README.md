@@ -33,7 +33,7 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **246-test automated regression suite** (`backend/tests/`, pytest +
+- **262-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -973,6 +973,88 @@ replaces: the result would enter the record *unflagged*, which is exactly
 what FR-C3-08 exists to prevent. A min above its max is the quieter half —
 nothing crashes, and every result the method ever produces comes out flagged.
 
+## Customer auth: the internet-facing surface
+
+`/auth/customer/*` is the only part of the system reachable from the public
+internet without credentials, and it is hand-rolled rather than a
+framework's — `CustomerUser` is deliberately not `AUTH_USER_MODEL`, so
+registration, verification, login and TOTP are implemented here. That code
+was well covered for *correct* behaviour and had never been examined for
+adversarial behaviour. Six findings, all confirmed by probing the running
+API before being fixed:
+
+- **Registration confirmed whether an address was a customer.** It answered
+  "An account with this email already exists" to any anonymous caller,
+  which is an oracle for the lab's customer list — personal data under RA
+  10173. It now returns the same `202` either way and emails the *real
+  owner* instead, which is the half of the design that makes the silence
+  acceptable: someone who has forgotten they registered still finds out,
+  through a channel only they can read.
+- **Login leaked the same thing through timing.** Returning before
+  `check_password` meant an unknown address answered in ~2ms where a known
+  one took ~425ms — a **220x** difference, measured. Password hashing is
+  deliberately slow, so skipping it is loud. The identical error message
+  was doing nothing while the clock gave the answer away. A dummy hash now
+  runs on the miss.
+- **TOTP codes could be replayed.** RFC 6238 §6 says a one-time password is
+  accepted once; nothing recorded use, so a code seen over a shoulder or on
+  a shared screen stayed valid for the whole window — and that window is
+  deliberately wide, to tolerate clock skew, which is exactly what made it
+  useful. The accepted time step is now recorded, and replay protection is
+  monotonic: an older code cannot follow a newer one.
+- **Re-enrolling MFA locked the customer out.** `/mfa/enable` wrote the new
+  secret straight to `mfa_secret` while `mfa_enabled` stayed `True`, so
+  merely *opening* the enrolment screen replaced the secret their
+  authenticator held, every code they could produce was rejected, and
+  nothing let them back in. New secrets now wait in `pending_mfa_secret`
+  and are promoted only on confirmation.
+- **Verification tokens were reusable.** They travel by email and stay
+  valid for hours; accepting one again after it has done its job leaves a
+  live credential in a mailbox for no benefit. Single-use now.
+- **Nothing was rate limited.** See below.
+
+### Rate limiting
+
+Two axes, because either alone is porous: **per IP**, which stops one host
+hammering the surface, and **per targeted account**, which stops a
+distributed attempt on one victim — the case per-IP limits are blind to,
+since each source stays under its own quota while the target absorbs their
+combined rate.
+
+| Endpoint | Per IP | Per account |
+|---|---|---|
+| `login` | 20/min | 10/min |
+| `register` | 10/hour | 3/hour |
+| `verify-email` | 30/hour | — |
+| `mfa/confirm` | — | 10/hour |
+
+The MFA limit is the sharpest of them: six digits against a ~90-second
+window is not meaningfully harder than no second factor at all when the
+guesses are unlimited. Registration's is also a **mail-flood** limit —
+it sends to whatever address is in the request, so unthrottled it lets
+anyone make the lab's mail server bombard a third party, which is how a
+sending domain's reputation gets destroyed by someone else.
+
+Three implementation details are load-bearing:
+
+- **Counters live in Redis, not local memory.** Django's default cache is
+  per-process, so with several gunicorn workers each would count
+  separately — the effective limit multiplied by the worker count, and
+  reset on every restart.
+- **`NUM_PROXIES` must match the deployment.** Behind a load balancer every
+  request arrives from the balancer, so without it a per-IP throttle rate
+  limits the entire customer base as one client. Too high and a client can
+  spoof its address by prepending headers; too low and everyone shares a
+  bucket.
+- **The email is hashed into the throttle cache key.** A key named for a
+  customer's address would turn the throttle store into a list of the lab's
+  customers, which is the personal data this is meant to protect.
+
+Tests clear the cache between cases (`conftest.py`). Without that, one
+test's failed logins spend the limit and the next gets a 429 it never asked
+for — which makes the suite order-dependent and, worse, makes tests of
+*other* properties pass without exercising them.
+
 ## Row-level security
 
 `apps/accounts/middleware.py` (`RLSContextMiddleware`) sets
@@ -1275,7 +1357,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-246 tests, organized by behavior rather than by app:
+262 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -1301,6 +1383,7 @@ pytest
 | `test_malformed_request_bodies.py` | A non-object JSON body (array, string, null, number) is a 400 on every write route, walked from the router rather than listed; the five hand-rolled actions that read `request.data` as a dict individually pinned, including the customer-reachable credit-note apply; a bodyless POST still works and a long review comment is still accepted |
 | `test_deploy_migrate.py` | Migrations run under a Postgres advisory lock: a second instance waits rather than migrating concurrently, a timeout is an error rather than a silent boot against the wrong schema, and the lock is released even when the migration itself raises |
 | `test_container_entrypoint.py` | The entrypoint and healthcheck shell scripts, run against stubbed binaries: which command each `NEXUSLIMS_ROLE` resolves to, that web and worker migrate *before* starting while beat does not, that the worker's ping targets its own node rather than any worker on the broker, and that an unknown role is unhealthy rather than silently ok |
+| `test_customer_auth_hardening.py` | The customer auth surface viewed adversarially: registration answers identically whether or not the address is already a customer (and tells the real owner by email instead), login takes the same time for a known and an unknown account, a TOTP code cannot be replayed and an older one cannot follow a newer, starting a re-enrolment does not break the working secret, verification tokens are single-use, and password/TOTP guessing and mail-flooding are all rate limited |
 | `test_health_probes.py` | Liveness answers without touching Postgres or Redis (asserted by making both checks raise), readiness names the dependency that failed rather than only 503-ing, a database failure is reported instead of 500-ing, neither probe leaks a connection string into an unauthenticated response |
 | `test_malformed_request_params.py` | Every numeric query-string filter across eight apps returns 400 rather than 500 for a non-numeric id, still filters for a valid one, ignores an empty one, and treats `0` as a filter rather than as "no filter"; over-length and non-string chain-of-custody locations refused before Postgres sees them |
 | `test_sample_filters.py` | `SampleViewSet`'s `?status=`/`?service_line=` filters actually filter (a real bug the Review Queue surfaced) |

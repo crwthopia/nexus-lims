@@ -6,6 +6,8 @@ verification token and TOTP codes rather than parsing them out of the
 console-backend email, since that plumbing isn't under test here.
 """
 
+import time
+
 import pyotp
 import pytest
 
@@ -22,7 +24,11 @@ def test_register_verify_login_round_trip(api_client):
         {"email": "newcustomer@example.test", "password": "Str0ngPassw0rd!1"},
         format="json",
     )
-    assert response.status_code == 201
+    # 202 with a neutral body, not 201 with the created account: the
+    # response must read the same whether or not the address was already
+    # registered, or it answers "is this person a customer here?" for
+    # anyone who asks. See test_customer_auth_hardening.py.
+    assert response.status_code == 202
     customer = CustomerUser.objects.get(email="newcustomer@example.test")
     assert not customer.is_email_verified
 
@@ -101,9 +107,17 @@ def test_mfa_enrollment_and_login_flow(login_as_customer, api_client):
     assert login_without_code.status_code == 400
     assert login_without_code.data["code"] == "MFARequiredError"
 
+    # A code from the *next* time step, not TOTP.now().
+    #
+    # Confirming enrolment consumes the code it was confirmed with, so that
+    # an attacker who saw it cannot immediately replay it into a login. In
+    # the same 30-second window TOTP.now() returns that very code, so this
+    # would be rejected as a replay -- correctly. A real customer hits this
+    # only if they log in again within thirty seconds of enrolling.
+    next_step_code = pyotp.TOTP(secret).at(time.time() + 30)
     login_with_code = api_client.post(
         "/api/v1/auth/customer/login",
-        {"email": customer.email, "password": CUSTOMER_RAW_PASSWORD, "mfa_code": pyotp.TOTP(secret).now()},
+        {"email": customer.email, "password": CUSTOMER_RAW_PASSWORD, "mfa_code": next_step_code},
         format="json",
     )
     assert login_with_code.status_code == 200

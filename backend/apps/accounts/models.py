@@ -135,6 +135,24 @@ class CustomerUser(models.Model):
         help_text="Base32 TOTP secret (RFC 6238). Set by /auth/customer/mfa/enable, only "
                    "activated (mfa_enabled=True) once confirmed with a real code.",
     )
+    pending_mfa_secret = models.CharField(
+        max_length=64, null=True, blank=True,
+        help_text=(
+            "A new secret being enrolled, held here until it is confirmed. Re-enrolling "
+            "used to overwrite mfa_secret directly while mfa_enabled stayed True, which "
+            "locked the customer out of their own account the moment they opened the "
+            "enrolment screen: their authenticator still held the old secret and the "
+            "server no longer accepted it."
+        ),
+    )
+    mfa_last_used_timestep = models.BigIntegerField(
+        null=True, blank=True,
+        help_text=(
+            "The TOTP time step of the last accepted code, so it cannot be replayed. "
+            "Without it a code observed over someone's shoulder, or captured anywhere "
+            "in transit, stayed usable for the whole validity window."
+        ),
+    )
     organization_name = models.CharField(max_length=255, null=True, blank=True)
     prc_license_number = models.CharField(
         max_length=64, null=True, blank=True,

@@ -311,6 +311,44 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    # Rates for the unauthenticated customer auth surface (see
+    # apps/common/throttling.py). Applied per view rather than globally:
+    # a global anon throttle would also cover the public training
+    # catalogue, where browsing is not an attack.
+    #
+    # The login and register scopes are doubled up, per IP and per targeted
+    # account, because per-IP alone is blind to a distributed attempt on
+    # one victim.
+    "DEFAULT_THROTTLE_RATES": {
+        "customer_login_ip": os.environ.get("THROTTLE_LOGIN_IP", "20/min"),
+        "customer_login_account": os.environ.get("THROTTLE_LOGIN_ACCOUNT", "10/min"),
+        "customer_register_ip": os.environ.get("THROTTLE_REGISTER_IP", "10/hour"),
+        "customer_register_account": os.environ.get("THROTTLE_REGISTER_ACCOUNT", "3/hour"),
+        "customer_verify_email": os.environ.get("THROTTLE_VERIFY_EMAIL", "30/hour"),
+        # Six digits, ~90s window: this is the difference between MFA and
+        # decoration.
+        "customer_mfa_confirm": os.environ.get("THROTTLE_MFA_CONFIRM", "10/hour"),
+    },
+    # Behind Alibaba's SLB every request arrives from the load balancer, so
+    # REMOTE_ADDR is the balancer for all of them and a per-IP throttle
+    # would rate-limit the entire customer base as one client. This tells
+    # DRF how many proxies to step back through X-Forwarded-For to find the
+    # real client. It must match the deployment: too high and a client can
+    # spoof its own address by prepending headers, too low and everyone
+    # shares one bucket.
+    "NUM_PROXIES": int(os.environ["NUM_PROXIES"]) if os.environ.get("NUM_PROXIES") else None,
+}
+
+# Throttle counters live in the cache. Django's default is per-process
+# local memory, which with several gunicorn workers means each worker
+# counts separately and the effective limit is multiplied by the worker
+# count -- and resets whenever a worker restarts. Redis is already here for
+# Celery, so the throttles use it and every worker shares one counter.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get("DJANGO_CACHE_URL", CELERY_BROKER_URL),
+    }
 }
 
 

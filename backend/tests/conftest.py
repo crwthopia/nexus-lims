@@ -25,6 +25,27 @@ STAFF_LOGIN_BACKEND = "django.contrib.auth.backends.ModelBackend"
 
 
 @pytest.fixture(autouse=True)
+def _clear_throttle_state():
+    """
+    Empty the cache between tests.
+
+    Throttle counters live in Redis (config/settings.CACHES), which is a
+    real server shared by the whole suite -- so without this, one test's
+    failed logins spend the rate limit and the *next* test gets a 429 it
+    never asked for. That makes the suite order-dependent and produces
+    failures that look like the code under test and are not.
+
+    It also means a test that wants to prove throttling works has to spend
+    the limit itself, which is the honest way to test it.
+    """
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_ssl_redirect(settings):
     """
     Turn off SECURE_SSL_REDIRECT for the duration of every test.
