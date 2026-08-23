@@ -368,19 +368,31 @@ jobs:
             -e CELERY_BROKER_URL=redis://127.0.0.1:6379/0 \
             $DB_ENV $COMMON_ENV \
             nexuslims-backend:ci
+          # What this step proves is that beat *boots and stays up* in the
+          # image: Django imports, the broker connects, the scheduler
+          # initialises and writes its file. That is the part no unit test
+          # can reach.
+          #
+          # It deliberately does not assert which entries are scheduled.
+          # tests/test_celery_beat_schedule.py already covers that, and
+          # checking it here is not merely redundant, it cannot work: beat
+          # persists entries only on sync or shutdown, so while it runs the
+          # shelve is empty -- and gdbm holds an exclusive lock on it, so a
+          # concurrent reader gets "Resource temporarily unavailable"
+          # rather than an answer. Both were confirmed the hard way.
           for _ in $(seq 1 30); do
             if docker exec nexuslims-beat /app/docker-healthcheck.sh 2>/dev/null; then
-              echo "Beat wrote its schedule file"
-              # The schedule it loaded must be the real one: a beat running
-              # with an empty schedule is alive and doing nothing, which the
-              # healthcheck above cannot distinguish.
-              #
-              # Read from the shelve rather than grepping the log. Beat logs
-              # only its Configuration block at INFO -- broker, scheduler,
-              # db path, maxinterval -- and never the entry names, so a grep
-              # for one could not have matched at any log level worth
-              # running in CI.
-              docker exec nexuslims-beat python -c "import shelve, sys; db = shelve.open('/app/beat/celerybeat-schedule'); names = sorted(db.get('entries', {})); db.close(); print('scheduled entries:', names); sys.exit(0 if {'retention-sweep-daily', 'training-capacity-check-daily'} <= set(names) else 1)"
+              echo "Beat initialised its scheduler"
+              # Still alive a few seconds later, so this is a running
+              # scheduler rather than one about to crash-loop.
+              sleep 5
+              if [ "$(docker inspect -f '{{.State.Running}}' nexuslims-beat)" != "true" ]; then
+                echo "Beat exited after starting"
+                docker logs nexuslims-beat
+                exit 1
+              fi
+              echo "Beat is still running"
+              docker logs nexuslims-beat 2>&1 | tail -20
               docker rm -f nexuslims-beat > /dev/null
               exit 0
             fi
