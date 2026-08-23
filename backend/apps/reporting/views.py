@@ -18,12 +18,22 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.accounts.authentication import CustomerSessionAuthentication
-from apps.accounts.permissions import IsCustomerAuthenticated
+from apps.accounts.models import Role
+from apps.accounts.permissions import IsCustomerAuthenticated, roles_required
 from apps.audit.oss import OSSNotConfiguredError, presigned_url
 from apps.common.params import int_param
 from apps.reporting.models import Report
 from apps.reporting.serializers import CustomerReportSerializer, ReportSerializer
 from apps.reporting.tasks import enqueue_generation
+
+RoleName = Role.RoleName
+
+# Issuing a report is the lab publishing a result to the customer, and it is
+# the step FR-C6-03 gates behind the sample already being approved -- so the
+# role that performs the approval, plus the supervisor, in the same shape as
+# INVESTIGATION_WRITE_ROLES. Reading is left to any authenticated staff
+# member: a report is evidence others need to consult.
+REPORT_WRITE_ROLES = (RoleName.APPROVER, RoleName.LAB_SUPERVISOR)
 
 
 class ReportViewSet(
@@ -32,6 +42,11 @@ class ReportViewSet(
     queryset = Report.objects.select_related("sample", "order", "generated_by")
     serializer_class = ReportSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [IsAuthenticated(), roles_required(*REPORT_WRITE_ROLES)()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         qs = super().get_queryset()
