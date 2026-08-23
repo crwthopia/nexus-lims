@@ -39,10 +39,15 @@ class CustomerRegisterSerializer(serializers.Serializer):
     organization_name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     prc_license_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
-    def validate_email(self, value):
-        if CustomerUser.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError("An account with this email already exists.")
-        return value
+    # Deliberately no uniqueness check here. Rejecting a duplicate at this
+    # layer is what made registration an enumeration oracle: it answers
+    # "An account with this email already exists" to any anonymous caller,
+    # which discloses whether any address belongs to a customer of this
+    # laboratory -- personal data under RA 10173.
+    #
+    # register_customer() handles the collision instead, by returning None
+    # and emailing the real owner, and the view answers identically either
+    # way. See tests/test_customer_auth_hardening.py.
 
 
 class CustomerLoginSerializer(serializers.Serializer):

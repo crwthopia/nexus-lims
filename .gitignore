@@ -56,3 +56,8 @@ Thumbs.db
 htmlcov/
 .coverage
 
+# Redis snapshots. redis-server writes dump.rdb into whatever directory it
+# was started from, so running it from backend/ during local testing drops
+# one into the tree. It is a binary database file that changes constantly
+# and can hold session keys and cache contents -- never versioned.
+*.rdb
