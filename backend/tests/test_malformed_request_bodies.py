@@ -32,6 +32,7 @@ from apps.samples.models import ChainOfCustodyEvent, Sample
 from tests.factories import (
     CreditNoteFactory,
     CustomerUserFactory,
+    EnrollmentFactory,
     RoleFactory,
     SampleFactory,
     StaffUserFactory,
@@ -144,8 +145,17 @@ def test_the_customer_credit_note_route_rejects_a_non_object_body(
     # The same helper backs both, but this one is reachable from the public
     # internet by any registered customer, which makes it the severe half.
     customer = CustomerUserFactory(is_email_verified=True)
+    # Built before logging in, and with the enrollment owned by the same
+    # customer. `enrollment` carries an RLS policy (apps/training/migrations/
+    # 0002) whose USING clause governs writes as well as reads, so creating
+    # another customer's row -- which CreditNoteFactory's default
+    # source_enrollment does -- is refused once the connection is in this
+    # customer's context. Fixture setup belongs before authentication
+    # regardless; this just makes the reason explicit.
+    credit_note = CreditNoteFactory(
+        customer=customer, source_enrollment=EnrollmentFactory(customer=customer)
+    )
     client = login_as_customer(customer)
-    credit_note = CreditNoteFactory(customer=customer)
 
     response = client.post(
         f"/api/v1/my/credit-notes/{credit_note.id}/apply/",
