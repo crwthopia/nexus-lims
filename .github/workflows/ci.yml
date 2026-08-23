@@ -370,10 +370,17 @@ jobs:
             nexuslims-backend:ci
           for _ in $(seq 1 30); do
             if docker exec nexuslims-beat /app/docker-healthcheck.sh 2>/dev/null; then
-              echo "Beat is scheduling"
-              # The schedule it loaded must be the real one: a beat that
-              # starts with an empty schedule is running and doing nothing.
-              docker logs nexuslims-beat 2>&1 | grep -q "retention-sweep-daily"
+              echo "Beat wrote its schedule file"
+              # The schedule it loaded must be the real one: a beat running
+              # with an empty schedule is alive and doing nothing, which the
+              # healthcheck above cannot distinguish.
+              #
+              # Read from the shelve rather than grepping the log. Beat logs
+              # only its Configuration block at INFO -- broker, scheduler,
+              # db path, maxinterval -- and never the entry names, so a grep
+              # for one could not have matched at any log level worth
+              # running in CI.
+              docker exec nexuslims-beat python -c "import shelve, sys; db = shelve.open('/app/beat/celerybeat-schedule'); names = sorted(db.get('entries', {})); db.close(); print('scheduled entries:', names); sys.exit(0 if {'retention-sweep-daily', 'training-capacity-check-daily'} <= set(names) else 1)"
               docker rm -f nexuslims-beat > /dev/null
               exit 0
             fi
