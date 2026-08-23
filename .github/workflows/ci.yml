@@ -197,6 +197,18 @@ jobs:
     env:
       # Reached from inside a container, so the host rather than localhost.
       PGHOST: 172.17.0.1
+      # The database credentials the roles below connect with. settings.py
+      # defaults POSTGRES_PASSWORD to an empty string, so omitting it here
+      # does not fall back to something workable -- it sends no password at
+      # all and Postgres refuses the connection. The user and database
+      # names match what the "Create the application database" step below
+      # creates.
+      DB_ENV: >-
+        -e POSTGRES_HOST=127.0.0.1
+        -e POSTGRES_PORT=5432
+        -e POSTGRES_DB=nasat_lims
+        -e POSTGRES_USER=nasat_lims
+        -e POSTGRES_PASSWORD=devpassword
       COMMON_ENV: >-
         -e DJANGO_DEBUG=false
         -e DJANGO_SECRET_KEY=ci-boot-only-not-a-real-secret-but-long-enough-to-pass
@@ -313,8 +325,7 @@ jobs:
         run: |
           docker run --rm --network host \
             -e NEXUSLIMS_ROLE=migrate \
-            -e POSTGRES_HOST=127.0.0.1 \
-            $COMMON_ENV \
+            $DB_ENV $COMMON_ENV \
             nexuslims-backend:ci
 
       # Twice, because a deploy runs this from every replica at once. The
@@ -324,8 +335,7 @@ jobs:
         run: |
           docker run --rm --network host \
             -e NEXUSLIMS_ROLE=migrate \
-            -e POSTGRES_HOST=127.0.0.1 \
-            $COMMON_ENV \
+            $DB_ENV $COMMON_ENV \
             nexuslims-backend:ci 2>&1 | tee /tmp/second-migrate.log
           grep -q "No migrations to apply" /tmp/second-migrate.log
 
@@ -333,10 +343,9 @@ jobs:
         run: |
           docker run -d --name nexuslims-worker --network host \
             -e NEXUSLIMS_ROLE=worker \
-            -e POSTGRES_HOST=127.0.0.1 \
             -e CELERY_BROKER_URL=redis://127.0.0.1:6379/0 \
             -e CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1 \
-            $COMMON_ENV \
+            $DB_ENV $COMMON_ENV \
             nexuslims-backend:ci
           # `inspect ping` over the broker, so this proves the worker is
           # consuming rather than merely that the process exists.
@@ -356,9 +365,8 @@ jobs:
         run: |
           docker run -d --name nexuslims-beat --network host \
             -e NEXUSLIMS_ROLE=beat \
-            -e POSTGRES_HOST=127.0.0.1 \
             -e CELERY_BROKER_URL=redis://127.0.0.1:6379/0 \
-            $COMMON_ENV \
+            $DB_ENV $COMMON_ENV \
             nexuslims-backend:ci
           for _ in $(seq 1 30); do
             if docker exec nexuslims-beat /app/docker-healthcheck.sh 2>/dev/null; then
