@@ -70,6 +70,9 @@ export function Layout() {
               <NavLink to="/billing" style={navStyle}>
                 Billing
               </NavLink>
+              <NavLink to="/system-failures" style={navStyle}>
+                System
+              </NavLink>
               {canTest && (
                 <NavLink to="/testing-queue" style={navStyle}>
                   Testing Queue

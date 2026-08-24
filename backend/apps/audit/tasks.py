@@ -29,7 +29,8 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
-from apps.audit.models import AuditLogEntry, RetentionPolicy
+from apps.audit.failures import record_failure
+from apps.audit.models import AuditLogEntry, RetentionPolicy, SystemFailure
 from apps.audit.oss import OSSNotConfiguredError, archive_object
 
 logger = logging.getLogger(__name__)
@@ -113,14 +114,37 @@ def _move_to_cold_storage_tier(entity_type, entity_id):
 
     try:
         return archive_object(key)
-    except OSSNotConfiguredError:
+    except OSSNotConfiguredError as exc:
         logger.warning(
             "retention: OSS not configured, cannot archive %s#%s this run (will retry next sweep)",
             entity_type, entity_id,
         )
+        # Recorded rather than only logged (ISO/IEC 17025:2017 7.11.3(e)).
+        # These two branches are the reason the register cannot rely on the
+        # task_failure signal alone: they swallow the error deliberately so
+        # the sweep carries on with the other records, which means the task
+        # succeeds and task_failure never fires. A retention action that
+        # silently did not happen is exactly what 7.11.3(e) is for.
+        #
+        # DEGRADED, not FAILED: the record is left unprocessed on purpose
+        # and the next nightly sweep retries it -- see _already_processed.
+        record_failure(
+            SystemFailure.Component.OBJECT_STORAGE,
+            "retention archival skipped: object storage is not configured",
+            detail=f"{entity_type}#{entity_id}: {exc}",
+            severity=SystemFailure.Severity.DEGRADED,
+            immediate_action=SystemFailure.ImmediateAction.RETRY_SCHEDULED,
+        )
         return False
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 -- recorded, then the sweep continues
         logger.exception("retention: failed to archive OSS object for %s#%s", entity_type, entity_id)
+        record_failure(
+            SystemFailure.Component.OBJECT_STORAGE,
+            f"retention archival raised {type(exc).__name__}",
+            detail=f"{entity_type}#{entity_id}: {exc}",
+            severity=SystemFailure.Severity.DEGRADED,
+            immediate_action=SystemFailure.ImmediateAction.RETRY_SCHEDULED,
+        )
         return False
 
 

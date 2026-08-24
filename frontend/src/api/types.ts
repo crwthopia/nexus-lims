@@ -589,3 +589,60 @@ export const SAMPLE_REPORT_TYPES: ReportType[] = [
   "water_environmental_coa",
   "custom",
 ];
+
+/**
+ * The ISO/IEC 17025:2017 7.11.3(e) system failure register
+ * (backend/apps/audit/models.py SystemFailure).
+ *
+ * `immediate_action` is what the system did by itself at the moment of
+ * failure; `corrective_action` is what a person did so it stops happening.
+ * The API refuses to close a failure while the second is empty.
+ */
+export type SystemFailureComponent =
+  | "report_generation"
+  | "retention_sweep"
+  | "object_storage"
+  | "database"
+  | "task_broker"
+  | "scheduled_task"
+  | "api_request";
+
+export type SystemFailureSeverity = "degraded" | "failed";
+export type SystemFailureStatus = "open" | "acknowledged" | "closed";
+
+export interface SystemFailure {
+  id: number;
+  component: SystemFailureComponent;
+  component_display: string;
+  severity: SystemFailureSeverity;
+  summary: string;
+  detail: string;
+  immediate_action: string;
+  immediate_action_display: string;
+  occurrences: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  status: SystemFailureStatus;
+  acknowledged_by: number | null;
+  acknowledged_by_display_name: string | null;
+  acknowledged_at: string | null;
+  corrective_action: string;
+  investigation: number | null;
+  closed_by: number | null;
+  closed_by_display_name: string | null;
+  closed_at: string | null;
+}
+
+export const SYSTEM_FAILURE_STATUS_LABELS: Record<SystemFailureStatus, string> = {
+  open: "Open",
+  acknowledged: "Acknowledged",
+  closed: "Closed",
+};
+
+export const SYSTEM_FAILURE_SEVERITY_LABELS: Record<SystemFailureSeverity, string> = {
+  degraded: "Degraded",
+  failed: "Failed",
+};
+
+/** FAILURE_WRITE_ROLES (backend/apps/audit/views.py) -- keep in sync by hand. */
+export const SYSTEM_FAILURE_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];

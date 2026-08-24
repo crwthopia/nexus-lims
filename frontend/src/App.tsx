@@ -10,6 +10,7 @@ import { TestRequestDetail } from "./pages/TestRequestDetail";
 import { DocumentsList } from "./pages/DocumentsList";
 import { DocumentDetail } from "./pages/DocumentDetail";
 import { InvestigationsList } from "./pages/InvestigationsList";
+import { SystemFailuresList } from "./pages/SystemFailuresList";
 import { InvestigationDetail } from "./pages/InvestigationDetail";
 import { EquipmentList } from "./pages/EquipmentList";
 import { InstrumentDetail } from "./pages/InstrumentDetail";
@@ -46,6 +47,7 @@ function App() {
         <Route path="/training-sessions/:id" element={<TrainingSessionDetail />} />
         <Route path="/reports" element={<ReportsList />} />
         <Route path="/billing" element={<BillingList />} />
+        <Route path="/system-failures" element={<SystemFailuresList />} />
         <Route path="/invoices/:id" element={<InvoiceDetail />} />
       </Route>
     </Routes>
