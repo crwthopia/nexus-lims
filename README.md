@@ -17,8 +17,10 @@ was invented outside that grounding.
 ## What's actually working, end to end
 
 - **Data layer**: full 26-entity PostgreSQL schema, monthly-partitioned
-  audit log, row-level security *forced* (not just enabled) on
-  customer-visible tables, retention policy seeded per Blueprint defaults.
+  audit log that the database itself refuses to update, delete or truncate
+  (see Append-only audit ledger below), row-level security *forced* (not just
+  enabled) on customer-visible tables, retention policy seeded per Blueprint
+  defaults.
 - **API layer**: DRF resource groups for the full sample → testing →
   review → approval → report FSM chain, with the segregation-of-duties
   guard enforced server-side, not just documented.
@@ -85,9 +87,11 @@ nexus-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, both frontends' lint/test/typecheck/build
-├── docs/                      <- external-facing specs
-│   └── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, traceability-matrix drift check, both frontends' lint/test/typecheck/build
+├── docs/                      <- external-facing specs and validation evidence
+│   ├── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
+│   ├── traceability-matrix.md <- generated: requirement -> implementation -> test (ISO/IEC 17025 7.11.2)
+│   └── traceability-matrix.csv <- the same matrix, one row per test, for a validation pack
 ├── infra/                     <- Terraform for Blueprint Section 2.2 (VPC, OSS, RDS, Redis) -- never applied, see infra/README.md
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
@@ -1089,6 +1093,96 @@ Verified directly against Postgres, not just via HTTP status codes: as the
 app's own (non-superuser) DB role, zero RLS context returns zero rows;
 `rls.is_staff='true'` returns everything; two customers seeded with their
 own `Order`+`Sample` each see only their own row, with zero cross-visibility.
+
+## Append-only audit ledger
+
+`AuditLogEntry` was always described as append-only, and until
+`apps/audit/migrations/0004_audit_log_append_only.py` that was an
+application-layer promise: no endpoint or admin action exposed an update or a
+delete. True, but only for as long as every future view, management command
+and `manage.py shell` session remembered it — and an audit ledger under
+ISO/IEC 17025:2017 8.4.2 exists precisely for the case where something does
+not.
+
+Postgres enforces it now, by the same move the RLS work made: stop asking the
+application to be careful. Two mechanisms, because on a partitioned table
+neither covers the whole surface on its own.
+
+| Mechanism | Covers | Does not cover |
+|---|---|---|
+| `REVOKE UPDATE, DELETE, TRUNCATE` from the app role | The parent, and every partition existing when the migration ran. DML privileges are checked against the table actually named, so `DELETE FROM audit_log_entry_2026_08` is checked against that partition, not the parent | Partitions created later — they do not exist yet to be revoked on |
+| `BEFORE UPDATE OR DELETE ... FOR EACH ROW` on the parent | Every partition, including ones created afterwards: Postgres clones row-level triggers from a partitioned parent onto new partitions | `TRUNCATE`, which fires no row trigger |
+
+Between them the only gap left is `TRUNCATE` of a partition created after the
+migration — statement-level triggers are *not* cloned onto partitions the way
+row-level ones are. Rather than leave that as a comment nobody reads,
+`tests/test_audit_append_only.py` asserts that **every** partition of
+`audit_log_entry` has the three privileges revoked, so the first
+partition-creation code that forgets fails CI instead of shipping.
+
+Verified against a real PostgreSQL database, not just asserted: `INSERT` still
+works (all `signals.py` and the retention sweep ever do), while `UPDATE`,
+`DELETE` and `TRUNCATE` are refused through the parent, directly against an
+existing partition, and directly against a partition created after the
+migration — through the ORM and through raw SQL alike.
+
+**What this does not stop**, stated plainly because a control described as
+more than it is, is worse than no control:
+
+- **A superuser.** Superusers bypass privilege checks entirely — the same
+  reason `infra/` provisions the RDS account as `Normal`, and the same reason
+  the RLS policies needed `FORCE`.
+- **The owner re-granting to itself.** The application role owns these tables,
+  so it can `GRANT` the privileges back and disable the trigger. Closing that
+  means the application connecting as a role that does not own the schema,
+  with migrations run by a separate DDL role — a deployment change (`infra/`
+  and `docker-entrypoint.sh` both assume one role today), not a schema one.
+  It is the right next step to harden the ledger against a compromised
+  application rather than against the application's own mistakes.
+
+## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
+
+7.11.2 requires the LIMS to be validated for functionality before
+introduction, and re-validated whenever it changes. An assessor asks two
+questions of that claim: which test discharges each requirement, and which
+requirement has nothing verifying it. A test suite answers neither on its own
+— the mapping lives in docstrings, where nobody can audit it in aggregate.
+
+`backend/tools/traceability.py` reads that mapping out of the source and
+writes [`docs/traceability-matrix.md`](docs/traceability-matrix.md) (and a
+CSV alongside it, for pasting into a validation pack). It is a *reporter*, not
+a second database: the requirement IDs stay in the code next to what
+implements them, so they cannot drift out of sync with a separately
+maintained spreadsheet. The attribution rules are documented at the top of the
+script, including which one can over-attribute and why it is deliberately
+narrow.
+
+Regenerating is the whole update process:
+
+```bash
+cd backend
+python tools/traceability.py --write     # regenerate
+python tools/traceability.py --check     # exit 1 if the committed copy is stale
+```
+
+Staleness is a build failure — `tests/test_traceability.py`, plus its own CI
+job so the check still runs on a day the application will not boot. That is
+what makes the matrix evidence rather than documentation: a matrix that was
+accurate when someone generated it and has drifted since is worse than none,
+because it asserts coverage the code no longer has.
+
+The script is stdlib-only and imports no Django, for the same reason.
+
+**It is one input to a validation report, not the report.** It records that a
+requirement has a verifying test; it does not record who authorized the
+change, who reviewed the result, or when the run was witnessed. Those are
+7.11.2's other half and belong in the change-control record.
+
+The current run reports **22 requirements referenced in source, 13 with no
+test citing them**. That number is the point of the exercise rather than an
+embarrassment: most of those thirteen are covered by tests that never name
+the requirement, and an assessor cannot tell that apart from a genuine gap —
+which is exactly why the matrix is worth having before someone asks.
 
 ## Instrument raw-data ingestion
 

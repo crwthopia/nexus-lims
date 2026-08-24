@@ -2,12 +2,17 @@
 Audit and Retention entities (Blueprint Section 3.1 AuditLogEntry, Section
 3.1a RetentionPolicy, Section 7.2, Section 7.4a).
 
-AuditLogEntry is append-only at the application layer (FR-E17-02): no
-update/delete permission is exposed via any API endpoint or Django admin
-action; only a direct, logged database administrator action can alter it.
-This is enforced in apps.audit.permissions / admin.py (not representable as
-a pure model-layer constraint against a superuser), and is noted here so it
-is not silently overlooked in views.py.
+AuditLogEntry is append-only (FR-E17-02), enforced in Postgres rather than
+by convention: migration 0004 revokes UPDATE/DELETE/TRUNCATE from the
+application's database role and adds a row-level trigger that refuses both,
+so the ORM, raw SQL, a management command and SQL injection are all denied
+alike. apps.audit.permissions / admin.py still withhold it at the API layer,
+which is now the outer of two rings rather than the only one.
+
+What that does not cover -- a superuser, and the table's owner re-granting
+to itself -- is set out in migration 0004's docstring, along with the
+deployment change that would. tests/test_audit_append_only.py verifies the
+whole surface, including partitions created after the migration ran.
 
 AuditLogEntry.timestamp is partitioned monthly at the database layer via
 native PostgreSQL declarative range partitioning (Blueprint Section 2.1
