@@ -37,6 +37,8 @@ class NotificationRecord(models.Model):
         INVESTIGATION_OPENED = "investigation_opened", "Investigation opened"
         RESULT_OUT_OF_SPEC = "result_out_of_spec", "Test result flagged out of specification"
         # Customer-facing
+        SAMPLE_PROGRESS = "sample_progress", "Sample reached a milestone"
+        SAMPLE_PROGRESS_DIGEST = "sample_progress_digest", "Daily sample-progress digest"
         REPORT_READY = "report_ready", "Report ready to download"
         TRAINING_SESSION_RESCHEDULED = "training_session_rescheduled", "Training session rescheduled"
         CUSTOMER_EMAIL_VERIFICATION = "customer_email_verification", "Customer email verification"
@@ -61,6 +63,17 @@ class NotificationRecord(models.Model):
     # and so "has this instrument already been chased?" is answerable.
     entity_type = models.CharField(max_length=64, blank=True)
     entity_id = models.BigIntegerField(null=True, blank=True)
+
+    # Identifiers, enum values and counts only -- never a measured value,
+    # never document content. The body is deliberately not stored (see the
+    # module docstring) and this must not become a way around that.
+    #
+    # It exists because some notifications describe a *transition*, and the
+    # entity has moved on by the time a worker picks the row up: a sample
+    # that goes received -> in_prep in the same minute would otherwise send
+    # "your sample is in prep" under the subject "sample received". Storing
+    # the milestone at queue time is what keeps the message true.
+    context = models.JSONField(default=dict, blank=True)
 
     # Unique, and that is the whole mechanism. See the module docstring:
     # a sweep re-running must lose at the database, not in a prior SELECT.

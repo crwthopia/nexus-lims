@@ -25,6 +25,7 @@ from apps.common.params import body_dict, int_param, str_param
 from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
 from apps.review.services import SegregationOfDutiesError, check_can_approve
+from apps.notifications.tasks import notify_sample_progress
 from apps.samples.models import ChainOfCustodyEvent, Order, Sample
 from apps.samples.serializers import (
     ChainOfCustodyEventSerializer,
@@ -45,6 +46,11 @@ def _run_transition(sample, method_name):
             f"Cannot perform '{method_name}' while Sample is '{sample.status}': {exc}"
         )
     sample.save()
+    # Every Sample transition runs through here, so one call covers all ten
+    # rather than ten actions each remembering to notify. Which milestones a
+    # customer actually hears about -- and which are never sent
+    # automatically -- is decided in apps/notifications/tasks.py.
+    notify_sample_progress(sample)
 
 
 class OrderViewSet(viewsets.ModelViewSet):

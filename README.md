@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **392-test automated regression suite** (`backend/tests/`, pytest +
+- **408-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -1268,6 +1268,7 @@ if and only if the thing it describes actually happened.
 | Calibration due | Nightly sweep, `CALIBRATION_DUE_WARNING_DAYS` ahead (6.4) | The instrument's custodian, falling back to every Instrument Custodian |
 | Investigation opened | `POST /investigations/` (7.10) | QA Officer, Lab Supervisor |
 | Out-of-specification result | A `TestResult` flagged on entry (FR-C3-08) | QA Officer, Lab Supervisor |
+| Sample progress | A Sample reaches `received`, `in_testing` or `approved` | The customer, per sample or as a daily per-order digest |
 | Report ready | The generation task marks a report `ready` | The customer the report belongs to |
 | Training session rescheduled | The capacity check reschedules a session | The enrolled customer |
 | Customer verification / duplicate registration | Registration | The customer |
@@ -1294,6 +1295,57 @@ deduplicates at all: the alert fires on the **create** path only, never on the
 coalescing path. A dependency probed every few seconds would otherwise be an
 email every few seconds, all night, with the one that mattered somewhere in
 the middle of it.
+
+### Sample progress, and why it is only three of eleven states
+
+Customers want to know their sample arrived, that analysis started, and that
+it finished. The Sample FSM has **eleven** states, and mailing all of them
+would be eleven emails per sample for eight events nobody outside the lab can
+act on.
+
+`CUSTOMER_NOTIFIED_SAMPLE_STATUSES` defaults to `received,in_testing,approved`:
+
+| Status | Sent? | |
+|---|---|---|
+| `pre_registered`, `registered` | No | Bookkeeping before the sample physically exists at the lab |
+| `received` | **Yes** | "Has arrived at the laboratory" — the one customers chase the lab about |
+| `in_prep` | No | Internal |
+| `in_testing` | **Yes** | "Is now being analysed" |
+| `under_review` | No | Internal QA step |
+| `approved` | **Yes** | "Analysis complete, results approved" |
+| `under_investigation`, `rejected`, `retest_pending` | **Never** | See below |
+| `disposed` | Configurable, off | End of physical custody; usually contractual |
+
+**Nonconforming work is never sent automatically.** `under_investigation`,
+`rejected` and `retest_pending` are in a `NEVER_AUTO_NOTIFIED` frozenset in
+code, not in settings, and widening the configured list cannot switch them on.
+ISO/IEC 17025:2017 7.10 asks the laboratory to *evaluate* nonconforming work
+and decide whether the customer needs telling; an automatic "your sample
+failed" fires before anybody has evaluated anything. It pre-empts a judgement
+the lab is required to make, and it is the email you can never take back.
+
+The hook is a single line in `apps/samples/views._run_transition`, which every
+one of the ten Sample transitions already runs through — so this sees all of
+them and filters, rather than ten call sites each remembering to notify.
+
+**Big orders are digested.** A 30-sample water order at three milestones is 90
+emails, which is how a customer learns to filter the lab into a folder they
+never open. Above `SAMPLE_PROGRESS_DIGEST_THRESHOLD` samples on one order,
+nothing is sent at transition time; `send_sample_progress_digests` runs each
+evening and sends one message per order per milestone — "3 of the 4 samples on
+order #12 have arrived at the laboratory".
+
+That task reads the **audit ledger**, not the samples. A sample sitting in
+`received` cannot tell you whether it arrived today or last week, whereas
+`apps/audit/signals.py` already writes a row per status change with the new
+value on it. Same reason the retention sweep reads the ledger for its own
+idempotency: the ledger is the record of what *happened*, and everything else
+is the record of what *is*.
+
+The milestone is stored on the notification at queue time rather than read
+back at send time. A sample can move twice before a worker picks the row up,
+and without that the body would describe wherever it ended up under a subject
+line about where it was.
 
 ### Nothing confidential travels by email
 

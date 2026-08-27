@@ -186,6 +186,12 @@ CELERY_BEAT_SCHEDULE = {
     # that was written but never handed to a worker because the broker was
     # down, and a customer waiting on a verification email should not wait
     # until tomorrow for it.
+    # Evening rather than morning: it reports what moved today, so it has to
+    # run after the day's work rather than before it.
+    "sample-progress-digest-daily": {
+        "task": "apps.notifications.tasks.send_sample_progress_digests",
+        "schedule": crontab(hour=18, minute=0),
+    },
     "retry-stalled-notifications-hourly": {
         "task": "apps.notifications.tasks.retry_stalled_notifications",
         "schedule": crontab(minute=15),
@@ -307,6 +313,24 @@ STAFF_CONSOLE_BASE_URL = os.environ.get("STAFF_CONSOLE_BASE_URL", "")
 # a stall, short enough that a broker blip does not strand a customer waiting
 # on a verification link.
 NOTIFICATION_STALL_MINUTES = int(os.environ.get("NOTIFICATION_STALL_MINUTES", "15"))
+
+# Which Sample milestones a customer is emailed about. The lab's FSM has
+# eleven states; these are the three a customer can act on or is waiting for
+# -- their sample arrived, analysis started, analysis finished. The rest are
+# internal (in_prep, under_review) or are nonconforming work that a person
+# must decide how to communicate, which apps/notifications/tasks.py refuses
+# to send automatically whatever this is set to.
+CUSTOMER_NOTIFIED_SAMPLE_STATUSES = [
+    s.strip()
+    for s in os.environ.get("CUSTOMER_NOTIFIED_SAMPLE_STATUSES", "received,in_testing,approved").split(",")
+    if s.strip()
+]
+
+# Above this many samples on one order, progress is a once-daily digest
+# instead of an email per sample. A 30-sample water order at three milestones
+# is 90 emails otherwise, which is how a customer learns to filter the lab
+# into a folder they never open.
+SAMPLE_PROGRESS_DIGEST_THRESHOLD = int(os.environ.get("SAMPLE_PROGRESS_DIGEST_THRESHOLD", "5"))
 
 # Base URL of the React Customer Portal (customer-portal/, Blueprint Section
 # 5.2), used to build the clickable verification link; the console email

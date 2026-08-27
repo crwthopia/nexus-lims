@@ -29,6 +29,17 @@ from apps.notifications.models import NotificationRecord
 Kind = NotificationRecord.Kind
 
 
+# Customer-facing wording for the milestones a customer is told about. The
+# lab's own status names ("in_testing", "approved") are internal vocabulary;
+# a customer should not have to learn the FSM to read their email.
+MILESTONE_WORDING = {
+    "received": "has arrived at the laboratory",
+    "in_testing": "is now being analysed",
+    "approved": "has completed analysis and the results are approved",
+    "disposed": "has been disposed of, ending the laboratory's custody",
+}
+
+
 class NotificationEntityGone(Exception):
     """The record a queued notification described no longer exists."""
 
@@ -147,6 +158,48 @@ def _result_out_of_spec(record):
 
 # --- Customer --------------------------------------------------------------
 
+def _sample_progress(record):
+    from apps.samples.models import Sample
+
+    sample = _entity(record, Sample)
+    # The milestone as it was when this was queued, not as the sample is now
+    # -- a sample can move twice before a worker picks the row up, and the
+    # message has to match the subject it was sent under.
+    status = record.context.get("status", sample.status)
+    milestone = MILESTONE_WORDING.get(status, "moved to a new stage")
+
+    return (
+        f"Your sample {sample.unique_sample_code} {milestone}.\n\n"
+        f"Sample:    {sample.unique_sample_code}\n"
+        + (f"Your reference: {sample.client_reference}\n" if sample.client_reference else "")
+        + f"\nYou can follow its progress in the NexusLIMS Customer Portal:\n\n"
+        f"{_portal_url('/samples')}\n\n"
+        f"Results are not included in this message and are never sent by email. "
+        f"They are released through your account once the report is issued.\n"
+    )
+
+
+def _sample_progress_digest(record):
+    from apps.samples.models import Order
+
+    order = _entity(record, Order)
+    status = record.context.get("status", "")
+    count = record.context.get("count", 0)
+    total = order.samples.count()
+    milestone = MILESTONE_WORDING.get(status, "moved to a new stage")
+
+    return (
+        f"{count} of the {total} samples on order #{order.id} {milestone}.\n\n"
+        f"Order:        #{order.id} ({order.get_service_line_display()})\n"
+        f"Milestone:    {milestone}\n"
+        f"Samples:      {count} of {total}\n\n"
+        f"Per-sample detail is in the NexusLIMS Customer Portal:\n\n"
+        f"{_portal_url('/samples')}\n\n"
+        f"Results are not included in this message and are never sent by email. "
+        f"They are released through your account once the report is issued.\n"
+    )
+
+
 def _report_ready(record):
     from apps.reporting.models import Report
 
@@ -210,6 +263,8 @@ BODY_BUILDERS = {
     Kind.CALIBRATION_DUE: _calibration_due,
     Kind.INVESTIGATION_OPENED: _investigation_opened,
     Kind.RESULT_OUT_OF_SPEC: _result_out_of_spec,
+    Kind.SAMPLE_PROGRESS: _sample_progress,
+    Kind.SAMPLE_PROGRESS_DIGEST: _sample_progress_digest,
     Kind.REPORT_READY: _report_ready,
     Kind.TRAINING_SESSION_RESCHEDULED: _training_session_rescheduled,
     Kind.CUSTOMER_EMAIL_VERIFICATION: _customer_email_verification,

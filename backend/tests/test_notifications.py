@@ -30,10 +30,13 @@ from apps.audit.models import SystemFailure
 from apps.notifications.messages import BODY_BUILDERS, NotificationEntityGone, build_body
 from apps.notifications.models import NotificationRecord
 from apps.notifications.notify import notify, notify_each, staff_emails_for_roles
+from apps.samples.models import Sample
 from apps.notifications.tasks import (
+    notify_sample_progress,
     retry_stalled_notifications,
     send_notification,
     send_open_failure_digest,
+    send_sample_progress_digests,
     sweep_calibration_due,
 )
 from tests.factories import (
@@ -50,6 +53,34 @@ pytestmark = pytest.mark.django_db
 
 Kind = NotificationRecord.Kind
 Status = NotificationRecord.Status
+
+
+def _record_status_change(sample, status, when=None):
+    """
+    The audit row a real status change writes (apps/audit/signals.py).
+
+    The digest reads the ledger rather than the samples, because a sample
+    sitting in `received` cannot say whether it arrived today or last week.
+    These tests force status with a queryset update -- which sends no signals
+    by design -- so the ledger row has to be written explicitly here.
+
+    Raw INSERT rather than the ORM because `timestamp` is auto_now_add, and
+    a test that needs a row dated three days ago cannot set it any other way:
+    migration 0004 revoked UPDATE on this table, so ageing it afterwards is
+    refused. That refusal is the append-only ledger doing its job -- INSERT
+    is the only door, for tests as much as for the application.
+    """
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO audit_log_entry
+                (actor_type, entity_type, entity_id, field_changed, old_value, new_value, reason, "timestamp")
+            VALUES ('system', 'Sample', %s, 'status', NULL, %s, '', %s)
+            """,
+            [sample.pk, status, when or timezone.now()],
+        )
 
 
 # --- Queueing and delivery -------------------------------------------------
@@ -505,3 +536,186 @@ def test_the_retry_stops_rather_than_hammering_a_broker_that_is_still_down(monke
 
     assert retry_stalled_notifications() == {"requeued": 0}
     assert len(attempts) == 1
+
+
+# --- Sample progress -------------------------------------------------------
+
+_NO_ORDER = object()
+
+
+def _sample_at(status, order=_NO_ORDER, **kwargs):
+    """
+    A Sample forced to `status`, bypassing the FSM's protected field.
+
+    The sentinel matters: `order=None` is a walk-in sample with deliberately
+    no Order, which is different from "caller did not say" -- an `or` here
+    would quietly give the walk-in test an order and assert nothing.
+    """
+    sample = SampleFactory(order=OrderFactory() if order is _NO_ORDER else order, **kwargs)
+    Sample.objects.filter(pk=sample.pk).update(status=status)
+    return Sample.objects.get(pk=sample.pk)
+
+
+def test_a_customer_hears_when_their_sample_arrives():
+    sample = _sample_at(Sample.Status.RECEIVED)
+
+    notify_sample_progress(sample)
+
+    record = NotificationRecord.objects.get(kind=Kind.SAMPLE_PROGRESS)
+    assert record.recipient == sample.order.customer.email
+    assert record.context == {"status": "received"}
+    assert "arrived" in record.subject
+
+
+def test_an_internal_step_is_not_a_customer_milestone():
+    """Eleven lab states are not eleven customer emails."""
+    for status in (Sample.Status.PRE_REGISTERED, Sample.Status.REGISTERED,
+                   Sample.Status.IN_PREP, Sample.Status.UNDER_REVIEW):
+        notify_sample_progress(_sample_at(status))
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS).exists()
+
+
+@pytest.mark.parametrize("status", ["under_investigation", "rejected", "retest_pending"])
+def test_nonconforming_work_is_never_auto_notified(status, settings):
+    """
+    7.10 asks the laboratory to evaluate nonconforming work and decide
+    whether the customer needs telling. An automatic "your sample failed"
+    pre-empts that judgement -- so widening the configured list must not be
+    able to switch it on.
+    """
+    settings.CUSTOMER_NOTIFIED_SAMPLE_STATUSES = [status]
+
+    notify_sample_progress(_sample_at(status))
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS).exists()
+
+
+def test_the_milestone_is_pinned_at_queue_time_not_read_at_send_time():
+    """
+    A sample can move twice before a worker picks the row up. Without the
+    stored milestone the body would describe wherever it ended up, under a
+    subject line about where it was.
+    """
+    sample = _sample_at(Sample.Status.RECEIVED)
+    notify_sample_progress(sample)
+    record = NotificationRecord.objects.get(kind=Kind.SAMPLE_PROGRESS)
+
+    Sample.objects.filter(pk=sample.pk).update(status=Sample.Status.IN_PREP)
+    send_notification(record.pk)
+
+    assert "arrived at the laboratory" in mail.outbox[-1].body
+    assert "in prep" not in mail.outbox[-1].body.lower()
+
+
+def test_a_retest_does_not_re_announce_that_testing_started():
+    sample = _sample_at(Sample.Status.IN_TESTING)
+
+    notify_sample_progress(sample)
+    notify_sample_progress(sample)
+
+    assert NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS).count() == 1
+
+
+def test_a_walk_in_sample_has_no_customer_to_tell():
+    """The Order FK is nullable for over-the-counter work; that is not a failure."""
+    sample = _sample_at(Sample.Status.RECEIVED, order=None)
+
+    assert notify_sample_progress(sample) == []
+    assert not NotificationRecord.objects.exists()
+
+
+def test_no_result_travels_with_a_progress_update():
+    sample = _sample_at(Sample.Status.APPROVED)
+    notify_sample_progress(sample)
+
+    send_notification(NotificationRecord.objects.get(kind=Kind.SAMPLE_PROGRESS).pk)
+
+    body = mail.outbox[-1].body
+    assert "never sent by email" in body
+    assert sample.unique_sample_code in body
+
+
+# --- Sample progress: the digest for big orders ----------------------------
+
+def test_a_big_order_is_not_mailed_per_sample(settings):
+    """A 30-sample order at three milestones is 90 emails otherwise."""
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 2
+    order = OrderFactory()
+    samples = [_sample_at(Sample.Status.RECEIVED, order=order) for _ in range(4)]
+
+    for sample in samples:
+        notify_sample_progress(sample)
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS).exists()
+
+
+def test_a_small_order_is_still_mailed_as_it_happens(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 5
+    order = OrderFactory()
+    sample = _sample_at(Sample.Status.RECEIVED, order=order)
+
+    notify_sample_progress(sample)
+
+    assert NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS).count() == 1
+
+
+def test_the_digest_reports_what_moved_today(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 2
+    order = OrderFactory()
+    samples = [_sample_at(Sample.Status.RECEIVED, order=order) for _ in range(4)]
+    for sample in samples[:3]:
+        _record_status_change(sample, "received")
+
+    send_sample_progress_digests()
+    deliver_queued_notifications()
+
+    digest = next(m for m in mail.outbox if "order #" in m.subject)
+    assert digest.to == [order.customer.email]
+    assert "3 of the 4 samples" in digest.body
+
+
+def test_the_digest_goes_out_once_per_order_per_milestone_per_day(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 2
+    order = OrderFactory()
+    for _ in range(4):
+        _record_status_change(_sample_at(Sample.Status.RECEIVED, order=order), "received")
+
+    send_sample_progress_digests()
+    send_sample_progress_digests()
+
+    assert NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS_DIGEST).count() == 1
+
+
+def test_the_digest_ignores_a_small_order_that_was_already_mailed(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 10
+    order = OrderFactory()
+    _record_status_change(_sample_at(Sample.Status.RECEIVED, order=order), "received")
+
+    send_sample_progress_digests()
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS_DIGEST).exists()
+
+
+def test_the_digest_does_not_report_nonconforming_work(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 2
+    settings.CUSTOMER_NOTIFIED_SAMPLE_STATUSES = ["received", "under_investigation"]
+    order = OrderFactory()
+    for _ in range(4):
+        _record_status_change(_sample_at(Sample.Status.UNDER_INVESTIGATION, order=order), "under_investigation")
+
+    send_sample_progress_digests()
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS_DIGEST).exists()
+
+
+def test_yesterdays_movement_is_not_in_todays_digest(settings):
+    settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD = 2
+    order = OrderFactory()
+    three_days_ago = timezone.now() - timezone.timedelta(days=3)
+    for _ in range(4):
+        _record_status_change(_sample_at(Sample.Status.RECEIVED, order=order), "received", when=three_days_ago)
+
+    send_sample_progress_digests()
+
+    assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS_DIGEST).exists()

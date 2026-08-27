@@ -56,7 +56,7 @@ def staff_emails_for_roles(*role_names):
     )
 
 
-def notify(kind, recipient, subject, *, dedupe_key, entity=None):
+def notify(kind, recipient, subject, *, dedupe_key, entity=None, context=None):
     """
     Queue one notification. Returns the NotificationRecord, or None if
     `dedupe_key` has already been used.
@@ -78,6 +78,7 @@ def notify(kind, recipient, subject, *, dedupe_key, entity=None):
                 subject=subject[:255],
                 entity_type=entity_type,
                 entity_id=entity_id,
+                context=context or {},
                 dedupe_key=dedupe_key[:255],
             )
     except IntegrityError:
@@ -94,7 +95,7 @@ def notify(kind, recipient, subject, *, dedupe_key, entity=None):
     return record
 
 
-def notify_each(kind, recipients, subject, *, dedupe_key, entity=None):
+def notify_each(kind, recipients, subject, *, dedupe_key, entity=None, context=None):
     """
     Same notification to several people, one row each.
 
@@ -106,7 +107,9 @@ def notify_each(kind, recipients, subject, *, dedupe_key, entity=None):
     return [
         record
         for recipient in recipients
-        if (record := notify(kind, recipient, subject, dedupe_key=f"{dedupe_key}:{recipient}", entity=entity))
+        if (record := notify(
+            kind, recipient, subject, dedupe_key=f"{dedupe_key}:{recipient}", entity=entity, context=context,
+        ))
     ]
 
 

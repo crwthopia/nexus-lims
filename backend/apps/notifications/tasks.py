@@ -217,6 +217,140 @@ def notify_system_failure(failure):
     )
 
 
+# Statuses a customer is never told about automatically, whatever
+# CUSTOMER_NOTIFIED_SAMPLE_STATUSES is set to. These are nonconforming work
+# (ISO/IEC 17025:2017 7.10), and the clause asks the laboratory to *evaluate*
+# it and decide whether the customer needs notifying. An automatic "your
+# sample failed" fires before anybody has evaluated anything: it pre-empts a
+# judgement the lab is required to make, and it is the email you can never
+# take back.
+#
+# In code rather than in settings on purpose. Widening the configured
+# milestone list in a deployment must not be able to switch on automatic bad
+# news by accident.
+NEVER_AUTO_NOTIFIED = frozenset({"under_investigation", "rejected", "retest_pending"})
+
+
+def notify_sample_progress(sample):
+    """
+    Tell a customer their sample reached a milestone they care about.
+
+    Called from apps/samples/views._run_transition, which every Sample
+    transition runs through -- so this sees all ten of them and filters,
+    rather than ten call sites each remembering to notify.
+
+    Above SAMPLE_PROGRESS_DIGEST_THRESHOLD samples on the order, nothing is
+    sent here: a 30-sample water order would otherwise be 30 emails per
+    milestone, 90 for the job. Those orders are picked up once a day by
+    send_sample_progress_digests instead.
+    """
+    from django.conf import settings as django_settings
+
+    status = sample.status
+
+    if status in NEVER_AUTO_NOTIFIED:
+        return []
+    if status not in django_settings.CUSTOMER_NOTIFIED_SAMPLE_STATUSES:
+        return []
+
+    order = sample.order
+    if order is None or order.customer is None:
+        # Walk-in samples are registered without an Order (the FK is nullable
+        # for exactly that case), so there is no customer to tell. Not a
+        # failure, and deliberately not noisy -- it is the normal shape for
+        # over-the-counter work.
+        logger.debug("sample %s has no order/customer to notify", sample.pk)
+        return []
+
+    if order.samples.count() > django_settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD:
+        return []  # digested daily instead; see send_sample_progress_digests
+
+    return notify_each(
+        NotificationRecord.Kind.SAMPLE_PROGRESS,
+        [order.customer.email],
+        subject=f"NexusLIMS: sample {sample.unique_sample_code} {_milestone_phrase(status)}",
+        # Keyed on the milestone, so a retest re-entering in_testing stays
+        # quiet: the customer already knows testing is happening, and being
+        # told twice reads as a mistake rather than as news.
+        dedupe_key=f"sample-progress:{sample.pk}:{status}",
+        entity=sample,
+        context={"status": status},
+    )
+
+
+def _milestone_phrase(status):
+    from apps.notifications.messages import MILESTONE_WORDING
+
+    return MILESTONE_WORDING.get(status, "moved to a new stage")
+
+
+@shared_task(name="apps.notifications.tasks.send_sample_progress_digests")
+def send_sample_progress_digests():
+    """
+    One email per order per milestone per day, for orders too big to mail
+    per sample.
+
+    Reads the audit ledger rather than re-deriving "what changed today" from
+    the samples themselves: apps/audit/signals.py already writes a row per
+    status change with the new value on it, and a Sample sitting in
+    `in_testing` cannot tell you whether it arrived there today or last week.
+    That is the same reason the retention sweep reads the ledger for its own
+    idempotency -- the ledger is the record of what happened, and everything
+    else is the record of what is.
+    """
+    from django.conf import settings as django_settings
+
+    from apps.audit.models import AuditLogEntry
+    from apps.samples.models import Order, Sample
+
+    since = timezone.now() - timezone.timedelta(days=1)
+    milestones = [
+        s for s in django_settings.CUSTOMER_NOTIFIED_SAMPLE_STATUSES if s not in NEVER_AUTO_NOTIFIED
+    ]
+
+    changes = AuditLogEntry.objects.filter(
+        entity_type="Sample", field_changed="status", new_value__in=milestones, timestamp__gte=since,
+    ).values_list("entity_id", "new_value")
+
+    # (order, status) -> how many of that order's samples reached it today.
+    grouped = {}
+    sample_orders = dict(
+        Sample.objects.filter(pk__in={sample_id for sample_id, _ in changes})
+        .values_list("pk", "order_id")
+    )
+    for sample_id, status in changes:
+        order_id = sample_orders.get(sample_id)
+        if order_id:
+            grouped.setdefault((order_id, status), set()).add(sample_id)
+
+    today = timezone.localdate()
+    queued = 0
+
+    for (order_id, status), sample_ids in grouped.items():
+        order = Order.objects.select_related("customer").filter(pk=order_id).first()
+        if order is None or order.customer is None:
+            continue
+        if order.samples.count() <= django_settings.SAMPLE_PROGRESS_DIGEST_THRESHOLD:
+            continue  # small orders were already mailed per sample, as they happened
+
+        queued += len(
+            notify_each(
+                NotificationRecord.Kind.SAMPLE_PROGRESS_DIGEST,
+                [order.customer.email],
+                subject=(
+                    f"NexusLIMS: {len(sample_ids)} sample(s) on order #{order.id} "
+                    f"{_milestone_phrase(status)}"
+                ),
+                dedupe_key=f"sample-progress-digest:{order.id}:{status}:{today:%Y-%m-%d}",
+                entity=order,
+                context={"status": status, "count": len(sample_ids)},
+            )
+        )
+
+    logger.info("sample progress digests: %d group(s), %d queued", len(grouped), queued)
+    return {"groups": len(grouped), "queued": queued}
+
+
 @shared_task(name="apps.notifications.tasks.retry_stalled_notifications")
 def retry_stalled_notifications():
     """
@@ -256,7 +390,9 @@ __all__ = [
     "notify_each",
     "notify_system_failure",
     "send_notification",
+    "notify_sample_progress",
     "retry_stalled_notifications",
+    "send_sample_progress_digests",
     "send_open_failure_digest",
     "sweep_calibration_due",
 ]
