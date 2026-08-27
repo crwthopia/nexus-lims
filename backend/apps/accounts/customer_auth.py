@@ -22,9 +22,11 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core import signing
-from django.core.mail import send_mail
+from django.utils import timezone
 
 from apps.accounts.models import CustomerUser
+from apps.notifications.models import NotificationRecord
+from apps.notifications.notify import notify
 
 EMAIL_VERIFICATION_SALT = "apps.accounts.customer_auth.email_verification"
 
@@ -86,38 +88,50 @@ def register_customer(*, email, password, organization_name=None, prc_license_nu
     return customer
 
 
+def _one_off_key(prefix, customer):
+    """
+    A dedupe key for a message that is legitimately re-sendable.
+
+    Both of these are replies to an action somebody just took -- a
+    registration attempt -- so every call is its own event and suppressing
+    the second one would strand a customer who asked for the link again.
+    The timestamp says that explicitly rather than leaving the reader to
+    wonder whether missing deduplication was an oversight.
+    """
+    return f"{prefix}:{customer.id}:{timezone.now():%Y%m%d%H%M%S%f}"
+
+
 def send_duplicate_registration_email(customer):
     """
     Sent when someone tries to register an address that already has an
     account. Deliberately says nothing an attacker could not already
     guess, and gives the real owner a reason to act if it was not them.
     """
-    send_mail(
+    notify(
+        NotificationRecord.Kind.CUSTOMER_DUPLICATE_REGISTRATION,
+        customer.email,
         subject="Someone tried to register your NexusLIMS account",
-        message=(
-            "Somebody just tried to create a NexusLIMS account with this email "
-            "address, which already has one.\n\n"
-            "If that was you, log in instead -- there is nothing to do here. If it "
-            "was not, your account is unaffected and no action is required, but "
-            "consider changing your password if you reuse it elsewhere.\n"
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[customer.email],
+        dedupe_key=_one_off_key("customer-duplicate-registration", customer),
+        entity=customer,
     )
 
 
 def send_verification_email(customer):
-    token = generate_email_verification_token(customer)
-    verify_url = f"{settings.CUSTOMER_PORTAL_BASE_URL}/verify-email?token={token}"
-    send_mail(
+    """
+    Queued, not sent inline.
+
+    This runs inside the registration request. Sending here meant SMTP
+    latency was in the customer's request and an SMTP failure was a 500 on
+    an account that had already been created -- the customer got an error
+    for something that had in fact worked. `notify` writes a row and returns;
+    the send happens in a worker after this transaction commits.
+    """
+    notify(
+        NotificationRecord.Kind.CUSTOMER_EMAIL_VERIFICATION,
+        customer.email,
         subject="Verify your NexusLIMS account",
-        message=(
-            f"Welcome to NexusLIMS. Verify your email to activate your account:\n\n"
-            f"{verify_url}\n\n"
-            f"(Raw token, valid {settings.CUSTOMER_EMAIL_VERIFICATION_MAX_AGE_SECONDS // 3600}h: {token})"
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[customer.email],
+        dedupe_key=_one_off_key("customer-verification", customer),
+        entity=customer,
     )
 
 

@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "apps.documents",
     "apps.equipment",
     "apps.investigations",
+    "apps.notifications",
     "apps.training",
     "apps.billing",
     "apps.audit",
@@ -169,6 +170,26 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.training.tasks.check_session_capacity",
         "schedule": crontab(hour=3, minute=0),
     },
+    # Deliberately after the two sweeps above rather than alongside them: the
+    # digest reports what is still open, and a failure recorded by the 02:00
+    # retention sweep should appear in the same morning's digest rather than
+    # waiting a day.
+    "open-failure-digest-daily": {
+        "task": "apps.notifications.tasks.send_open_failure_digest",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    "calibration-due-sweep-daily": {
+        "task": "apps.notifications.tasks.sweep_calibration_due",
+        "schedule": crontab(hour=6, minute=30),
+    },
+    # Hourly rather than daily: this is the recovery path for a notification
+    # that was written but never handed to a worker because the broker was
+    # down, and a customer waiting on a verification email should not wait
+    # until tomorrow for it.
+    "retry-stalled-notifications-hourly": {
+        "task": "apps.notifications.tasks.retry_stalled_notifications",
+        "schedule": crontab(minute=15),
+    },
 }
 
 # Object storage (Alibaba Cloud OSS, S3-API-compatible, Blueprint Section 2.2).
@@ -269,6 +290,23 @@ LOGIN_REDIRECT_URL = "/admin/"
 # backend before this goes anywhere near production.
 EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasatlabs.test")
+
+# How far ahead the nightly calibration sweep (apps/notifications/tasks.py)
+# starts chasing. 14 days by default: long enough that a custodian can book
+# an external calibration house, short enough that the message still reads as
+# urgent when it arrives. Instruments already past due are always included.
+CALIBRATION_DUE_WARNING_DAYS = int(os.environ.get("CALIBRATION_DUE_WARNING_DAYS", "14"))
+
+# Base URL of the React Staff Console (frontend/), used to build the links in
+# staff notifications. Empty in dev, which yields a bare path -- the message
+# still names the record, and a half-built link is worse than none.
+STAFF_CONSOLE_BASE_URL = os.environ.get("STAFF_CONSOLE_BASE_URL", "")
+
+# How long a notification may sit unsent before retry_stalled_notifications
+# picks it up. Long enough that an ordinary queue backlog is not mistaken for
+# a stall, short enough that a broker blip does not strand a customer waiting
+# on a verification link.
+NOTIFICATION_STALL_MINUTES = int(os.environ.get("NOTIFICATION_STALL_MINUTES", "15"))
 
 # Base URL of the React Customer Portal (customer-portal/, Blueprint Section
 # 5.2), used to build the clickable verification link; the console email

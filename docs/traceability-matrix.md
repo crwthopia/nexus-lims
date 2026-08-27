@@ -27,7 +27,7 @@ Each of these is either a requirement genuinely without a test, or a test that v
 - **FR-C1-01** — implemented at `backend/apps/samples/models.py:122`, `backend/apps/samples/serializers.py:25`
 - **FR-C1-09** — implemented at `backend/apps/samples/models.py:126`, `backend/apps/samples/views.py:156`
 - **FR-C1-13** — implemented at `backend/apps/samples/models.py:130`
-- **FR-C3-01** — implemented at `backend/apps/samples/models.py:134`, `backend/apps/testing/serializers.py:70`
+- **FR-C3-01** — implemented at `backend/apps/samples/models.py:134`, `backend/apps/testing/serializers.py:73`
 - **FR-C3-03** — implemented at `backend/apps/testing/views.py:129`
 - **FR-C3-05** — implemented at `backend/apps/testing/models.py:80`
 - **FR-C3-06** — implemented at `backend/apps/testing/views.py:129`
@@ -45,12 +45,12 @@ Each of these is either a requirement genuinely without a test, or a test that v
 | **FR-C1-01** | — | `backend/apps/samples/models.py:122`<br>`backend/apps/samples/serializers.py:25` | **none** |
 | **FR-C1-09** | — | `backend/apps/samples/models.py:126`<br>`backend/apps/samples/views.py:156` | **none** |
 | **FR-C1-13** | — | `backend/apps/samples/models.py:130` | **none** |
-| **FR-C3-01** | — | `backend/apps/samples/models.py:134`<br>`backend/apps/testing/serializers.py:70` | **none** |
+| **FR-C3-01** | — | `backend/apps/samples/models.py:134`<br>`backend/apps/testing/serializers.py:73` | **none** |
 | **FR-C3-02** | Blueprint Section 7.1 | `backend/apps/accounts/models.py:90`<br>`backend/apps/accounts/permissions.py:2`<br>`backend/apps/testing/ingestion.py:39`<br>`backend/apps/testing/models.py:140`<br>_+4 more_ | 6 |
 | **FR-C3-03** | — | `backend/apps/testing/views.py:129` | **none** |
 | **FR-C3-05** | — | `backend/apps/testing/models.py:80` | **none** |
 | **FR-C3-06** | — | `backend/apps/testing/views.py:129` | **none** |
-| **FR-C3-08** | — | `backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:134`<br>`backend/apps/testing/serializers.py:16`<br>`backend/apps/testing/migrations/0001_initial.py:108` | 9 |
+| **FR-C3-08** | ISO/IEC 17025:2017 7.10 | `backend/apps/notifications/messages.py:136`<br>`backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:134`<br>`backend/apps/testing/serializers.py:19`<br>_+1 more_ | 9 |
 | **FR-C4-04** | — | `backend/apps/samples/models.py:138`<br>`backend/apps/samples/views.py:190`<br>`backend/apps/testing/models.py:84` | **none** |
 | **FR-C4-05** | — | `backend/apps/testing/models.py:134`<br>`backend/apps/testing/migrations/0001_initial.py:108` | **none** |
 | **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:143`<br>`backend/apps/samples/views.py:220` | **none** |
@@ -60,9 +60,9 @@ Each of these is either a requirement genuinely without a test, or a test that v
 | **FR-D1-03** | — | `backend/apps/documents/serializers.py:16`<br>`backend/apps/documents/views.py:61` | 14 |
 | **FR-E3-02** | — | `backend/apps/equipment/serializers.py:54`<br>`backend/apps/equipment/views.py:69` | 32 |
 | **FR-E9-01** | Blueprint Section 6 | `backend/apps/investigations/views.py:2` | 18 |
-| **FR-E17-01** | Blueprint Section 6<br>ISO/IEC 17025:2017 8.4.2 | `backend/apps/audit/context.py:4`<br>`backend/apps/audit/signals.py:2`<br>`backend/apps/equipment/views.py:67`<br>`backend/apps/reporting/tasks.py:103`<br>_+2 more_ | 16 |
+| **FR-E17-01** | Blueprint Section 6<br>ISO/IEC 17025:2017 8.4.2 | `backend/apps/audit/context.py:4`<br>`backend/apps/audit/signals.py:2`<br>`backend/apps/equipment/views.py:67`<br>`backend/apps/reporting/tasks.py:105`<br>_+2 more_ | 16 |
 | **FR-E17-02** | Blueprint Section 3.1<br>ISO/IEC 17025:2017 8.4.2 | `backend/apps/accounts/permissions.py:18`<br>`backend/apps/audit/models.py:5`<br>`backend/apps/audit/migrations/0004_audit_log_append_only.py:2` | 7 |
-| **FR-E17-03** | Blueprint Section 3.1<br>Blueprint Section 6<br>ISO/IEC 17025:2017 8.4.2 | `backend/apps/reporting/tasks.py:103`<br>`backend/apps/reporting/views.py:4`<br>`backend/apps/audit/migrations/0003_partition_audit_log_entry.py:8`<br>`backend/apps/audit/migrations/0004_audit_log_append_only.py:2` | 8 |
+| **FR-E17-03** | Blueprint Section 3.1<br>Blueprint Section 6<br>ISO/IEC 17025:2017 8.4.2 | `backend/apps/reporting/tasks.py:105`<br>`backend/apps/reporting/views.py:4`<br>`backend/apps/audit/migrations/0003_partition_audit_log_entry.py:8`<br>`backend/apps/audit/migrations/0004_audit_log_append_only.py:2` | 8 |
 | **FR-S1-01** | Blueprint Section 3.1 | `backend/apps/accounts/models.py:190`<br>`backend/apps/accounts/services.py:3` | **none** |
 
 ## Verifying tests, by requirement
@@ -107,6 +107,8 @@ Cited clauses: Blueprint Section 7.1
 **No verifying test cites this requirement.**
 
 ### FR-C3-08
+
+Cited clauses: ISO/IEC 17025:2017 7.10
 
 - `backend/tests/test_semantic_invariants.py::test_a_malformed_limit_refuses_the_result_rather_than_skipping_the_check`
 - `backend/tests/test_semantic_invariants.py::test_a_min_above_max_would_have_flagged_every_result`

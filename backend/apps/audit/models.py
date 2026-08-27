@@ -161,6 +161,7 @@ class SystemFailure(models.Model):
         TASK_BROKER = "task_broker", "Task broker"
         SCHEDULED_TASK = "scheduled_task", "Scheduled task"
         API_REQUEST = "api_request", "API request"
+        EMAIL = "email", "Email delivery"
 
     class Severity(models.TextChoices):
         # The distinction an operator reads first: did the work eventually
