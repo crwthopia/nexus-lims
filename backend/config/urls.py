@@ -27,6 +27,7 @@ from apps.common.health import healthz, readyz
 # Blueprint Section 10, rather than one flat router here.
 api_v1_patterns = [
     path("", include("apps.accounts.urls")),
+    path("", include("apps.audit.urls")),
     path("", include("apps.samples.urls")),
     path("", include("apps.testing.urls")),
     path("", include("apps.review.urls")),

@@ -17,8 +17,10 @@ was invented outside that grounding.
 ## What's actually working, end to end
 
 - **Data layer**: full 26-entity PostgreSQL schema, monthly-partitioned
-  audit log, row-level security *forced* (not just enabled) on
-  customer-visible tables, retention policy seeded per Blueprint defaults.
+  audit log that the database itself refuses to update, delete or truncate
+  (see Append-only audit ledger below), row-level security *forced* (not just
+  enabled) on customer-visible tables, retention policy seeded per Blueprint
+  defaults.
 - **API layer**: DRF resource groups for the full sample → testing →
   review → approval → report FSM chain, with the segregation-of-duties
   guard enforced server-side, not just documented.
@@ -33,7 +35,12 @@ was invented outside that grounding.
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
   capacity check), with a real S3-compatible object storage client
   (`boto3` against OSS's S3-compatible API — see Object storage below).
-- **262-test automated regression suite** (`backend/tests/`, pytest +
+- **System failure register** (ISO/IEC 17025:2017 7.11.3(e)): the failures
+  the system already detected are recorded durably instead of only logged,
+  with what it did about them automatically, and a corrective action a
+  person has to write before the failure can be closed — see System failure
+  register below.
+- **358-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -43,7 +50,7 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **212-test frontend suite** (Vitest + React Testing Library): 156 in the
+- **224-test frontend suite** (Vitest + React Testing Library): 168 in the
   Staff Console and 56 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
@@ -85,9 +92,11 @@ nexus-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, both frontends' lint/test/typecheck/build
-├── docs/                      <- external-facing specs
-│   └── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, traceability-matrix drift check, both frontends' lint/test/typecheck/build
+├── docs/                      <- external-facing specs and validation evidence
+│   ├── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
+│   ├── traceability-matrix.md <- generated: requirement -> implementation -> test (ISO/IEC 17025 7.11.2)
+│   └── traceability-matrix.csv <- the same matrix, one row per test, for a validation pack
 ├── infra/                     <- Terraform for Blueprint Section 2.2 (VPC, OSS, RDS, Redis) -- never applied, see infra/README.md
 ├── .claude/launch.json        <- dev-server configs (backend, celery-worker, celery-beat, frontend, customer-portal)
 ├── frontend/                   <- Staff Console (React + TypeScript + Vite) -- see "Staff Console" below
@@ -103,7 +112,8 @@ nexus-lims/
 │                                    InvestigationsList, InvestigationDetail,
 │                                    EquipmentList, InstrumentDetail,
 │                                    TrainingList, TrainingSessionDetail,
-│                                    BillingList, InvoiceDetail, ReportsList
+│                                    BillingList, InvoiceDetail, ReportsList,
+                                    SystemFailuresList
 ├── customer-portal/            <- Customer Portal (React + TypeScript + Vite) -- see "Customer Portal" below
 │   ├── vite.config.ts          <- dev server on :5173, proxies /api to Django on :8000
 │   └── src/
@@ -166,7 +176,8 @@ nexus-lims/
         │   └── tasks.py              <- Celery: check_session_capacity
         ├── billing/            <- Invoice, Payment
         │   └── views.py              <- POST /invoices/{id}/payments/ auto-transitions Invoice.status
-        └── audit/              <- AuditLogEntry (partitioned), RetentionPolicy
+        └── audit/              <- AuditLogEntry (partitioned, append-only), RetentionPolicy,
+                                   SystemFailure register + failures.py recorder (7.11.3(e))
             ├── oss.py                <- boto3 client, S3-compatible OSS/MinIO
             └── tasks.py              <- Celery: run_retention_sweep
 ```
@@ -1089,6 +1100,185 @@ Verified directly against Postgres, not just via HTTP status codes: as the
 app's own (non-superuser) DB role, zero RLS context returns zero rows;
 `rls.is_staff='true'` returns everything; two customers seeded with their
 own `Order`+`Sample` each see only their own row, with zero cross-visibility.
+
+## Append-only audit ledger
+
+`AuditLogEntry` was always described as append-only, and until
+`apps/audit/migrations/0004_audit_log_append_only.py` that was an
+application-layer promise: no endpoint or admin action exposed an update or a
+delete. True, but only for as long as every future view, management command
+and `manage.py shell` session remembered it — and an audit ledger under
+ISO/IEC 17025:2017 8.4.2 exists precisely for the case where something does
+not.
+
+Postgres enforces it now, by the same move the RLS work made: stop asking the
+application to be careful. Two mechanisms, because on a partitioned table
+neither covers the whole surface on its own.
+
+| Mechanism | Covers | Does not cover |
+|---|---|---|
+| `REVOKE UPDATE, DELETE, TRUNCATE` from the app role | The parent, and every partition existing when the migration ran. DML privileges are checked against the table actually named, so `DELETE FROM audit_log_entry_2026_08` is checked against that partition, not the parent | Partitions created later — they do not exist yet to be revoked on |
+| `BEFORE UPDATE OR DELETE ... FOR EACH ROW` on the parent | Every partition, including ones created afterwards: Postgres clones row-level triggers from a partitioned parent onto new partitions | `TRUNCATE`, which fires no row trigger |
+
+Between them the only gap left is `TRUNCATE` of a partition created after the
+migration — statement-level triggers are *not* cloned onto partitions the way
+row-level ones are. Rather than leave that as a comment nobody reads,
+`tests/test_audit_append_only.py` asserts that **every** partition of
+`audit_log_entry` has the three privileges revoked, so the first
+partition-creation code that forgets fails CI instead of shipping.
+
+Verified against a real PostgreSQL database, not just asserted: `INSERT` still
+works (all `signals.py` and the retention sweep ever do), while `UPDATE`,
+`DELETE` and `TRUNCATE` are refused through the parent, directly against an
+existing partition, and directly against a partition created after the
+migration — through the ORM and through raw SQL alike.
+
+**What this does not stop**, stated plainly because a control described as
+more than it is, is worse than no control:
+
+- **A superuser.** Superusers bypass privilege checks entirely — the same
+  reason `infra/` provisions the RDS account as `Normal`, and the same reason
+  the RLS policies needed `FORCE`.
+- **The owner re-granting to itself.** The application role owns these tables,
+  so it can `GRANT` the privileges back and disable the trigger. Closing that
+  means the application connecting as a role that does not own the schema,
+  with migrations run by a separate DDL role — a deployment change (`infra/`
+  and `docker-entrypoint.sh` both assume one role today), not a schema one.
+  It is the right next step to harden the ledger against a compromised
+  application rather than against the application's own mistakes.
+
+## System failure register (ISO/IEC 17025:2017 7.11.3(e))
+
+7.11.3(e) asks a laboratory information management system to "include
+recording system failures and the appropriate immediate and corrective
+actions". Everything here detected failures already — a report that would
+not render, object storage that would not answer, a readiness check that
+failed — and every one of them went to `logger` and stopped there. In a
+container the log stream *is* the log, on ephemeral storage, so a restart
+took it. "Show me last quarter's system failures and what you did about
+them" had no answer.
+
+`SystemFailure` (`apps/audit/models.py`) is that answer, and it keeps the
+clause's two halves in separate columns on purpose:
+
+| Column | Written by | Meaning |
+|---|---|---|
+| `immediate_action` | the recorder, never a person | What the system did by itself at the moment of failure — retried, marked the report failed, took the instance out of rotation |
+| `corrective_action` | a person, later | What was done so it stops happening. Empty until somebody writes it, which is the point |
+| `investigation` | a person, optionally | A link to the existing CAPA record (7.10 / 8.7) when the failure warranted one — rather than a second parallel CAPA workflow |
+
+### Where failures are recorded from
+
+| Source | Why it is wired that way |
+|---|---|
+| Celery `task_failure` signal | Catches every task failure including ones nobody remembered to wrap. Report generation already marks its own row and re-raises, and re-raising is what brings it here — so the call site does not record as well, which would put two rows in the register for one failure |
+| The retention sweep's object-storage failures | These swallow the error deliberately so the sweep carries on with the other records, which means the task *succeeds* and `task_failure` never fires. A retention action that silently did not happen is exactly what the clause is for |
+| `/readyz` dependency checks | Where a Postgres or Redis outage is actually detected |
+| `got_request_exception` | An unhandled 500. Fingerprinted on the URL *route*, not the path, or one broken endpoint files one failure per row it was called with |
+
+### Deduplication, and where it deliberately stops
+
+A failing dependency produces one failure per probe and a load balancer
+probes every few seconds, so one row per occurrence would mean thousands of
+rows for one outage — burying the register it is meant to populate. A repeat
+of an already-open failure bumps `occurrences` and `last_seen_at` instead.
+
+**Only while the row is open.** Once somebody has acknowledged or closed a
+failure, the next occurrence opens a *new* row rather than quietly joining
+the closed one. A failure that comes back after a corrective action was
+signed off is the single most useful thing this table can tell you, and
+coalescing it into the closed row would say precisely the opposite.
+
+The counter bump is a `QuerySet.update()`, which sends no signals and so
+writes no history row — the one deliberate use of the caveat documented in
+`apps/audit/signals.py`. `occurrences` moving from 41 to 42 during an outage
+is not a change anybody needs attributed. Everything a *person* does goes
+through `save()` and is recorded by `HistoricalRecords` with their name on
+it.
+
+### Closing requires an action
+
+`POST /system-failures/{id}/close/` refuses while `corrective_action` is
+empty, and that refusal is the reason it is an endpoint rather than a status
+field anyone can PATCH. A register whose failures can be closed with nothing
+written against them decays into a list of things that stopped being
+annoying. "No action needed, transient dependency blip" is a perfectly good
+corrective action — it is a decision somebody put their name to, which is
+what was missing.
+
+Acknowledging is a separate step from closing, because "we know about this"
+and "we have done something about it" are different claims and an assessor
+is entitled to see which one is being made.
+
+### Two limits, stated plainly
+
+- **A failure of Postgres itself cannot be recorded.** The register lives in
+  the database. When the database is what is down there is nowhere to write,
+  so `record_failure` falls back to the log and returns `None`; `/readyz`
+  still answers 503, which is what an operator is watching in that case. Any
+  database-backed failure register has this hole by construction — the
+  alternative is a monitoring system, which is a different thing, and NASAT
+  should have both.
+- **Recording a failure must never cause one.** Every path through
+  `apps/audit/failures.py` swallows everything and falls back to the logger.
+  A recorder that raises turns a degraded dependency into a 500, and turns a
+  task that failed once into one that fails twice with the second traceback
+  hiding the first.
+
+Rows cannot be deleted: migration 0005 revokes `DELETE` and `TRUNCATE` from
+the application's role, the same way 0004 does for the audit ledger. `UPDATE`
+is deliberately *not* revoked — the corrective action is written after the
+fact, sometimes weeks after — and what makes that writable column
+trustworthy instead is attribution through `HistoricalRecords`. The ledger
+gets immutability; the register gets attribution.
+
+The Staff Console screen is under **System**, readable by any authenticated
+staff member and writable by a QA Officer or Lab Supervisor, matching the
+Investigation endpoints it links to.
+
+## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
+
+7.11.2 requires the LIMS to be validated for functionality before
+introduction, and re-validated whenever it changes. An assessor asks two
+questions of that claim: which test discharges each requirement, and which
+requirement has nothing verifying it. A test suite answers neither on its own
+— the mapping lives in docstrings, where nobody can audit it in aggregate.
+
+`backend/tools/traceability.py` reads that mapping out of the source and
+writes [`docs/traceability-matrix.md`](docs/traceability-matrix.md) (and a
+CSV alongside it, for pasting into a validation pack). It is a *reporter*, not
+a second database: the requirement IDs stay in the code next to what
+implements them, so they cannot drift out of sync with a separately
+maintained spreadsheet. The attribution rules are documented at the top of the
+script, including which one can over-attribute and why it is deliberately
+narrow.
+
+Regenerating is the whole update process:
+
+```bash
+cd backend
+python tools/traceability.py --write     # regenerate
+python tools/traceability.py --check     # exit 1 if the committed copy is stale
+```
+
+Staleness is a build failure — `tests/test_traceability.py`, plus its own CI
+job so the check still runs on a day the application will not boot. That is
+what makes the matrix evidence rather than documentation: a matrix that was
+accurate when someone generated it and has drifted since is worse than none,
+because it asserts coverage the code no longer has.
+
+The script is stdlib-only and imports no Django, for the same reason.
+
+**It is one input to a validation report, not the report.** It records that a
+requirement has a verifying test; it does not record who authorized the
+change, who reviewed the result, or when the run was witnessed. Those are
+7.11.2's other half and belong in the change-control record.
+
+The current run reports **22 requirements referenced in source, 13 with no
+test citing them**. That number is the point of the exercise rather than an
+embarrassment: most of those thirteen are covered by tests that never name
+the requirement, and an assessor cannot tell that apart from a genuine gap —
+which is exactly why the matrix is worth having before someone asks.
 
 ## Instrument raw-data ingestion
 

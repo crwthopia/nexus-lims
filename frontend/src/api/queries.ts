@@ -27,6 +27,7 @@ import type {
   TestResult,
   TrainingCourse,
   TrainingSession,
+  SystemFailure,
 } from "./types";
 
 export function useSamples(params: { status?: string; service_line?: string } = {}) {
@@ -544,5 +545,52 @@ export function useCreateReport() {
 export function useReportDownloadUrl() {
   return useMutation({
     mutationFn: (reportId: number) => apiGet<ReportDownload>(`/reports/${reportId}/download/`),
+  });
+}
+
+export function useSystemFailures(params: { status?: string; component?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.component) query.set("component", params.component);
+  const qs = query.toString();
+
+  return useQuery({
+    queryKey: ["system-failures", params],
+    queryFn: () => apiGet<Paginated<SystemFailure>>(`/system-failures/${qs ? `?${qs}` : ""}`),
+  });
+}
+
+export function useUpdateSystemFailure(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { corrective_action?: string; investigation?: number | null }) =>
+      apiPatch<SystemFailure>(`/system-failures/${id}/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-failures"] }),
+  });
+}
+
+export function useAcknowledgeSystemFailure(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<SystemFailure>(`/system-failures/${id}/acknowledge/`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-failures"] }),
+  });
+}
+
+/**
+ * The server refuses this while corrective_action is empty
+ * (ISO/IEC 17025:2017 7.11.3(e)), so the text is sent with the close rather
+ * than saved separately first -- one round trip, and no window where the
+ * operator has typed an action into a failure that is still open.
+ */
+export function useCloseSystemFailure(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (corrective_action: string) =>
+      apiPost<SystemFailure>(`/system-failures/${id}/close/`, { corrective_action }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-failures"] }),
   });
 }

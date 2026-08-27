@@ -26,7 +26,18 @@ from django.conf import settings
 from django.db import connection
 from django.http import JsonResponse
 
+from apps.audit.failures import record_failure
+
 logger = logging.getLogger(__name__)
+
+# Resolved as plain strings rather than by importing SystemFailure: this
+# module is imported by config/urls.py at startup and the probes must not
+# depend on the model layer being importable. The values are the
+# SystemFailure.Component / ImmediateAction members, and
+# tests/test_system_failures.py pins them to the enums so a rename cannot
+# leave a string here pointing at nothing.
+_COMPONENTS = {"database": "database", "redis": "task_broker"}
+_REMOVED_FROM_ROTATION = "removed_from_rotation"
 
 
 def healthz(_request):
@@ -74,6 +85,23 @@ def readyz(_request):
             # Logged in full for the operator; the response says only which
             # dependency failed, since this endpoint is unauthenticated.
             logger.warning("Readiness check %r failed: %s", name, exc, exc_info=True)
+            # And recorded, per ISO/IEC 17025:2017 7.11.3(e). A load balancer
+            # probes this every few seconds, so an outage would be thousands
+            # of rows without the deduplication in apps/audit/failures.py --
+            # which is why the summary names the dependency and the
+            # exception type only, and the message goes in the detail.
+            #
+            # When `name` is "database" this is the one failure the register
+            # cannot record, because the register is in the database.
+            # record_failure falls back to the log and returns None; the
+            # probe still answers 503, which is what an operator is watching
+            # in that case anyway. See the failures module docstring.
+            record_failure(
+                _COMPONENTS[name],
+                f"readiness check {name!r} failed with {type(exc).__name__}",
+                detail=str(exc),
+                immediate_action=_REMOVED_FROM_ROTATION,
+            )
             results[name] = "unavailable"
             healthy = False
 
