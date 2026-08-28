@@ -201,6 +201,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.send_sample_progress_digests",
         "schedule": crontab(hour=18, minute=0),
     },
+    # Every five minutes rather than hourly: this is the path a customer
+    # waiting on a verification link is sitting behind, and the backoff in
+    # the task decides how long each individual row actually waits. A sweep
+    # that runs rarely would make its own frequency the floor.
+    "retry-failed-notifications": {
+        "task": "apps.notifications.tasks.retry_failed_notifications",
+        "schedule": crontab(minute="*/5"),
+    },
     "retry-stalled-notifications-hourly": {
         "task": "apps.notifications.tasks.retry_stalled_notifications",
         "schedule": crontab(minute=15),
@@ -362,6 +370,15 @@ STAFF_CONSOLE_BASE_URL = os.environ.get("STAFF_CONSOLE_BASE_URL", "")
 # a stall, short enough that a broker blip does not strand a customer waiting
 # on a verification link.
 NOTIFICATION_STALL_MINUTES = int(os.environ.get("NOTIFICATION_STALL_MINUTES", "15"))
+
+# How many times a notification may be attempted before it is abandoned.
+# Eight, with the exponential backoff in apps/notifications/tasks.py, spans
+# roughly two hours -- long enough to ride out a provider outage, short
+# enough that a genuinely undeliverable message stops consuming attempts and
+# becomes a system failure somebody looks at. Permanent failures (a rejected
+# recipient, bad credentials) never reach this: they are abandoned on the
+# first attempt, because the ninth would fail identically.
+NOTIFICATION_MAX_ATTEMPTS = int(os.environ.get("NOTIFICATION_MAX_ATTEMPTS", "8"))
 
 # Which Sample milestones a customer is emailed about. The lab's FSM has
 # eleven states; these are the three a customer can act on or is waiting for

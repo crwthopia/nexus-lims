@@ -47,7 +47,15 @@ class NotificationRecord(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         SENT = "sent", "Sent"
-        FAILED = "failed", "Failed"
+        # Failed, and will be tried again. The retry sweep looks for exactly
+        # this, so the name is a promise: a row sitting in `failed` is work
+        # still in progress, not a dead letter.
+        FAILED = "failed", "Failed (will be retried)"
+        # Terminal. Either the failure is one no number of retries can fix --
+        # a rejected recipient, a refused sender, bad credentials -- or the
+        # attempt limit is spent. Nothing looks at these again, which is why
+        # reaching one is a system failure worth an operator's attention.
+        ABANDONED = "abandoned", "Abandoned (will not be retried)"
 
     id = models.BigAutoField(primary_key=True)
     kind = models.CharField(max_length=40, choices=Kind.choices)
@@ -81,6 +89,13 @@ class NotificationRecord(models.Model):
 
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     failure_reason = models.TextField(blank=True, default="")
+    # Counted on the row rather than left to Celery's own retry state,
+    # because the row is the thing that survives a worker dying mid-backoff
+    # or a broker losing the message. It is also what caps the total: a
+    # notification that has failed eight times is not going to succeed on the
+    # ninth, and something is wrong that retrying will not tell anybody about.
+    attempts = models.PositiveIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
 
@@ -89,6 +104,8 @@ class NotificationRecord(models.Model):
         indexes = [
             models.Index(fields=["kind", "-created_at"]),
             models.Index(fields=["status"]),
+            # The retry sweep's lookup: failed rows, oldest attempt first.
+            models.Index(fields=["status", "last_attempt_at"]),
             models.Index(fields=["entity_type", "entity_id"]),
         ]
         ordering = ["-created_at"]

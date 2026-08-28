@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **436-test automated regression suite** (`backend/tests/`, pytest +
+- **456-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -1433,6 +1433,68 @@ during it — customers would simply never hear back, and nothing would say so.
 
 Re-delivery is safe: Celery is at-least-once, so `send_notification` checks the
 row and returns `already-sent` rather than sending twice.
+
+### Retrying a failed send, and knowing when to stop
+
+A send that fails is not the end of it — but retrying *blindly* is its own
+bug. A customer who mistyped their address would cost eight delivery attempts
+before anybody found out, and retrying an authentication failure against a
+provider that rate-limits bad logins makes the outage worse.
+
+So `apps/notifications/tasks.is_transient` decides, and SMTP mostly says it
+outright: **4xx means try later, 5xx means no.**
+
+| Retried | Abandoned immediately |
+|---|---|
+| Connection refused, timeouts, `SMTPServerDisconnected` — the relay was never reached | `SMTPAuthenticationError` — the credentials will not improve |
+| 4xx response codes, including greylisting (`450` on a recipient) | 5xx response codes: sender domain not verified, no such user |
+| | Anything unrecognised — see below |
+
+**Anything unrecognised is treated as permanent, deliberately.** The cost is
+asymmetric: misjudging a transient failure as permanent abandons one message
+and records a system failure an operator reads, whereas misjudging a
+permanent failure as transient is silent and repeats. A wrong call that
+surfaces beats a wrong call that hides.
+
+`NotificationRecord.Status` carries the distinction, and the names are
+promises:
+
+- **`failed`** — will be retried. A row sitting here is work in progress.
+- **`abandoned`** — terminal. Permanent failure, or `NOTIFICATION_MAX_ATTEMPTS`
+  spent. Nothing looks at it again.
+
+### Only giving up raises
+
+A transient failure with attempts left is **not** re-raised. That is a change
+from the original contract, and the reason is noise: re-raising makes it a
+Celery task failure and therefore a `SystemFailure`, and alarming QA about a
+thirty-second hiccup the next sweep will fix is exactly how a register of
+real problems becomes something people filter.
+
+Giving up is what raises. A permanent failure, or one that has spent its
+attempts, becomes a `SystemFailure` with the `EMAIL` component — which
+`notify_system_failure` deliberately does not try to email about.
+
+### Why a sweep and not Celery's own retry
+
+`retry_failed_notifications` runs every five minutes and re-attempts rows
+whose backoff has elapsed. Celery's `autoretry_for` / `retry_backoff` would
+have been fewer lines, and was rejected on purpose:
+
+- **Celery holds retry state in the broker.** A worker killed mid-backoff, or
+  a broker that loses the message, loses the retry with it — and the whole
+  point is that a customer waiting on a verification link should not depend
+  on a queue message surviving. The row survives, and carries everything
+  needed to reconstruct the schedule: how many attempts have happened, and
+  when the last one was.
+- **Two mechanisms could both fire.** A Celery retry in flight and a sweep
+  picking up the same row would both send, and only timing would stand
+  between that and a duplicate email.
+
+Backoff doubles from one minute and caps at an hour — roughly two hours
+across the default eight attempts, which is the shape of a provider outage
+rather than of a blip. The cap exists so the last attempts are not days
+apart, by which point the message has stopped being worth sending.
 
 ### Sending for real
 
