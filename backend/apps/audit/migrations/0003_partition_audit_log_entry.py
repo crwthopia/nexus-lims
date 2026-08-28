@@ -15,7 +15,7 @@ so this is applied as raw SQL against the table Django already created in
 0001_initial. ApsaraDB RDS for PostgreSQL (Blueprint Section 2.2) supports
 native declarative partitioning; no extension is required, though NASAT may
 opt to manage partition creation via pg_partman instead of the Celery beat
-task referenced in Section 2.1 item 5a.
+task apps.audit.tasks.create_audit_log_partitions (Section 2.1 item 5a).
 
 NOTE: this migration recreates the table as partitioned and therefore should
 run immediately after 0001_initial/0002_seed_retention_policy, before any
@@ -61,8 +61,8 @@ FROM audit_log_entry_legacy;
 
 DROP TABLE audit_log_entry_legacy;
 
--- Seed the current and next 2 months of partitions; the Celery beat task
--- referenced in Blueprint Section 2.1 item 5a is responsible for creating
+-- Seed the current and next 2 months of partitions; apps.audit.tasks
+-- .create_audit_log_partitions (Blueprint Section 2.1 item 5a) creates
 -- new monthly partitions ahead of need thereafter.
 DO $$
 DECLARE

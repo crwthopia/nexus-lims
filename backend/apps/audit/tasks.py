@@ -24,6 +24,7 @@ record is *not* marked processed, so the next daily run retries it rather
 than silently losing the archival action.
 """
 
+import datetime
 import logging
 
 from celery import shared_task
@@ -224,3 +225,177 @@ def run_retention_sweep():
         logger.info("retention sweep: %s -> %s (%d newly processed)", policy.record_type, policy.action_after_expiry, processed)
 
     return summary
+
+
+# --- Monthly partition creation (Blueprint Section 2.1 item 5a) ------------
+
+PARTITION_PREFIX = "audit_log_entry_"
+DEFAULT_PARTITION = "audit_log_entry_default"
+
+
+def _next_month(day):
+    return datetime.date(day.year + 1, 1, 1) if day.month == 12 else datetime.date(day.year, day.month + 1, 1)
+
+
+def _months_from(first, count):
+    """The first of `first`'s month, then the first of each following month."""
+    start = first.replace(day=1)
+    for _ in range(count):
+        yield start
+        start = _next_month(start)
+
+
+def _existing_partitions(cursor):
+    cursor.execute(
+        """
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_inherits i ON i.inhrelid = c.oid
+        WHERE i.inhparent = 'audit_log_entry'::regclass
+        """
+    )
+    return {row[0] for row in cursor.fetchall()}
+
+
+def _revoke_on(cursor, partition):
+    """
+    Take UPDATE/DELETE/TRUNCATE away from the application's own role.
+
+    Applied to every partition on every run, not only the ones just created.
+    A REVOKE on the partitioned parent does *not* reach a partition created
+    afterwards -- verified against PostgreSQL, where a partition created after
+    the parent was revoked still reports has_table_privilege(DELETE) = true --
+    so each partition needs its own. A partition made by anything else
+    (pg_partman, a DBA at 3am) would otherwise be a hole in the append-only
+    ledger that nobody notices until an assessor asks.
+
+    Doing it unconditionally makes this task the thing that *maintains* the
+    invariant rather than merely not breaking it, and it is what keeps
+    tests/test_audit_append_only.py passing as partitions come and go.
+
+    The name is derived from a date this module formatted or read back from
+    pg_class, never from user input, so it cannot carry an injection.
+    """
+    cursor.execute(f'REVOKE UPDATE, DELETE, TRUNCATE ON "{partition}" FROM CURRENT_USER')
+
+
+@shared_task(name="apps.audit.tasks.create_audit_log_partitions")
+def create_audit_log_partitions():
+    """
+    Create the monthly audit_log_entry partitions ahead of need, and keep the
+    append-only revoke true for every partition that exists.
+
+    Migration 0003 seeded the current month and the two after it, then said
+    the Blueprint Section 2.1 item 5a beat task took over from there. No such
+    task existed, so once those three months elapsed every audit row landed in
+    `audit_log_entry_default` -- still working and still protected, but the
+    partitioning was decorative and the default grew without bound.
+
+    **Falling behind is not recoverable by this application**, which is why
+    this runs daily rather than monthly. Two facts, both verified against
+    PostgreSQL, combine badly:
+
+      1. `CREATE TABLE ... PARTITION OF` fails outright if the default
+         partition already holds a row belonging to the new range: "updated
+         partition constraint for default partition would be violated by some
+         row". The month cannot simply be created late.
+      2. Moving those rows out of the default needs DELETE on it, which
+         migration 0004 revoked from this very role. The rescue is a DBA
+         operation under a superuser; the app cannot do it.
+
+    So the failure mode is a trap -- fall behind by a month and the gap can
+    only widen. Daily runs with three months of headroom give roughly ninety
+    attempts before any partition is actually needed, and both a creation
+    failure and any row found sitting in the default are recorded as system
+    failures (7.11.3(e)) rather than logged and forgotten.
+    """
+    from django.conf import settings
+    from django.db import connection, transaction
+
+    first_of_month = timezone.localdate().replace(day=1)
+    # +1 so AUDIT_PARTITION_MONTHS_AHEAD counts months *beyond* this one.
+    wanted = list(_months_from(first_of_month, settings.AUDIT_PARTITION_MONTHS_AHEAD + 1))
+
+    with connection.cursor() as cursor:
+        existing = _existing_partitions(cursor)
+
+    created, failed = [], []
+
+    for start in wanted:
+        name = f"{PARTITION_PREFIX}{start:%Y_%m}"
+        if name in existing:
+            continue
+        try:
+            # Its own transaction: one month that cannot be created must not
+            # take the others down with it, and in Postgres a failed statement
+            # aborts the whole transaction unless it is contained.
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute(
+                    f'CREATE TABLE "{name}" PARTITION OF audit_log_entry FOR VALUES FROM (%s) TO (%s)',
+                    [start, _next_month(start)],
+                )
+                _revoke_on(cursor, name)
+            created.append(name)
+            logger.info("audit partitions: created %s", name)
+        except Exception as exc:  # noqa: BLE001 -- recorded, then the next month is tried
+            failed.append(name)
+            logger.exception("audit partitions: could not create %s", name)
+            record_failure(
+                SystemFailure.Component.DATABASE,
+                "audit_log_entry monthly partition could not be created",
+                detail=(
+                    f"{name}: {exc}\n\n"
+                    "If this says the default partition's constraint would be violated, rows for "
+                    "that month are already in audit_log_entry_default and the partition can no "
+                    "longer be created. Moving them needs DELETE on the default partition, which "
+                    "migration 0004 revoked from the application role -- so this is a DBA "
+                    "operation under a superuser, not something the application can repair."
+                ),
+                severity=SystemFailure.Severity.FAILED,
+                immediate_action=SystemFailure.ImmediateAction.NONE,
+            )
+
+    # Re-assert the revoke across everything, including partitions that
+    # already existed. See _revoke_on for why this is not redundant.
+    with connection.cursor() as cursor:
+        for partition in sorted(_existing_partitions(cursor)):
+            _revoke_on(cursor, partition)
+
+    _warn_if_rows_are_stranded_in_default()
+
+    logger.info("audit partitions: %d created, %d failed", len(created), len(failed))
+    return {"created": created, "failed": failed}
+
+
+def _warn_if_rows_are_stranded_in_default():
+    """
+    Rows in the default partition mean this task fell behind at some point.
+
+    Worth a system failure rather than a log line, because it is both
+    invisible day to day and unfixable from here: those months can no longer
+    be given a partition (fact 1 above), and the rows cannot be moved (fact
+    2). The longer it goes unnoticed the more months are stranded.
+    """
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(f'SELECT count(*) FROM "{DEFAULT_PARTITION}"')  # noqa: S608 -- constant name
+        stranded = cursor.fetchone()[0]
+
+    if not stranded:
+        return
+
+    logger.warning("audit partitions: %d row(s) sitting in %s", stranded, DEFAULT_PARTITION)
+    record_failure(
+        SystemFailure.Component.DATABASE,
+        "audit log rows have landed in the default partition",
+        detail=(
+            f"{stranded} row(s) are in {DEFAULT_PARTITION}, meaning monthly partition creation "
+            "fell behind. Those months can no longer be partitioned while the rows sit there, and "
+            "the rows cannot be moved by the application: migration 0004 revoked DELETE on the "
+            "default partition. Recovery is a DBA operation under a superuser -- detach the "
+            "default, move the rows into freshly created monthly partitions, reattach."
+        ),
+        severity=SystemFailure.Severity.FAILED,
+        immediate_action=SystemFailure.ImmediateAction.NONE,
+    )

@@ -162,6 +162,15 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 # needs to catch a session crossing its cancellation_threshold_days boundary
 # sometime today, not to the minute.
 CELERY_BEAT_SCHEDULE = {
+    # Before the retention sweep at 02:00, deliberately: the sweep writes
+    # AuditLogEntry rows of its own, and they should have a partition to land
+    # in rather than the default. Daily rather than monthly because falling
+    # behind is not recoverable from inside the application -- see the task's
+    # docstring for the two Postgres facts that make it a trap.
+    "audit-partitions-daily": {
+        "task": "apps.audit.tasks.create_audit_log_partitions",
+        "schedule": crontab(hour=1, minute=0),
+    },
     "retention-sweep-daily": {
         "task": "apps.audit.tasks.run_retention_sweep",
         "schedule": crontab(hour=2, minute=0),
@@ -302,6 +311,15 @@ DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasat
 # an external calibration house, short enough that the message still reads as
 # urgent when it arrives. Instruments already past due are always included.
 CALIBRATION_DUE_WARNING_DAYS = int(os.environ.get("CALIBRATION_DUE_WARNING_DAYS", "14"))
+
+# How many months beyond the current one the nightly partition task keeps
+# audit_log_entry partitions for. Three is deliberate headroom rather than a
+# guess: a partition that does not exist when a row arrives sends that row to
+# the default partition, and from there the month can never be partitioned and
+# the rows can never be moved (migration 0004 revoked DELETE on the default).
+# Three months of daily attempts is roughly ninety chances to get each one
+# made before anything needs it.
+AUDIT_PARTITION_MONTHS_AHEAD = int(os.environ.get("AUDIT_PARTITION_MONTHS_AHEAD", "3"))
 
 # Base URL of the React Staff Console (frontend/), used to build the links in
 # staff notifications. Empty in dev, which yields a bare path -- the message

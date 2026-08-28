@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **408-test automated regression suite** (`backend/tests/`, pytest +
+- **422-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -1107,6 +1107,52 @@ app's own (non-superuser) DB role, zero RLS context returns zero rows;
 `rls.is_staff='true'` returns everything; two customers seeded with their
 own `Order`+`Sample` each see only their own row, with zero cross-visibility.
 
+## Audit log partitioning
+
+`audit_log_entry` is RANGE-partitioned by month. Migration 0003 seeded the
+current month and the two after it, then said the Blueprint Section 2.1 item
+5a beat task took over — and **no such task existed**. Once those three months
+elapsed, every audit row landed in `audit_log_entry_default`: still working,
+still protected, but the partitioning was decorative and the default grew
+without bound.
+
+`apps/audit/tasks.create_audit_log_partitions` is that task. It runs at 01:00,
+before the retention sweep at 02:00 — the sweep writes `AuditLogEntry` rows of
+its own, and they should have a partition to land in.
+
+### Why daily, for a monthly partition
+
+Because falling behind is not recoverable from inside the application. Two
+PostgreSQL facts, both verified directly rather than assumed:
+
+1. **A month cannot be partitioned late.** Once rows for it are in the default
+   partition, `CREATE TABLE ... PARTITION OF` fails outright — *"updated
+   partition constraint for default partition would be violated by some row"*.
+2. **Those rows cannot be moved by the application.** Rescuing them needs
+   `DELETE` on the default partition, which migration 0004 revoked from this
+   very role. The recovery — detach the default, move the rows, reattach — is
+   a DBA operation under a superuser.
+
+So the failure mode is a trap: fall behind by one month and the gap can only
+widen, silently. Daily runs with `AUDIT_PARTITION_MONTHS_AHEAD` (default 3) of
+headroom give roughly ninety attempts to create each partition before anything
+needs it. Both a failed creation and any row found sitting in the default are
+recorded as system failures (7.11.3(e)), because the alternative is a log line
+nobody reads about a problem that gets worse every month.
+
+### It maintains the append-only invariant, not just partitions
+
+A `REVOKE` on the partitioned parent does **not** reach a partition created
+afterwards — verified: a partition created after the parent was revoked still
+reports `has_table_privilege(..., 'DELETE') = true`. So the task revokes on
+**every** partition on **every** run, not only the ones it just created.
+
+That is deliberately more than housekeeping. It means a partition made by
+anything else — `pg_partman`, a DBA at 3am — is repaired on the next nightly
+run rather than sitting there as a mutable hole in the ledger until an
+assessor finds it. `tests/test_audit_append_only.py` asserts no partition is
+writable; this is the thing that keeps that true as months roll over.
+
 ## Append-only audit ledger
 
 `AuditLogEntry` was always described as append-only, and until
@@ -1128,7 +1174,9 @@ neither covers the whole surface on its own.
 
 Between them the only gap left is `TRUNCATE` of a partition created after the
 migration — statement-level triggers are *not* cloned onto partitions the way
-row-level ones are. Rather than leave that as a comment nobody reads,
+row-level ones are. `create_audit_log_partitions` closes it by revoking on
+every partition on every nightly run (see Audit log partitioning below); the
+test below is what keeps that honest. Rather than leave that as a comment nobody reads,
 `tests/test_audit_append_only.py` asserts that **every** partition of
 `audit_log_entry` has the three privileges revoked, so the first
 partition-creation code that forgets fails CI instead of shipping.
