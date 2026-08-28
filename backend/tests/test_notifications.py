@@ -20,6 +20,8 @@ if it were wrong:
                  a committed one always sends.
 """
 
+import smtplib
+
 import pytest
 from django.core import mail
 from django.db import transaction
@@ -32,7 +34,9 @@ from apps.notifications.models import NotificationRecord
 from apps.notifications.notify import notify, notify_each, staff_emails_for_roles
 from apps.samples.models import Sample
 from apps.notifications.tasks import (
+    is_transient,
     notify_sample_progress,
+    retry_failed_notifications,
     retry_stalled_notifications,
     send_notification,
     send_open_failure_digest,
@@ -122,8 +126,13 @@ def test_redelivery_does_not_send_a_second_email():
     assert len(mail.outbox) == 1
 
 
-def test_a_failed_send_is_recorded_on_the_row_and_re_raised(monkeypatch):
-    """Recorded so the row says why; re-raised so it becomes a SystemFailure."""
+def test_a_transient_failure_is_recorded_and_left_for_the_retry_sweep(monkeypatch):
+    """
+    Not re-raised, deliberately. Re-raising makes it a Celery task failure
+    and therefore a SystemFailure, and alarming QA about a thirty-second SMTP
+    hiccup the next sweep will fix is how a register of real problems turns
+    into noise people filter.
+    """
     customer = CustomerUserFactory()
     record = notify(
         Kind.CUSTOMER_DUPLICATE_REGISTRATION, customer.email, "subject", dedupe_key="k4", entity=customer,
@@ -133,12 +142,14 @@ def test_a_failed_send_is_recorded_on_the_row_and_re_raised(monkeypatch):
         lambda **kwargs: (_ for _ in ()).throw(OSError("connection refused")),
     )
 
-    with pytest.raises(OSError):
-        send_notification(record.pk)
+    assert send_notification(record.pk) == "retry-scheduled"
 
     record.refresh_from_db()
     assert record.status == Status.FAILED
+    assert record.attempts == 1
+    assert record.last_attempt_at is not None
     assert "connection refused" in record.failure_reason
+    assert not SystemFailure.objects.filter(component=SystemFailure.Component.EMAIL).exists()
 
 
 def test_a_notification_about_a_deleted_record_is_dropped_not_retried_forever():
@@ -151,7 +162,9 @@ def test_a_notification_about_a_deleted_record_is_dropped_not_retried_forever():
     assert send_notification(record.pk) == "entity-gone"
 
     record.refresh_from_db()
-    assert record.status == Status.FAILED
+    # ABANDONED, not FAILED: FAILED now means "will be retried", and retrying
+    # against a row that no longer exists is what this branch prevents.
+    assert record.status == Status.ABANDONED
     assert mail.outbox == []
 
 
@@ -719,3 +732,184 @@ def test_yesterdays_movement_is_not_in_todays_digest(settings):
     send_sample_progress_digests()
 
     assert not NotificationRecord.objects.filter(kind=Kind.SAMPLE_PROGRESS_DIGEST).exists()
+
+
+# --- Retrying a failed send ------------------------------------------------
+
+def _failing_send(monkeypatch, exc):
+    monkeypatch.setattr(
+        "apps.notifications.tasks.send_mail", lambda **kwargs: (_ for _ in ()).throw(exc)
+    )
+
+
+def _queued(dedupe_key="retry"):
+    customer = CustomerUserFactory()
+    return notify(
+        Kind.CUSTOMER_DUPLICATE_REGISTRATION, customer.email, "s", dedupe_key=dedupe_key, entity=customer,
+    )
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        smtplib.SMTPServerDisconnected("connection lost"),
+        smtplib.SMTPConnectError(421, "service unavailable"),
+        OSError("Connection refused"),
+        TimeoutError("timed out"),
+        smtplib.SMTPResponseException(451, "mailbox busy, try again"),
+        smtplib.SMTPRecipientsRefused({"a@b.test": (450, b"greylisted")}),
+    ],
+)
+def test_these_failures_are_worth_another_attempt(exc):
+    """4xx is 'try later', and a connection that never formed says nothing at all."""
+    assert is_transient(exc) is True
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        smtplib.SMTPAuthenticationError(535, "bad credentials"),
+        smtplib.SMTPResponseException(550, "sender domain not verified"),
+        smtplib.SMTPSenderRefused(553, "not authorised", "no-reply@x.test"),
+        smtplib.SMTPRecipientsRefused({"typo@nowhere.test": (550, b"no such user")}),
+        ValueError("a bug in the message builder"),
+    ],
+)
+def test_these_failures_would_fail_identically_forever(exc):
+    """
+    Retrying an authentication failure against a provider that rate-limits
+    bad logins makes things actively worse, and a mistyped recipient is not
+    going to start existing.
+    """
+    assert is_transient(exc) is False
+
+
+def test_a_permanent_failure_is_abandoned_on_the_first_attempt(monkeypatch):
+    record = _queued("permanent")
+    _failing_send(monkeypatch, smtplib.SMTPAuthenticationError(535, "bad credentials"))
+
+    with pytest.raises(smtplib.SMTPAuthenticationError):
+        send_notification(record.pk)
+
+    record.refresh_from_db()
+    assert record.status == Status.ABANDONED
+    assert record.attempts == 1
+
+
+def test_giving_up_is_what_raises_and_so_what_alarms(monkeypatch, settings):
+    """
+    The failure register should hear about a message the lab has stopped
+    trying to deliver, and not about every hiccup on the way there.
+    """
+    settings.NOTIFICATION_MAX_ATTEMPTS = 2
+    record = _queued("exhausted")
+    _failing_send(monkeypatch, OSError("Connection refused"))
+
+    assert send_notification(record.pk) == "retry-scheduled"
+    with pytest.raises(OSError):
+        send_notification(record.pk)
+
+    record.refresh_from_db()
+    assert record.status == Status.ABANDONED
+    assert record.attempts == 2
+
+
+def test_a_retry_that_succeeds_leaves_no_trace_of_the_failure(monkeypatch):
+    record = _queued("recovers")
+    _failing_send(monkeypatch, OSError("Connection refused"))
+    send_notification(record.pk)
+    monkeypatch.undo()
+
+    assert send_notification(record.pk) == "sent"
+
+    record.refresh_from_db()
+    assert record.status == Status.SENT
+    assert record.failure_reason == ""
+    assert record.attempts == 2
+    assert len(mail.outbox) == 1
+
+
+def test_the_backoff_lengthens_and_then_stops_lengthening():
+    from apps.notifications.tasks import _backoff_seconds
+
+    assert _backoff_seconds(1) == 60
+    assert _backoff_seconds(2) == 120
+    assert _backoff_seconds(3) == 240
+    # Capped, so the last attempts are not days apart -- by which point the
+    # message has stopped being worth sending.
+    assert _backoff_seconds(20) == 3600
+
+
+# --- The sweep -------------------------------------------------------------
+
+def _aged(record, seconds):
+    NotificationRecord.objects.filter(pk=record.pk).update(
+        last_attempt_at=timezone.now() - timezone.timedelta(seconds=seconds)
+    )
+
+
+def test_the_sweep_re_enqueues_a_failed_row_once_its_backoff_has_passed(monkeypatch):
+    record = _queued("sweep-due")
+    _failing_send(monkeypatch, OSError("Connection refused"))
+    send_notification(record.pk)
+    _aged(record, 300)
+
+    enqueued = []
+    monkeypatch.setattr("apps.notifications.tasks.send_notification.delay", lambda pk: enqueued.append(pk))
+
+    assert retry_failed_notifications() == {"requeued": 1, "waiting": 0}
+    assert enqueued == [record.pk]
+
+
+def test_a_row_still_inside_its_backoff_is_left_alone(monkeypatch):
+    record = _queued("sweep-waiting")
+    _failing_send(monkeypatch, OSError("Connection refused"))
+    send_notification(record.pk)
+
+    monkeypatch.setattr("apps.notifications.tasks.send_notification.delay", lambda pk: None)
+
+    assert retry_failed_notifications() == {"requeued": 0, "waiting": 1}
+
+
+def test_the_sweep_does_not_touch_an_abandoned_row(monkeypatch):
+    record = _queued("sweep-abandoned")
+    _failing_send(monkeypatch, smtplib.SMTPAuthenticationError(535, "bad credentials"))
+    with pytest.raises(smtplib.SMTPAuthenticationError):
+        send_notification(record.pk)
+    _aged(record, 100000)
+
+    enqueued = []
+    monkeypatch.setattr("apps.notifications.tasks.send_notification.delay", lambda pk: enqueued.append(pk))
+
+    assert retry_failed_notifications() == {"requeued": 0, "waiting": 0}
+    assert enqueued == []
+
+
+def test_the_sweep_does_not_touch_a_sent_row(monkeypatch):
+    record = _queued("sweep-sent")
+    send_notification(record.pk)
+    _aged(record, 100000)
+
+    monkeypatch.setattr("apps.notifications.tasks.send_notification.delay", lambda pk: None)
+
+    assert retry_failed_notifications()["requeued"] == 0
+
+
+def test_the_sweep_stops_rather_than_hammering_a_broker_that_is_down(monkeypatch):
+    for i in range(3):
+        record = _queued(f"sweep-down-{i}")
+        _failing_send(monkeypatch, OSError("Connection refused"))
+        send_notification(record.pk)
+        _aged(record, 100000)
+    monkeypatch.undo()
+
+    attempts = []
+
+    def _still_down(pk):
+        attempts.append(pk)
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("apps.notifications.tasks.send_notification.delay", _still_down)
+
+    assert retry_failed_notifications()["requeued"] == 0
+    assert len(attempts) == 1
