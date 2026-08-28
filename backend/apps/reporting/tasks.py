@@ -21,6 +21,8 @@ from django.db import transaction
 from weasyprint import HTML
 
 from apps.audit.oss import upload_object
+from apps.notifications.models import NotificationRecord
+from apps.notifications.notify import notify
 from apps.reporting.models import Report
 from apps.reporting.rendering import TEMPLATE_DIR, ReportTemplateMissing, render_report_html
 
@@ -149,7 +151,41 @@ def generate_report_pdf(report_id):
     report.failure_reason = ""
     report.save(update_fields=["file_id", "status", "failure_reason"])
     logger.info("report %s ready at %s (%d bytes)", report.pk, key, len(pdf_bytes))
+    _notify_customer(report)
     return key
+
+
+def _notify_customer(report):
+    """
+    Tell the customer their report is ready -- a link, never the document.
+
+    ISO/IEC 17025:2017 4.2 makes the lab responsible for the customer's
+    information, and an emailed PDF is a copy of a regulated record in a
+    channel the lab does not control after it sends. The Customer Portal
+    already has the auth, the role checks and the RLS policies; the email's
+    job is only to say there is something to fetch.
+
+    Keyed on the report *version*, so regenerating the same version is silent
+    while a correction (FR-E17-01/03 issues a new row with a higher version)
+    is a new notification -- which is the case where telling them again is
+    the whole point.
+
+    The customer is reached through whichever parent the report hangs off,
+    the same two-subquery shape the RLS policy uses: a COA joins sample, a
+    training certificate joins order.
+    """
+    order = report.order or (report.sample.order if report.sample else None)
+    if order is None or order.customer is None:
+        logger.warning("report %s has no customer to notify", report.pk)
+        return
+
+    notify(
+        NotificationRecord.Kind.REPORT_READY,
+        order.customer.email,
+        subject=f"NexusLIMS: your {report.get_report_type_display()} is ready",
+        dedupe_key=f"report-ready:{report.pk}:v{report.version}",
+        entity=report,
+    )
 
 
 def _mark_failed(report, reason):

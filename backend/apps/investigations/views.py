@@ -15,6 +15,8 @@ from rest_framework.response import Response
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
 from apps.common.params import int_param
+from apps.notifications.models import NotificationRecord
+from apps.notifications.notify import notify_each, staff_emails_for_roles
 from apps.investigations.models import Investigation
 from apps.investigations.serializers import InvestigationSerializer
 
@@ -55,7 +57,18 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
-        serializer.save(opened_by=self.request.user)
+        investigation = serializer.save(opened_by=self.request.user)
+        # Nonconforming work has to be evaluated, and somebody other than the
+        # person who opened it usually does that (7.10). Telling QA at open
+        # time rather than leaving it to whoever next looks at the queue is
+        # the difference between a CAPA process and a list.
+        notify_each(
+            NotificationRecord.Kind.INVESTIGATION_OPENED,
+            staff_emails_for_roles(*INVESTIGATION_WRITE_ROLES),
+            subject=f"NexusLIMS: investigation #{investigation.id} opened ({investigation.get_type_display()})",
+            dedupe_key=f"investigation-opened:{investigation.id}",
+            entity=investigation,
+        )
 
     @action(detail=True, methods=["post"])
     def close(self, request, pk=None):

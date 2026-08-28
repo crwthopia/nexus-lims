@@ -116,6 +116,23 @@ def record_failure(component, summary, *, detail="", severity=None, immediate_ac
             last_seen_at=now,
         )
         logger.error("system failure (%s): %s -- %s", component, summary, detail[:200])
+
+        # Alert on creation only, never on the coalescing path above. That
+        # boundary is what the deduplication is *for*: a dependency probed
+        # every few seconds would otherwise be an email every few seconds.
+        # Imported here rather than at module scope to keep this module's
+        # import graph small -- apps/common/health.py imports it, and the
+        # probes must not depend on the notification stack being importable.
+        try:
+            from apps.notifications.tasks import notify_system_failure
+
+            notify_system_failure(failure)
+        except Exception:
+            # Same rule as everything else here: recording a failure must not
+            # cause one. A notification that cannot be queued is logged and
+            # dropped; the failure itself is already safely on the row.
+            logger.exception("could not queue a notification for system failure %s", failure.pk)
+
         return failure
     except Exception:
         # The whole point of the module docstring's first rule. If the

@@ -40,7 +40,12 @@ was invented outside that grounding.
   with what it did about them automatically, and a corrective action a
   person has to write before the failure can be closed — see System failure
   register below.
-- **358-test automated regression suite** (`backend/tests/`, pytest +
+- **Email notifications** (`apps/notifications/`): one queue-then-send path
+  for every message the lab sends — system failures, calibration due dates,
+  investigations, out-of-spec results, report-ready notices — deduplicated so
+  a nightly sweep cannot chase the same instrument every night, and carrying
+  no result or document into a mailbox — see Notifications below.
+- **408-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -176,6 +181,7 @@ nexus-lims/
         │   └── tasks.py              <- Celery: check_session_capacity
         ├── billing/            <- Invoice, Payment
         │   └── views.py              <- POST /invoices/{id}/payments/ auto-transitions Invoice.status
+        ├── notifications/      <- NotificationRecord + notify()/send task: the one path email leaves by
         └── audit/              <- AuditLogEntry (partitioned, append-only), RetentionPolicy,
                                    SystemFailure register + failures.py recorder (7.11.3(e))
             ├── oss.py                <- boto3 client, S3-compatible OSS/MinIO
@@ -1235,6 +1241,163 @@ gets immutability; the register gets attribution.
 The Staff Console screen is under **System**, readable by any authenticated
 staff member and writable by a QA Officer or Lab Supervisor, matching the
 Investigation endpoints it links to.
+
+## Notifications
+
+`apps/notifications/` is the only place in this codebase that sends email.
+Before it, two modules called `django.core.mail.send_mail` inline, and both
+were in the wrong place for it:
+
+| Where | What was wrong |
+|---|---|
+| `apps/accounts/customer_auth.py` | Sent the verification message inside the registration *request*. SMTP latency was in the customer's request, and an SMTP failure was a 500 on an account that had already been created — an error for something that had in fact worked |
+| `apps/training/tasks.py` | Sent inside `transaction.atomic()`. A mail failure rolled back the `CreditNote` rows the same block had just written — a mail outage quietly cancelling credit notes — and a rollback *after* a successful send left customers holding an email about a reschedule that never happened. You cannot unsend |
+
+So a notification is a **row first and an email second**. `notify()` writes a
+`NotificationRecord` in the caller's transaction and returns; the send is a
+Celery task dispatched by `transaction.on_commit`, the same shape
+`apps/reporting/tasks.enqueue_generation` already uses. A message now goes out
+if and only if the thing it describes actually happened.
+
+### What gets sent, and to whom
+
+| Notification | Trigger | Recipients |
+|---|---|---|
+| System failure | A new `SystemFailure` with severity `failed` | QA Officer, Lab Supervisor |
+| Open-failure digest | Daily, 06:00, if anything is still open | QA Officer, Lab Supervisor |
+| Calibration due | Nightly sweep, `CALIBRATION_DUE_WARNING_DAYS` ahead (6.4) | The instrument's custodian, falling back to every Instrument Custodian |
+| Investigation opened | `POST /investigations/` (7.10) | QA Officer, Lab Supervisor |
+| Out-of-specification result | A `TestResult` flagged on entry (FR-C3-08) | QA Officer, Lab Supervisor |
+| Sample progress | A Sample reaches `received`, `in_testing` or `approved` | The customer, per sample or as a daily per-order digest |
+| Report ready | The generation task marks a report `ready` | The customer the report belongs to |
+| Training session rescheduled | The capacity check reschedules a session | The enrolled customer |
+| Customer verification / duplicate registration | Registration | The customer |
+
+Recipients resolve **from roles**, never a configured address list — adding a
+QA Officer in the admin is all it takes to put them on the distribution, and a
+hardcoded list is one staff change away from mailing somebody who left.
+
+### Deduplication, or why the nightly sweeps are tolerable
+
+`dedupe_key` is unique at the database, not checked with a prior `SELECT` —
+because the callers that need it most are periodic sweeps, and beat firing
+while somebody triggers the same task by hand is exactly the race a
+check-then-insert loses.
+
+Without it, "email every instrument whose calibration is due" mails the same
+custodian about the same instrument every night until somebody calibrates it,
+and the message stops being read inside a week. The key includes the **due
+date**, so a re-scheduled calibration is a new notification rather than one
+suppressed by the old row — the thing being chased has genuinely changed.
+
+The same rule governs system-failure alerts, and it is why the register
+deduplicates at all: the alert fires on the **create** path only, never on the
+coalescing path. A dependency probed every few seconds would otherwise be an
+email every few seconds, all night, with the one that mattered somewhere in
+the middle of it.
+
+### Sample progress, and why it is only three of eleven states
+
+Customers want to know their sample arrived, that analysis started, and that
+it finished. The Sample FSM has **eleven** states, and mailing all of them
+would be eleven emails per sample for eight events nobody outside the lab can
+act on.
+
+`CUSTOMER_NOTIFIED_SAMPLE_STATUSES` defaults to `received,in_testing,approved`:
+
+| Status | Sent? | |
+|---|---|---|
+| `pre_registered`, `registered` | No | Bookkeeping before the sample physically exists at the lab |
+| `received` | **Yes** | "Has arrived at the laboratory" — the one customers chase the lab about |
+| `in_prep` | No | Internal |
+| `in_testing` | **Yes** | "Is now being analysed" |
+| `under_review` | No | Internal QA step |
+| `approved` | **Yes** | "Analysis complete, results approved" |
+| `under_investigation`, `rejected`, `retest_pending` | **Never** | See below |
+| `disposed` | Configurable, off | End of physical custody; usually contractual |
+
+**Nonconforming work is never sent automatically.** `under_investigation`,
+`rejected` and `retest_pending` are in a `NEVER_AUTO_NOTIFIED` frozenset in
+code, not in settings, and widening the configured list cannot switch them on.
+ISO/IEC 17025:2017 7.10 asks the laboratory to *evaluate* nonconforming work
+and decide whether the customer needs telling; an automatic "your sample
+failed" fires before anybody has evaluated anything. It pre-empts a judgement
+the lab is required to make, and it is the email you can never take back.
+
+The hook is a single line in `apps/samples/views._run_transition`, which every
+one of the ten Sample transitions already runs through — so this sees all of
+them and filters, rather than ten call sites each remembering to notify.
+
+**Big orders are digested.** A 30-sample water order at three milestones is 90
+emails, which is how a customer learns to filter the lab into a folder they
+never open. Above `SAMPLE_PROGRESS_DIGEST_THRESHOLD` samples on one order,
+nothing is sent at transition time; `send_sample_progress_digests` runs each
+evening and sends one message per order per milestone — "3 of the 4 samples on
+order #12 have arrived at the laboratory".
+
+That task reads the **audit ledger**, not the samples. A sample sitting in
+`received` cannot tell you whether it arrived today or last week, whereas
+`apps/audit/signals.py` already writes a row per status change with the new
+value on it. Same reason the retention sweep reads the ledger for its own
+idempotency: the ledger is the record of what *happened*, and everything else
+is the record of what *is*.
+
+The milestone is stored on the notification at queue time rather than read
+back at send time. A sample can move twice before a worker picks the row up,
+and without that the body would describe wherever it ended up under a subject
+line about where it was.
+
+### Nothing confidential travels by email
+
+ISO/IEC 17025:2017 4.2 makes the lab responsible for the customer's
+information, and email is not a channel the lab controls once it has sent.
+
+- A customer is told a report is **ready**, with a link into the Customer
+  Portal where the session, the role checks and the RLS policies all still
+  apply. The PDF is never attached and the OSS object key never appears.
+- An out-of-specification alert names the result and the sample. **The
+  measured value is not in it** — a value in a mailbox is an uncontrolled copy
+  of a regulated measurement.
+- `NotificationRecord` stores the subject but **not the body**. The row
+  answers "who was told what, and when", which is what anybody auditing this
+  needs; copying the message into a staff-readable table would spread it for
+  no benefit. Bodies are rebuilt from the entity at send time
+  (`apps/notifications/messages.py`), so they also cannot drift into a stale
+  copy of a record that has since been corrected.
+
+### The two loops that had to not exist
+
+**Email failure → alert by email.** A send failure is a Celery task failure,
+so `config/celery.py` records it in the 7.11.3(e) register automatically. A
+new system failure normally sends an email. `notify_system_failure` therefore
+refuses to send for the `EMAIL` component at all — you cannot email somebody
+to tell them email is broken. Deduplication would have stopped the loop after
+a hop or two, but a loop that terminates by accident is not a design.
+
+**Broker failure → 500.** Moving the send out of the request removed SMTP from
+the request path; it must not have put Redis there instead. `.delay()` runs
+inline via `on_commit`, so an unguarded call would 500 a registration for
+exactly the reason the old `send_mail` did. A broker failure instead leaves the
+row `pending` and returns, and `retry_stalled_notifications` (hourly) re-enqueues
+anything still pending once the broker is back. Without that recovery, a
+five-minute Redis blip would silently swallow every verification email queued
+during it — customers would simply never hear back, and nothing would say so.
+
+Re-delivery is safe: Celery is at-least-once, so `send_notification` checks the
+row and returns `already-sent` rather than sending twice.
+
+### Sending for real
+
+`EMAIL_BACKEND` defaults to Django's console backend, which prints messages
+(and the verification links) to the runserver log. Production needs the SMTP
+backend and the usual `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` /
+`EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS`.
+
+That is an environment change, not a code change — but it is **gated on
+something Terraform cannot do**: Alibaba DirectMail sending domains need DNS
+verification, which `infra/README.md` already lists among the things it
+deliberately does not provision. Until that is done, nothing actually leaves
+the building.
 
 ## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
 

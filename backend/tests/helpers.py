@@ -16,3 +16,29 @@ for tests that don't need to mutate the same instance in place.
 
 def reload(instance):
     return type(instance).objects.get(pk=instance.pk)
+
+
+def deliver_queued_notifications():
+    """
+    Run every queued notification's send task inline, and return how many.
+
+    Notifications are queued in the caller's transaction and dispatched by
+    `transaction.on_commit` (apps/notifications/notify.py), so inside a test
+    -- which never commits -- the row exists but the send never fires. That
+    is the correct production behaviour and an awkward test fixture, so this
+    stands in for the worker.
+
+    It calls the real task against the real EMAIL_BACKEND, so a test using
+    it still exercises message building, the confidentiality rules about
+    what may appear in a body, and `mail.outbox`. Asserting only that a row
+    was written would leave all of that untested.
+    """
+    from apps.notifications.models import NotificationRecord
+    from apps.notifications.tasks import send_notification
+
+    pending = list(
+        NotificationRecord.objects.filter(status=NotificationRecord.Status.PENDING).values_list("pk", flat=True)
+    )
+    for pk in pending:
+        send_notification(pk)
+    return len(pending)

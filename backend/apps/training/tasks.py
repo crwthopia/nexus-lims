@@ -15,12 +15,13 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
 from apps.billing.models import Invoice
+from apps.notifications.models import NotificationRecord
+from apps.notifications.notify import notify
 from apps.training.models import CreditNote, Enrollment, TrainingSession
 
 logger = logging.getLogger(__name__)
@@ -74,21 +75,20 @@ def check_session_capacity():
                         amount=amount,
                     )
 
-                send_mail(
+                # Queued, not sent, and that matters twice over inside this
+                # atomic block. Sending here meant an SMTP failure rolled back
+                # the CreditNote rows written immediately above -- a mail
+                # outage quietly cancelling credit notes -- and a rollback
+                # *after* a successful send left customers holding an email
+                # about a reschedule that did not happen. notify() writes a
+                # row in this transaction and defers the send to on_commit, so
+                # the message goes out if and only if the reschedule did.
+                notify(
+                    NotificationRecord.Kind.TRAINING_SESSION_RESCHEDULED,
+                    enrollment.customer.email,
                     subject=f"NexusLIMS: {session.course.title} session rescheduled",
-                    message=(
-                        f"The {session.course.title} session scheduled for "
-                        f"{session.start_date:%Y-%m-%d} did not meet the minimum enrollment "
-                        f"requirement and has been rescheduled.\n\n"
-                        + (
-                            f"A credit note for {amount} has been issued to your account, "
-                            f"redeemable against a future session."
-                            if amount > 0
-                            else "No payment was recorded against your enrollment, so no credit note was issued."
-                        )
-                    ),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[enrollment.customer.email],
+                    dedupe_key=f"training-rescheduled:{enrollment.id}:{session.start_date:%Y-%m-%d}",
+                    entity=enrollment,
                 )
 
         flagged += 1

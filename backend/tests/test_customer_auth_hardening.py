@@ -20,6 +20,7 @@ from django.core import mail
 
 from apps.accounts import customer_auth
 from apps.accounts.models import CustomerUser
+from tests.helpers import deliver_queued_notifications
 from tests.factories import CUSTOMER_RAW_PASSWORD, CustomerUserFactory
 
 pytestmark = pytest.mark.django_db
@@ -64,6 +65,11 @@ def test_the_real_owner_is_told_when_someone_registers_their_address(api_client)
         {"email": existing.email, "password": "Str0ngPassw0rd!1"},
         format="json",
     )
+
+    # The message is queued in the request and sent by a worker after commit
+    # (apps/notifications/notify.py), so a test has to stand in for the
+    # worker -- see tests/helpers.deliver_queued_notifications.
+    deliver_queued_notifications()
 
     assert len(mail.outbox) == 1
     assert mail.outbox[0].to == [existing.email]

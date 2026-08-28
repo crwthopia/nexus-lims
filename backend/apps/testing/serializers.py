@@ -3,6 +3,9 @@ from rest_framework import serializers
 
 from apps.equipment.models import StandardReagent
 from apps.testing.ingestion import IngestionError, assert_certified, compute_out_of_spec
+from apps.accounts.models import Role
+from apps.notifications.models import NotificationRecord
+from apps.notifications.notify import notify_each, staff_emails_for_roles
 from apps.testing.models import TestMethod, TestRequest, TestResult
 
 
@@ -117,4 +120,17 @@ class TestResultSerializer(serializers.ModelSerializer):
             validated_data["data_type"],
             validated_data["value"],
         )
-        return super().create(validated_data)
+        result = super().create(validated_data)
+        if result.is_out_of_spec:
+            # An OOS result is candidate nonconforming work (7.10) and the
+            # analyst who entered it is not the person who decides that. The
+            # measured value is deliberately not in the message -- see
+            # apps/notifications/messages.py.
+            notify_each(
+                NotificationRecord.Kind.RESULT_OUT_OF_SPEC,
+                staff_emails_for_roles(Role.RoleName.QA_OFFICER, Role.RoleName.LAB_SUPERVISOR),
+                subject=f"NexusLIMS: out-of-specification result on {result.test_request.sample.unique_sample_code}",
+                dedupe_key=f"result-oos:{result.id}",
+                entity=result,
+            )
+        return result

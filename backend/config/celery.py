@@ -59,6 +59,14 @@ def _set_rls_context(**kwargs):
 _TASK_COMPONENTS = {
     "apps.reporting.tasks.generate_report_pdf": ("report_generation", "marked_failed"),
     "apps.audit.tasks.run_retention_sweep": ("retention_sweep", "none"),
+    # The send task marks the NotificationRecord failed before re-raising, so
+    # the row says what happened as well as the register.
+    #
+    # This is the loop worth being explicit about: an email failure becomes a
+    # SystemFailure, and a new SystemFailure normally sends an email. It does
+    # not recurse, because apps/notifications/tasks.notify_system_failure
+    # refuses to send for the EMAIL component at all -- see the comment there.
+    "apps.notifications.tasks.send_notification": ("email", "marked_failed"),
 }
 
 

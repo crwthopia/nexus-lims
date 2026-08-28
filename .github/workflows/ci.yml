@@ -8,6 +8,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a maintainer re-run CI against a branch by hand, from the Actions
+  # tab. Added because there is no other way to: a force-push whose
+  # `synchronize` event does not produce a run, or a pull_request whose base
+  # was retargeted (the trigger above has no `types:`, so it covers
+  # opened/synchronize/reopened only and a base change fires nothing), leaves
+  # a head with no CI and no legitimate way to ask for it. The alternatives
+  # are an empty commit or a close-and-reopen, both of which produce a green
+  # tick without testing anything -- which is worse than no tick at all.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
