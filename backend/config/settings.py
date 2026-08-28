@@ -306,6 +306,37 @@ LOGIN_REDIRECT_URL = "/admin/"
 EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasatlabs.test")
 
+# SMTP transport, used only when DJANGO_EMAIL_BACKEND names the SMTP backend.
+# Provider-agnostic on purpose: Alibaba DirectMail is what Blueprint Section
+# 2.2 assumes, but these are the standard Django knobs and any relay works.
+# The real values come from the DirectMail console (or whichever provider) --
+# there is nothing to guess here, and a wrong guess would silently not send.
+#
+# Without these, Django's SMTP backend falls back to localhost:25 with no
+# credentials, which in a container is nothing at all: every send fails, and
+# before the notification work it failed silently.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+# STARTTLS on 587 by default. EMAIL_USE_SSL is implicit TLS (465) and the two
+# are mutually exclusive -- Django raises if both are set, but only when the
+# first message is sent, which is a worse place to find out. See the startup
+# check below.
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "false").lower() == "true"
+
+# The setting most worth having, and the one Django does not default.
+#
+# smtplib blocks forever on a socket with no timeout. Sending now happens
+# inside a Celery task (apps/notifications/tasks.py), and the worker runs a
+# small fixed pool -- CELERY_CONCURRENCY defaults to 2 -- so two sends against
+# a black-holed SMTP host would hang the entire worker indefinitely. Not
+# crash it, which monitoring would catch: hang it, with report generation and
+# the retention sweep queued behind a mail server that is never going to
+# answer. Ten seconds is long for SMTP and short for an outage.
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
+
 # How far ahead the nightly calibration sweep (apps/notifications/tasks.py)
 # starts chasing. 14 days by default: long enough that a custodian can book
 # an external calibration house, short enough that the message still reads as
@@ -494,6 +525,43 @@ if not DEBUG:
             "the development key: every session cookie and signed token would be "
             "forgeable by anyone who has read this repository."
         )
+
+    # Email, checked at startup for the same reason as the key above: the
+    # alternative is finding out per-message, in a worker, hours later.
+    #
+    # A half-configured SMTP backend is worse than an unconfigured one. With
+    # DEBUG off the console backend prints to a log nobody reads, and the SMTP
+    # backend with no host quietly tries localhost:25 -- both mean a customer
+    # never receives their verification link and nothing says so out loud. The
+    # notification register would fill with failed rows, which is the right
+    # record but the wrong moment to learn.
+    if EMAIL_BACKEND.endswith("smtp.EmailBackend"):
+        if not EMAIL_HOST:
+            raise RuntimeError(
+                "DJANGO_EMAIL_BACKEND is the SMTP backend but EMAIL_HOST is unset. "
+                "Django would fall back to localhost:25, which in a container is "
+                "nothing at all: every notification would fail to send."
+            )
+        if EMAIL_USE_TLS and EMAIL_USE_SSL:
+            raise RuntimeError(
+                "EMAIL_USE_TLS and EMAIL_USE_SSL are both set, and they are mutually "
+                "exclusive -- STARTTLS (usually port 587) or implicit TLS (usually "
+                "465), not both. Django raises on this too, but only when the first "
+                "message is sent."
+            )
+        if bool(EMAIL_HOST_USER) != bool(EMAIL_HOST_PASSWORD):
+            raise RuntimeError(
+                "EMAIL_HOST_USER and EMAIL_HOST_PASSWORD must be set together. One "
+                "without the other is the shape a half-finished deployment takes, "
+                "and it authenticates as nobody."
+            )
+        if DEFAULT_FROM_EMAIL.endswith(".test"):
+            raise RuntimeError(
+                "DJANGO_DEFAULT_FROM_EMAIL is still the development address and the "
+                "SMTP backend is active. A provider that verifies sending domains "
+                "(Alibaba DirectMail does) will reject every message from an "
+                "unverified From, so nothing would leave the building."
+            )
 
 
 # --- Logging --------------------------------------------------------------
