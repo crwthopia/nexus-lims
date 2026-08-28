@@ -26,7 +26,11 @@ marked `sensitive`.
 - **The Entra ID App Registration.** It lives in Microsoft's tenant and is
   created through Azure, not Alibaba.
 - **DirectMail for real SMTP.** Sending domains need DNS verification
-  Terraform cannot complete on its own.
+  Terraform cannot complete on its own, and the DKIM value has to be issued
+  by an Alibaba support ticket with a 1-3 working day turnaround. The
+  procedure, the four records and the port trap (DirectMail has no 587, and
+  25 is blocked on ECS) are in [directmail.md](directmail.md). Raise the DKIM
+  ticket first; it is the long pole.
 - **Remote state.** State belongs in an OSS bucket with locking, but that
   bucket cannot be created by the configuration whose state it holds. Create
   it once, then `terraform init -backend-config=...`.
