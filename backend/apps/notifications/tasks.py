@@ -9,6 +9,7 @@ that loop is safe.
 """
 
 import logging
+import smtplib
 
 from celery import shared_task
 from django.conf import settings
@@ -20,6 +21,81 @@ from apps.notifications.models import NotificationRecord
 from apps.notifications.notify import notify, notify_each, staff_emails_for_roles
 
 logger = logging.getLogger(__name__)
+
+
+
+# --- Which failures are worth trying again ---------------------------------
+
+# Permanent by nature: no number of retries changes the answer, and retrying
+# an authentication failure against a provider that rate-limits bad logins
+# makes things actively worse.
+_PERMANENT = (
+    smtplib.SMTPAuthenticationError,
+    smtplib.SMTPNotSupportedError,
+)
+
+# Transient by nature: the connection did not survive, or was never made.
+_TRANSIENT = (
+    smtplib.SMTPServerDisconnected,
+    smtplib.SMTPConnectError,
+    smtplib.SMTPHeloError,
+)
+
+
+def is_transient(exc):
+    """
+    True if `exc` is worth another attempt.
+
+    The distinction is the whole point of retrying at all. Retrying blindly
+    means a customer who typed their address wrong costs eight delivery
+    attempts and eight log lines before anybody finds out; not retrying at
+    all means a thirty-second network blip loses a verification email
+    permanently. Neither is acceptable, so this decides.
+
+    SMTP says it in the response code: 4xx is "try later", 5xx is "no".
+    That is the rule underneath most of what follows.
+
+    Anything unrecognised is treated as **permanent**, deliberately. The cost
+    of that choice is asymmetric: misjudging a transient failure as permanent
+    abandons one message and records a system failure an operator will read,
+    whereas misjudging a permanent failure as transient is silent and
+    repeats. A wrong call that surfaces beats a wrong call that hides.
+    """
+    # Order matters: SMTPAuthenticationError and SMTPSenderRefused both
+    # subclass SMTPResponseException, so the specific cases go first.
+    if isinstance(exc, _PERMANENT):
+        return False
+    if isinstance(exc, _TRANSIENT):
+        return True
+
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        # Per-recipient codes. Greylisting is a 4xx here and is common enough
+        # that treating every refusal as permanent would lose real mail.
+        codes = [code for code, _ in (exc.recipients or {}).values()]
+        return bool(codes) and any(code < 500 for code in codes)
+
+    if isinstance(exc, smtplib.SMTPResponseException):
+        return exc.smtp_code < 500
+
+    # socket.timeout, ConnectionRefusedError and TimeoutError are all OSError
+    # subclasses; this is the "could not reach the relay" case.
+    if isinstance(exc, OSError):
+        return True
+
+    return False
+
+
+def _backoff_seconds(attempts):
+    """
+    Wait longer after each failure, up to an hour.
+
+    Doubling from one minute: 1, 2, 4, 8, 16, 32, 60, 60... With
+    NOTIFICATION_MAX_ATTEMPTS at 8 that spans a little over two hours, which
+    is the shape of a provider outage rather than of a blip. The cap exists
+    so the last attempts are not days apart, by which point the message has
+    stopped being worth sending.
+    """
+    return min(60 * (2 ** max(attempts - 1, 0)), 3600)
 
 
 @shared_task(name="apps.notifications.tasks.send_notification")
@@ -44,11 +120,17 @@ def send_notification(record_id):
         # The record it described is gone. Not an error: a notification about
         # a deleted row is one nobody should receive, and raising here would
         # retry forever against something that is not coming back.
-        record.status = NotificationRecord.Status.FAILED
+        # ABANDONED rather than FAILED: FAILED now means "will be retried",
+        # and retrying against a row that no longer exists is the one thing
+        # this branch was always there to prevent.
+        record.status = NotificationRecord.Status.ABANDONED
         record.failure_reason = str(exc)
         record.save(update_fields=["status", "failure_reason"])
         logger.warning("notification %s: %s", record.pk, exc)
         return "entity-gone"
+
+    record.attempts += 1
+    record.last_attempt_at = timezone.now()
 
     try:
         send_mail(
@@ -58,21 +140,53 @@ def send_notification(record_id):
             recipient_list=[record.recipient],
         )
     except Exception as exc:
-        # Recorded on the row *and* re-raised, the same contract
-        # apps/reporting/tasks.generate_report_pdf uses: the row is what the
-        # register reads, and the exception is what makes it a task failure
-        # and therefore a SystemFailure.
-        record.status = NotificationRecord.Status.FAILED
-        record.failure_reason = f"{type(exc).__name__}: {exc}"[:2000]
-        record.save(update_fields=["status", "failure_reason"])
-        logger.exception("notification %s failed to send", record.pk)
-        raise
+        return _record_send_failure(record, exc)
 
     record.status = NotificationRecord.Status.SENT
     record.sent_at = timezone.now()
     record.failure_reason = ""
-    record.save(update_fields=["status", "sent_at", "failure_reason"])
+    record.save(update_fields=["status", "sent_at", "failure_reason", "attempts", "last_attempt_at"])
     return "sent"
+
+
+def _record_send_failure(record, exc):
+    """
+    Write the failure down, and decide whether anybody should hear about it.
+
+    A transient failure with attempts left is *not* re-raised, which is a
+    deliberate change from the original contract. Re-raising makes it a
+    Celery task failure and therefore a SystemFailure, and alarming QA about
+    a thirty-second SMTP hiccup that the next sweep will fix is how a
+    register of real problems becomes noise people filter.
+
+    Giving up is the thing worth raising on. When the failure is permanent,
+    or the attempts are spent, the exception goes up and becomes a
+    SystemFailure with the EMAIL component -- which
+    notify_system_failure deliberately does not try to email about.
+    """
+    from django.conf import settings as django_settings
+
+    transient = is_transient(exc)
+    exhausted = record.attempts >= django_settings.NOTIFICATION_MAX_ATTEMPTS
+    retrying = transient and not exhausted
+
+    record.status = (
+        NotificationRecord.Status.FAILED if retrying else NotificationRecord.Status.ABANDONED
+    )
+    record.failure_reason = f"{type(exc).__name__}: {exc}"[:2000]
+    record.save(update_fields=["status", "failure_reason", "attempts", "last_attempt_at"])
+
+    if retrying:
+        logger.warning(
+            "notification %s failed (attempt %d/%d, retrying): %s",
+            record.pk, record.attempts, django_settings.NOTIFICATION_MAX_ATTEMPTS, exc,
+        )
+        return "retry-scheduled"
+
+    logger.exception(
+        "notification %s abandoned after %d attempt(s): %s", record.pk, record.attempts, exc
+    )
+    raise exc
 
 
 @shared_task(name="apps.notifications.tasks.sweep_calibration_due")
@@ -351,6 +465,55 @@ def send_sample_progress_digests():
     return {"groups": len(grouped), "queued": queued}
 
 
+@shared_task(name="apps.notifications.tasks.retry_failed_notifications")
+def retry_failed_notifications():
+    """
+    Re-attempt notifications that failed transiently and have attempts left.
+
+    Deliberately a database sweep rather than Celery's own `autoretry_for` /
+    `retry_backoff`. Celery holds retry state in the broker, so a worker
+    killed mid-backoff or a broker that loses the message loses the retry
+    with it -- and the whole reason this exists is that a customer waiting on
+    a verification link should not depend on a queue message surviving. The
+    row survives. Everything needed to decide the next attempt (how many have
+    happened, when the last one was) is on it, so the sweep can reconstruct
+    the schedule from nothing.
+
+    It also keeps one mechanism where there would otherwise be two: without
+    this, a Celery retry in flight and a sweep picking the same row up could
+    both send, and the only thing standing between that and a duplicate email
+    is timing.
+
+    Backoff is per row, from its own attempt count, so a message that failed
+    once is retried in a minute while one that has failed six times waits an
+    hour -- both handled by the same five-minute sweep.
+    """
+    from django.conf import settings as django_settings
+
+    now = timezone.now()
+    candidates = NotificationRecord.objects.filter(
+        status=NotificationRecord.Status.FAILED,
+        attempts__lt=django_settings.NOTIFICATION_MAX_ATTEMPTS,
+    ).order_by("last_attempt_at")
+
+    requeued, waiting = 0, 0
+    for record in candidates:
+        due_after = _backoff_seconds(record.attempts)
+        if record.last_attempt_at and (now - record.last_attempt_at).total_seconds() < due_after:
+            waiting += 1
+            continue
+        try:
+            send_notification.delay(record.pk)
+            requeued += 1
+        except Exception:
+            logger.exception("notification %s could not be re-enqueued; still failed", record.pk)
+            break  # the broker is down; the next sweep will try again
+
+    if requeued:
+        logger.info("re-enqueued %d failed notification(s), %d still in backoff", requeued, waiting)
+    return {"requeued": requeued, "waiting": waiting}
+
+
 @shared_task(name="apps.notifications.tasks.retry_stalled_notifications")
 def retry_stalled_notifications():
     """
@@ -386,11 +549,13 @@ def retry_stalled_notifications():
 
 
 __all__ = [
+    "is_transient",
     "notify",
     "notify_each",
     "notify_system_failure",
     "send_notification",
     "notify_sample_progress",
+    "retry_failed_notifications",
     "retry_stalled_notifications",
     "send_sample_progress_digests",
     "send_open_failure_digest",
