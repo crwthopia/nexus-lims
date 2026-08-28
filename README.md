@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **422-test automated regression suite** (`backend/tests/`, pytest +
+- **436-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -1437,15 +1437,79 @@ row and returns `already-sent` rather than sending twice.
 ### Sending for real
 
 `EMAIL_BACKEND` defaults to Django's console backend, which prints messages
-(and the verification links) to the runserver log. Production needs the SMTP
-backend and the usual `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` /
-`EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS`.
+(and the verification links) to the runserver log — nothing leaves a
+developer's machine. Production sets the SMTP backend and its transport
+settings:
 
-That is an environment change, not a code change — but it is **gated on
-something Terraform cannot do**: Alibaba DirectMail sending domains need DNS
-verification, which `infra/README.md` already lists among the things it
-deliberately does not provision. Until that is done, nothing actually leaves
-the building.
+```bash
+DJANGO_EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+DJANGO_DEFAULT_FROM_EMAIL=no-reply@<your verified sending domain>
+EMAIL_HOST=...            # from the provider's console
+EMAIL_PORT=587            # 587 STARTTLS, or 465 with EMAIL_USE_SSL
+EMAIL_HOST_USER=...
+EMAIL_HOST_PASSWORD=...
+EMAIL_USE_TLS=true        # mutually exclusive with EMAIL_USE_SSL
+EMAIL_TIMEOUT=10
+```
+
+These are the standard Django knobs, deliberately provider-agnostic. Alibaba
+DirectMail is what Blueprint Section 2.2 assumes, but the host, port and
+credentials come from that console and are **not guessed here** — the same
+rule `OSS_ARCHIVE_STORAGE_CLASS` follows, for the same reason.
+
+**`EMAIL_TIMEOUT` is the one that matters most, and the one Django does not
+default.** `smtplib` blocks forever on a socket with no timeout. Sending now
+happens inside a Celery task and the worker runs a small fixed pool
+(`CELERY_CONCURRENCY` defaults to 2), so two sends against a black-holed SMTP
+host would hang the whole worker — not crash it, which monitoring would
+catch, but hang it, with report generation and the retention sweep queued
+behind a mail server that is never going to answer.
+
+### It refuses to start half-configured
+
+A half-configured SMTP backend is worse than an unconfigured one: with `DEBUG`
+off, the console backend prints to a log nobody reads and the SMTP backend
+with no host quietly tries `localhost:25`. Either way the customer never gets
+their verification link, and the first person to notice is the customer.
+
+So `config/settings.py` checks at startup, the same way it refuses the
+development `SECRET_KEY`, and each of these has been confirmed to stop a real
+boot rather than surfacing per-message in a worker hours later:
+
+| Refuses to start when | Because |
+|---|---|
+| SMTP backend, no `EMAIL_HOST` | Django would fall back to `localhost:25`, which in a container is nothing at all |
+| `EMAIL_USE_TLS` and `EMAIL_USE_SSL` both set | They are mutually exclusive; Django raises too, but only on the first send |
+| `EMAIL_HOST_USER` without `EMAIL_HOST_PASSWORD`, or vice versa | The shape a half-finished deployment takes; it authenticates as nobody |
+| `DEFAULT_FROM_EMAIL` still `…@nasatlabs.test` over SMTP | A provider that verifies sending domains rejects every message from an unverified From |
+
+### Proving it works
+
+```bash
+python manage.py send_test_email you@example.com
+```
+
+Prints the effective configuration — host, port, TLS, whether a password is
+set, never the password itself — then sends one message and reports what
+failed if it did, with the usual causes in the order they actually happen.
+
+It sends **directly rather than through `notify()`**, on purpose: the
+notification path is already covered by tests, and routing a diagnostic
+through a queue means a failure surfaces in a worker log instead of in the
+terminal of the person running it. It also says plainly when the console
+backend is active, because a green run there would prove nothing.
+
+The transport path is verified end to end against a real SMTP server —
+settings, command, delivery — so what remains untested is only what a
+deployment can answer.
+
+### What is still not done
+
+DirectMail sending domains need **DNS verification**, which `infra/README.md`
+already lists among the things Terraform deliberately does not provision.
+That is a task for whoever owns the DNS zone, and until it is finished a
+correctly configured relay will still reject every message from an unverified
+sender. Worth starting early: verification is not instant.
 
 ## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
 
