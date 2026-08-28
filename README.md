@@ -1452,10 +1452,17 @@ EMAIL_USE_TLS=true        # mutually exclusive with EMAIL_USE_SSL
 EMAIL_TIMEOUT=10
 ```
 
-These are the standard Django knobs, deliberately provider-agnostic. Alibaba
-DirectMail is what Blueprint Section 2.2 assumes, but the host, port and
-credentials come from that console and are **not guessed here** — the same
-rule `OSS_ARCHIVE_STORAGE_CLASS` follows, for the same reason.
+These are the standard Django knobs, deliberately provider-agnostic — the
+credentials come from the provider's console and are **not guessed here**, the
+same rule `OSS_ARCHIVE_STORAGE_CLASS` follows.
+
+**The `EMAIL_PORT=587` default above is wrong for Alibaba DirectMail**, which
+Blueprint Section 2.2 assumes. DirectMail offers **25, 80 and 465 only**, and
+port 25 is disabled outbound on ECS instances — so that deployment wants
+**465 with `EMAIL_USE_SSL=true`**, not 587 with STARTTLS. Port 80 is available
+and is not worth taking: it is plain, and STARTTLS on it can be stripped,
+which is not something to do with a customer's information under 4.2. The
+whole procedure is in [`infra/directmail.md`](infra/directmail.md).
 
 **`EMAIL_TIMEOUT` is the one that matters most, and the one Django does not
 default.** `smtplib` blocks forever on a socket with no timeout. Sending now
@@ -1505,11 +1512,16 @@ deployment can answer.
 
 ### What is still not done
 
-DirectMail sending domains need **DNS verification**, which `infra/README.md`
-already lists among the things Terraform deliberately does not provision.
-That is a task for whoever owns the DNS zone, and until it is finished a
-correctly configured relay will still reject every message from an unverified
-sender. Worth starting early: verification is not instant.
+DirectMail sending domains need **DNS verification**, which
+[`infra/directmail.md`](infra/directmail.md) now sets out step by step: four
+DNS records, a console verification, then a sender address and its SMTP
+password.
+
+**Start it before you need it.** Three of the four records take minutes, but
+the DKIM value has to be issued by an Alibaba **support ticket with a 1–3
+working day turnaround** — that is the long pole, and nothing else about
+sending email can finish without it. Until the domain verifies, a correctly
+configured relay still rejects every message.
 
 ## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
 
