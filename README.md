@@ -1507,10 +1507,8 @@ settings:
 DJANGO_EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 DJANGO_DEFAULT_FROM_EMAIL=no-reply@<your verified sending domain>
 EMAIL_HOST=...            # from the provider's console
-EMAIL_PORT=587            # 587 STARTTLS, or 465 with EMAIL_USE_SSL
 EMAIL_HOST_USER=...
 EMAIL_HOST_PASSWORD=...
-EMAIL_USE_TLS=true        # mutually exclusive with EMAIL_USE_SSL
 EMAIL_TIMEOUT=10
 ```
 
@@ -1518,13 +1516,26 @@ These are the standard Django knobs, deliberately provider-agnostic — the
 credentials come from the provider's console and are **not guessed here**, the
 same rule `OSS_ARCHIVE_STORAGE_CLASS` follows.
 
-**The `EMAIL_PORT=587` default above is wrong for Alibaba DirectMail**, which
-Blueprint Section 2.2 assumes. DirectMail offers **25, 80 and 465 only**, and
-port 25 is disabled outbound on ECS instances — so that deployment wants
-**465 with `EMAIL_USE_SSL=true`**, not 587 with STARTTLS. Port 80 is available
-and is not worth taking: it is plain, and STARTTLS on it can be stripped,
-which is not something to do with a customer's information under 4.2. The
-whole procedure is in [`infra/directmail.md`](infra/directmail.md).
+The port and TLS mode are not in that list because the defaults already suit
+the intended provider: **`EMAIL_PORT=465` with `EMAIL_USE_SSL=true`**
+(implicit TLS), and `EMAIL_USE_TLS=false`. That is deliberately *not* the more
+common 587-with-STARTTLS. Alibaba DirectMail, which Blueprint Section 2.2
+assumes, offers **25, 80 and 465 only** — there is no 587 — and port 25 is
+disabled outbound on ECS instances. A 587 default could not connect to the
+provider the deployment actually uses, and said so only as a timeout in a
+worker. Port 80 is reachable and is not worth taking: it is plain, and
+STARTTLS on it can be stripped, which is not something to do with a customer's
+information under clause 4.2. The whole procedure is in
+[`infra/directmail.md`](infra/directmail.md).
+
+For a relay that does want STARTTLS, set the three together — the startup
+checks below refuse a port that contradicts the TLS mode:
+
+```bash
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_USE_SSL=false
+```
 
 **`EMAIL_TIMEOUT` is the one that matters most, and the one Django does not
 default.** `smtplib` blocks forever on a socket with no timeout. Sending now
@@ -1549,6 +1560,9 @@ boot rather than surfacing per-message in a worker hours later:
 |---|---|
 | SMTP backend, no `EMAIL_HOST` | Django would fall back to `localhost:25`, which in a container is nothing at all |
 | `EMAIL_USE_TLS` and `EMAIL_USE_SSL` both set | They are mutually exclusive; Django raises too, but only on the first send |
+| Neither `EMAIL_USE_TLS` nor `EMAIL_USE_SSL` set | Mail would leave in the clear, verification links included — clause 4.2 |
+| `EMAIL_PORT=465` with `EMAIL_USE_TLS` | A 465 listener wants the handshake first, so STARTTLS never completes: the send hangs to `EMAIL_TIMEOUT`, per attempt, in a worker |
+| `EMAIL_PORT=587` with `EMAIL_USE_SSL` | The same mistake inverted — the shape left behind by changing the port and nothing else |
 | `EMAIL_HOST_USER` without `EMAIL_HOST_PASSWORD`, or vice versa | The shape a half-finished deployment takes; it authenticates as nobody |
 | `DEFAULT_FROM_EMAIL` still `…@nasatlabs.test` over SMTP | A provider that verifies sending domains rejects every message from an unverified From |
 
