@@ -12,6 +12,11 @@ psycopg2-binary==2.9.12
 celery==5.4.0
 redis==5.0.4
 django-auth-adfs==1.16.0
+# Already present transitively via django-auth-adfs, but pinned explicitly
+# because apps/notifications/graph.py imports it directly: an indirect
+# dependency that a future django-auth-adfs release stops requiring would
+# take the mail transport with it.
+requests==2.33.1
 python-dotenv==1.0.1
 pyotp==2.9.0
 boto3==1.34.144

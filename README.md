@@ -1537,6 +1537,49 @@ EMAIL_USE_TLS=true
 EMAIL_USE_SSL=false
 ```
 
+### Or send as an M365 shared mailbox
+
+SMTP is not the only transport. If the laboratory already has a Microsoft 365
+tenant — which it does, since staff sign in through Entra ID — notifications
+can go out as a shared mailbox through Microsoft Graph instead:
+
+```bash
+DJANGO_EMAIL_BACKEND=apps.notifications.graph.GraphEmailBackend
+DJANGO_DEFAULT_FROM_EMAIL=NexusLIMS <lims-notifications@your-domain>
+GRAPH_MAIL_CLIENT_ID=...
+GRAPH_MAIL_CLIENT_SECRET=...
+GRAPH_MAIL_SENDER=lims-notifications@your-domain
+```
+
+Pick one transport or the other. Running both means two sending identities for
+one laboratory, and two external providers to evaluate under clause 6.6.
+
+**Graph rather than SMTP to Exchange Online**, because a shared mailbox has no
+password and no licence and so cannot authenticate over SMTP at all — the
+workaround of authenticating as a licensed user is refused with `5.7.60 Client
+does not have permissions to send as this sender`. Microsoft is also retiring
+SMTP AUTH client submission; check your Message Center rather than this
+sentence for where that has got to.
+
+What it buys, if the domain is already in M365: SPF, DKIM and DMARC are
+already done, which removes the DirectMail DNS verification **and its DKIM
+support ticket** — the 1–3 working day item that otherwise gates first send.
+One external provider instead of two. A rotatable, revocable Entra credential
+instead of an SMTP password in an environment variable. And Exchange's message
+trace, which is better delivery evidence under 7.5 than "the relay accepted
+it".
+
+What it costs: `Mail.Send` as an application permission is **tenant-wide** —
+as granted, the app can send as anybody, including the Laboratory Director. It
+has to be narrowed with an Exchange application access policy scoping the app
+to a group containing only the notifications mailbox. That step is not
+optional and the application cannot check it for you.
+
+The credential is deliberately a **second app registration**, separate from
+the SSO one, so that rotating the mail secret cannot lock the laboratory out
+of signing in. The whole procedure is in
+[`infra/m365-graph-mail.md`](infra/m365-graph-mail.md).
+
 **`EMAIL_TIMEOUT` is the one that matters most, and the one Django does not
 default.** `smtplib` blocks forever on a socket with no timeout. Sending now
 happens inside a Celery task and the worker runs a small fixed pool
@@ -1564,7 +1607,9 @@ boot rather than surfacing per-message in a worker hours later:
 | `EMAIL_PORT=465` with `EMAIL_USE_TLS` | A 465 listener wants the handshake first, so STARTTLS never completes: the send hangs to `EMAIL_TIMEOUT`, per attempt, in a worker |
 | `EMAIL_PORT=587` with `EMAIL_USE_SSL` | The same mistake inverted — the shape left behind by changing the port and nothing else |
 | `EMAIL_HOST_USER` without `EMAIL_HOST_PASSWORD`, or vice versa | The shape a half-finished deployment takes; it authenticates as nobody |
-| `DEFAULT_FROM_EMAIL` still `…@nasatlabs.test` over SMTP | A provider that verifies sending domains rejects every message from an unverified From |
+| `DEFAULT_FROM_EMAIL` still `…@nasatlabs.test` over any real transport | A provider that verifies sending domains rejects every message from an unverified From |
+| Graph backend with `GRAPH_MAIL_CLIENT_ID`, `_CLIENT_SECRET` or `_SENDER` unset | Every notification would fail at the first send, in a worker, one at a time |
+| Graph backend where `DEFAULT_FROM_EMAIL` is not `GRAPH_MAIL_SENDER` | Graph rewrites the From rather than refusing, so customers would see — and reply to — an address the application never chose |
 
 ### Proving it works
 

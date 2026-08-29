@@ -1,7 +1,7 @@
 """
 Sending, and the two sweeps that decide there is something to send.
 
-`send_notification` is the only place in the codebase that touches SMTP. A
+`send_notification` is the only place in the codebase that sends mail. A
 failure here is a Celery task failure, which means `config/celery.py`'s
 `task_failure` receiver records it in the SystemFailure register without
 this module doing anything -- see the EMAIL component note there for why
@@ -16,6 +16,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
+from apps.notifications.graph import GraphPermanentError, GraphSendError
 from apps.notifications.messages import NotificationEntityGone, build_body
 from apps.notifications.models import NotificationRecord
 from apps.notifications.notify import notify, notify_each, staff_emails_for_roles
@@ -41,6 +42,13 @@ _TRANSIENT = (
     smtplib.SMTPHeloError,
 )
 
+# Graph statuses worth another attempt. 429 is throttling and carries a
+# Retry-After; the 5xx pair is Microsoft having a bad minute. Everything else
+# Graph returns -- 400 malformed, 401 bad credential, 403 blocked by the
+# application access policy, 404 no such mailbox -- is a configuration
+# problem that retrying only repeats.
+_TRANSIENT_GRAPH_STATUSES = frozenset({429, 500, 503, 504})
+
 
 def is_transient(exc):
     """
@@ -53,7 +61,9 @@ def is_transient(exc):
     permanently. Neither is acceptable, so this decides.
 
     SMTP says it in the response code: 4xx is "try later", 5xx is "no".
-    That is the rule underneath most of what follows.
+    That is the rule underneath most of what follows. Graph says it in an
+    HTTP status instead, and inverts the convention -- its 5xx is the
+    retryable half -- so it gets its own branch rather than a shared one.
 
     Anything unrecognised is treated as **permanent**, deliberately. The cost
     of that choice is asymmetric: misjudging a transient failure as permanent
@@ -67,6 +77,22 @@ def is_transient(exc):
         return False
     if isinstance(exc, _TRANSIENT):
         return True
+
+    # Graph, before the OSError branch below: a GraphSendError raised for an
+    # unreachable endpoint is not an OSError, and one raised for HTTP 403
+    # must not be caught by anything general.
+    if isinstance(exc, GraphPermanentError):
+        # Missing credentials, or a message this backend refused to build.
+        # Neither is supplied by trying again.
+        return False
+    if isinstance(exc, GraphSendError):
+        # status_code is None when the request never got a response at all --
+        # DNS, TLS, a dropped connection -- which is the transient case. A
+        # message that was never valid raises GraphPermanentError above, so
+        # it cannot reach this branch and be mistaken for a network blip.
+        if exc.status_code is None:
+            return True
+        return exc.status_code in _TRANSIENT_GRAPH_STATUSES
 
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         # Per-recipient codes. Greylisting is a 4xx here and is common enough

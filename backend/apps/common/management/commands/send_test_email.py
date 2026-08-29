@@ -1,5 +1,5 @@
 """
-Prove the SMTP transport works, before trusting it with a customer's
+Prove the mail transport works, before trusting it with a customer's
 verification link.
 
 Everything else about notifications is covered by tests
@@ -21,13 +21,13 @@ from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = "Send one test email, to check SMTP configuration in a real deployment."
+    help = "Send one test email, to check the mail configuration in a real deployment."
 
     def add_arguments(self, parser):
         parser.add_argument("recipient", help="Address to send the test message to.")
         parser.add_argument(
             "--subject",
-            default="NexusLIMS SMTP test",
+            default="NexusLIMS mail transport test",
             help="Override the subject, e.g. to tell two attempts apart in a busy inbox.",
         )
 
@@ -39,21 +39,37 @@ class Command(BaseCommand):
         # password is deliberately never echoed -- only whether one is set.
         self.stdout.write("Sending with:")
         self.stdout.write(f"  backend    {settings.EMAIL_BACKEND}")
-        self.stdout.write(f"  host       {settings.EMAIL_HOST or '(unset)'}:{settings.EMAIL_PORT}")
         self.stdout.write(f"  from       {settings.DEFAULT_FROM_EMAIL}")
-        self.stdout.write(f"  user       {settings.EMAIL_HOST_USER or '(none)'}")
-        self.stdout.write(f"  password   {'set' if settings.EMAIL_HOST_PASSWORD else '(none)'}")
-        self.stdout.write(f"  TLS / SSL  {settings.EMAIL_USE_TLS} / {settings.EMAIL_USE_SSL}")
-        self.stdout.write(f"  timeout    {settings.EMAIL_TIMEOUT}s")
+
+        # Neither branch echoes a secret -- only whether one is set. This
+        # output is the first thing an operator pastes into a support ticket.
+        if settings.EMAIL_BACKEND == settings.GRAPH_EMAIL_BACKEND:
+            self.stdout.write(f"  tenant     {settings.GRAPH_MAIL_TENANT_ID or '(unset)'}")
+            self.stdout.write(f"  client     {settings.GRAPH_MAIL_CLIENT_ID or '(unset)'}")
+            self.stdout.write(
+                f"  secret     {'set' if settings.GRAPH_MAIL_CLIENT_SECRET else '(none)'}"
+            )
+            self.stdout.write(f"  mailbox    {settings.GRAPH_MAIL_SENDER or '(unset)'}")
+            self.stdout.write(f"  timeout    {settings.GRAPH_MAIL_TIMEOUT}s")
+        else:
+            self.stdout.write(
+                f"  host       {settings.EMAIL_HOST or '(unset)'}:{settings.EMAIL_PORT}"
+            )
+            self.stdout.write(f"  user       {settings.EMAIL_HOST_USER or '(none)'}")
+            self.stdout.write(f"  password   {'set' if settings.EMAIL_HOST_PASSWORD else '(none)'}")
+            self.stdout.write(f"  TLS / SSL  {settings.EMAIL_USE_TLS} / {settings.EMAIL_USE_SSL}")
+            self.stdout.write(f"  timeout    {settings.EMAIL_TIMEOUT}s")
+
         self.stdout.write(f"  to         {recipient}")
         self.stdout.write("")
 
         if settings.EMAIL_BACKEND.endswith("console.EmailBackend"):
             self.stdout.write(
                 self.style.WARNING(
-                    "The console backend is active, so this proves nothing about SMTP -- "
-                    "the message below is printed, not sent. Set DJANGO_EMAIL_BACKEND to "
-                    "django.core.mail.backends.smtp.EmailBackend to test a real relay."
+                    "The console backend is active, so this proves nothing about the "
+                    "transport -- the message below is printed, not sent. Set "
+                    "DJANGO_EMAIL_BACKEND to the SMTP backend, or to "
+                    f"{settings.GRAPH_EMAIL_BACKEND}, to test a real one."
                 )
             )
 
@@ -82,10 +98,16 @@ class Command(BaseCommand):
             raise CommandError(
                 f"{type(exc).__name__}: {exc}\n\n"
                 "Common causes, in the order they usually happen:\n"
+                "  SMTP:\n"
                 "  - the sending domain is not verified with the provider yet\n"
                 "  - EMAIL_HOST_USER is not the address DEFAULT_FROM_EMAIL sends as\n"
                 "  - the port is blocked outbound from this subnet\n"
-                "  - STARTTLS vs implicit TLS: 587 wants EMAIL_USE_TLS, 465 wants EMAIL_USE_SSL"
+                "  - STARTTLS vs implicit TLS: 587 wants EMAIL_USE_TLS, 465 wants EMAIL_USE_SSL\n"
+                "  Graph:\n"
+                "  - HTTP 403: the Exchange application access policy does not cover this\n"
+                "    mailbox, or Mail.Send was never admin-consented\n"
+                "  - HTTP 401: the client secret has expired -- they do, on a schedule\n"
+                "  - HTTP 404: GRAPH_MAIL_SENDER is not a mailbox in this tenant"
             ) from exc
 
         if not sent:

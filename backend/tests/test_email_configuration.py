@@ -53,6 +53,22 @@ def _reimport_settings(**overrides):
             sys.modules["config.settings"] = saved
 
 
+GRAPH_BACKEND = "apps.notifications.graph.GraphEmailBackend"
+
+
+def _graph_env(**overrides):
+    env = {
+        "DJANGO_EMAIL_BACKEND": GRAPH_BACKEND,
+        "DJANGO_DEFAULT_FROM_EMAIL": "lims-notifications@nasatlabs.example",
+        "GRAPH_MAIL_TENANT_ID": "11111111-1111-1111-1111-111111111111",
+        "GRAPH_MAIL_CLIENT_ID": "22222222-2222-2222-2222-222222222222",
+        "GRAPH_MAIL_CLIENT_SECRET": "placeholder",
+        "GRAPH_MAIL_SENDER": "lims-notifications@nasatlabs.example",
+    }
+    env.update(overrides)
+    return env
+
+
 def _smtp_env(**overrides):
     env = {
         "DJANGO_EMAIL_BACKEND": SMTP_BACKEND,
@@ -233,7 +249,7 @@ def test_the_command_says_when_it_is_proving_nothing(capsys, settings):
 
     call_command("send_test_email", "operator@nasatlabs.example")
 
-    assert "proves nothing about SMTP" in capsys.readouterr().out
+    assert "proves nothing about the transport" in capsys.readouterr().out
 
 
 def test_a_transport_failure_becomes_an_actionable_error(settings):
@@ -252,3 +268,91 @@ def test_a_transport_failure_becomes_an_actionable_error(settings):
     assert "Connection refused" in message
     # The point of the command: an operator should not have to read smtplib.
     assert "sending domain is not verified" in message
+
+
+# --- Microsoft Graph -------------------------------------------------------
+#
+# The startup checks matter more here than for SMTP, because Graph fails in
+# ways that look like success: a wrong From is rewritten rather than refused,
+# and a missing application access policy is a 403 that only appears once a
+# customer is waiting for a message.
+
+def test_a_fully_configured_graph_backend_starts():
+    module = _reimport_settings(**_graph_env())
+
+    assert module.EMAIL_BACKEND == module.GRAPH_EMAIL_BACKEND
+    assert module.GRAPH_MAIL_SENDER == "lims-notifications@nasatlabs.example"
+
+
+def test_the_graph_tenant_falls_back_to_the_sso_tenant():
+    """
+    It is genuinely the same tenant. Asking an operator to paste the same
+    GUID into two variables invites them to differ.
+    """
+    module = _reimport_settings(**_graph_env(GRAPH_MAIL_TENANT_ID=""))
+
+    assert module.GRAPH_MAIL_TENANT_ID == BASE_ENV["AZURE_AD_TENANT_ID"]
+
+
+def test_the_graph_credential_is_separate_from_the_sso_credential():
+    """
+    A separate app registration is the point: rotating the mail secret must
+    not be able to lock the laboratory out of signing in.
+    """
+    module = _reimport_settings(**_graph_env())
+
+    assert module.GRAPH_MAIL_CLIENT_ID != module.AUTH_ADFS["CLIENT_ID"]
+
+
+@pytest.mark.parametrize(
+    "unset",
+    ["GRAPH_MAIL_CLIENT_ID", "GRAPH_MAIL_CLIENT_SECRET", "GRAPH_MAIL_SENDER"],
+)
+def test_a_half_configured_graph_backend_refuses_to_start(unset):
+    with pytest.raises(RuntimeError, match=unset):
+        _reimport_settings(**_graph_env(**{unset: ""}))
+
+
+def test_a_from_address_that_is_not_the_mailbox_refuses_to_start():
+    """
+    Graph sends as the mailbox in the request URL whatever the message says,
+    so this would arrive from an address the application never chose -- and
+    the customer's reply would go there.
+    """
+    with pytest.raises(RuntimeError, match="rewrites the From"):
+        _reimport_settings(
+            **_graph_env(DJANGO_DEFAULT_FROM_EMAIL="no-reply@nasatlabs.example")
+        )
+
+
+def test_a_display_name_on_the_from_address_is_allowed():
+    """`NexusLIMS <mailbox>` is the same mailbox, and is what customers should see."""
+    module = _reimport_settings(
+        **_graph_env(
+            DJANGO_DEFAULT_FROM_EMAIL="NexusLIMS <lims-notifications@nasatlabs.example>"
+        )
+    )
+
+    assert module.DEFAULT_FROM_EMAIL.startswith("NexusLIMS <")
+
+
+def test_the_development_from_address_refuses_to_start_over_graph():
+    """The same rule the SMTP backend gets: a real transport, a real sender."""
+    with pytest.raises(RuntimeError, match="development address"):
+        _reimport_settings(
+            **_graph_env(
+                DJANGO_DEFAULT_FROM_EMAIL="no-reply@nasatlabs.test",
+                GRAPH_MAIL_SENDER="no-reply@nasatlabs.test",
+            )
+        )
+
+
+def test_the_smtp_transport_checks_do_not_fire_for_graph():
+    """
+    EMAIL_HOST is unset in a Graph deployment and that is correct, not
+    half-configured. A shared guard would make the two transports impossible
+    to run one at a time.
+    """
+    module = _reimport_settings(**_graph_env(EMAIL_HOST=""))
+
+    assert module.EMAIL_HOST == ""
