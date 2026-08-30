@@ -324,15 +324,27 @@ DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasat
 # credentials, which in a container is nothing at all: every send fails, and
 # before the notification work it failed silently.
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+# 465 (implicit TLS), not the more common 587 (STARTTLS).
+#
+# 587 is the usual submission port and was the default here, but DirectMail --
+# the provider Blueprint Section 2.2 assumes -- does not offer it. Its SMTP
+# ports are 25, 80 and 465, and outbound 25 is disabled on ECS instances, so
+# 465 is the only one that is both reachable and encrypted. A default that
+# cannot connect to the intended provider is not a neutral default.
+#
+# For a relay that does want STARTTLS, set all three together:
+#   EMAIL_PORT=587 EMAIL_USE_TLS=true EMAIL_USE_SSL=false
+# The startup check below refuses the mismatched halves of that.
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "465"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-# STARTTLS on 587 by default. EMAIL_USE_SSL is implicit TLS (465) and the two
-# are mutually exclusive -- Django raises if both are set, but only when the
-# first message is sent, which is a worse place to find out. See the startup
-# check below.
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
-EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "false").lower() == "true"
+# The two TLS modes are mutually exclusive and neither is optional: EMAIL_USE_SSL
+# is implicit TLS (the handshake precedes any SMTP command, port 465) and
+# EMAIL_USE_TLS is STARTTLS (upgrade mid-session, port 587). Django raises if
+# both are set, but only when the first message is sent, which is a worse place
+# to find out. See the startup checks below.
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() == "true"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "true").lower() == "true"
 
 # The setting most worth having, and the one Django does not default.
 #
@@ -565,6 +577,27 @@ if not DEBUG:
                 "exclusive -- STARTTLS (usually port 587) or implicit TLS (usually "
                 "465), not both. Django raises on this too, but only when the first "
                 "message is sent."
+            )
+        if not EMAIL_USE_TLS and not EMAIL_USE_SSL:
+            raise RuntimeError(
+                "Neither EMAIL_USE_TLS nor EMAIL_USE_SSL is set, so mail would leave "
+                "in the clear -- including customer verification links and the sample "
+                "and report references in every notification subject. Set EMAIL_USE_SSL "
+                "for implicit TLS (port 465) or EMAIL_USE_TLS for STARTTLS (port 587)."
+            )
+        if EMAIL_PORT == 465 and EMAIL_USE_TLS:
+            raise RuntimeError(
+                "EMAIL_PORT is 465 but EMAIL_USE_TLS asks for STARTTLS. A 465 listener "
+                "expects the TLS handshake before any SMTP command, so STARTTLS on it "
+                "never completes -- the send hangs until EMAIL_TIMEOUT and then fails. "
+                "Use EMAIL_USE_SSL=true with 465, or move to port 587."
+            )
+        if EMAIL_PORT == 587 and EMAIL_USE_SSL:
+            raise RuntimeError(
+                "EMAIL_PORT is 587 but EMAIL_USE_SSL asks for implicit TLS. A 587 "
+                "listener speaks plain SMTP until STARTTLS, so a TLS handshake opening "
+                "the connection never completes. Use EMAIL_USE_TLS=true with 587, or "
+                "move to port 465. Note that Alibaba DirectMail has no 587 at all."
             )
         if bool(EMAIL_HOST_USER) != bool(EMAIL_HOST_PASSWORD):
             raise RuntimeError(

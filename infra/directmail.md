@@ -84,13 +84,14 @@ wait it out rather than re-adding the records.
 DJANGO_EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 DJANGO_DEFAULT_FROM_EMAIL=no-reply@mail.<your-domain>   # the sender address
 EMAIL_HOST=smtpdm.aliyun.com                            # or the regional smtpdm-<region>.aliyun.com
-EMAIL_PORT=465
 EMAIL_HOST_USER=no-reply@mail.<your-domain>             # the sender address again
 EMAIL_HOST_PASSWORD=<the SMTP password>
-EMAIL_USE_SSL=true
-EMAIL_USE_TLS=false
 EMAIL_TIMEOUT=10
 ```
+
+`EMAIL_PORT=465`, `EMAIL_USE_SSL=true` and `EMAIL_USE_TLS=false` are the
+defaults in `config/settings.py`, so they are not in that list. Set them only
+if you are pointing the application at something other than DirectMail.
 
 4. Prove it:
 
@@ -100,9 +101,11 @@ python manage.py send_test_email you@example.com
 
 ## Ports: 465, and why not 587
 
-**DirectMail does not offer 587.** Its SMTP ports are **25, 80 and 465**, so
-the `EMAIL_PORT=587` default in `config/settings.py` — correct for most
-providers — will not connect here.
+**DirectMail does not offer 587.** Its SMTP ports are **25, 80 and 465**. 587
+is the usual submission port and is what `config/settings.py` used to default
+to; the default is now 465, because a default that cannot connect to the
+intended provider is not a neutral one. A relay that does want 587 has to say
+so explicitly, along with `EMAIL_USE_TLS=true` and `EMAIL_USE_SSL=false`.
 
 **Port 25 is disabled on Alibaba ECS instances**, which is where this
 application is most likely to run. That leaves:
@@ -117,8 +120,10 @@ For a laboratory sending customer notifications, 465 is the only defensible
 choice — ISO/IEC 17025:2017 4.2 makes the lab responsible for the customer's
 information, and that responsibility does not stop at the edge of the VPC.
 
-`config/settings.py` will refuse to start if you set `EMAIL_USE_TLS` and
-`EMAIL_USE_SSL` together, which is the mistake this table exists to prevent.
+`config/settings.py` refuses to start on any of the ways this can be got
+wrong: both `EMAIL_USE_TLS` and `EMAIL_USE_SSL` set, neither of them set, 465
+with STARTTLS, or 587 with implicit TLS. Each of those otherwise surfaces as a
+hang or a rejection inside a Celery worker, one attempt at a time.
 
 ## When it does not work
 
