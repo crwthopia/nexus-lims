@@ -434,8 +434,8 @@ jar: `/auth/customer/me` returns 200, `/api/v1/samples/` returns 403).
 - **Register** → email verification token (`django.core.signing`,
   since there's no password/last_login to hash into a token the way
   Django's built-in generator does) sent via `EMAIL_BACKEND` (console
-  backend in dev — prints to the runserver log; swap for real SMTP/Alibaba
-  DirectMail in production).
+  backend in dev — prints to the runserver log; swap for Graph or a real
+  SMTP relay in production).
 - **Login** requires `is_email_verified`, and an `mfa_code` if
   `mfa_enabled` (TOTP via `pyotp`, RFC 6238).
 - **MFA enrollment** is two steps: `POST /auth/customer/mfa/enable`
@@ -1500,8 +1500,35 @@ apart, by which point the message has stopped being worth sending.
 
 `EMAIL_BACKEND` defaults to Django's console backend, which prints messages
 (and the verification links) to the runserver log — nothing leaves a
-developer's machine. Production sets the SMTP backend and its transport
-settings:
+developer's machine. Production picks one of two transports.
+
+**Microsoft Graph, as an M365 shared mailbox** — the one to reach for if the
+laboratory has a Microsoft 365 tenant, which it does, since staff sign in
+through Entra ID:
+
+```bash
+DJANGO_EMAIL_BACKEND=apps.notifications.graph.GraphEmailBackend
+DJANGO_DEFAULT_FROM_EMAIL=NexusLIMS <lims-notifications@your-domain>
+GRAPH_MAIL_CLIENT_ID=...
+GRAPH_MAIL_CLIENT_SECRET=...
+GRAPH_MAIL_SENDER=lims-notifications@your-domain
+```
+
+SPF, DKIM and DMARC come free if the domain is already in M365, so there is no
+DNS work at all. One external mail provider instead of two, which is one
+clause 6.6 provider file instead of two. A rotatable, revocable Entra
+credential instead of an SMTP password in an environment variable. And
+Exchange's message trace as delivery evidence under 7.5, which is more than
+"the relay accepted it".
+
+The credential is a **second app registration**, separate from the SSO one, so
+rotating the mail secret cannot lock the laboratory out of signing in. What it
+costs is a permission that is dangerous as granted: `Mail.Send` at application
+scope sends as **any mailbox in the tenant**, so it has to be narrowed with an
+Exchange application access policy. The whole procedure — and that
+narrowing — is in [`infra/m365-graph-mail.md`](infra/m365-graph-mail.md).
+
+**An SMTP relay** is the fallback, for a deployment without an M365 tenant:
 
 ```bash
 DJANGO_EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
@@ -1516,17 +1543,18 @@ These are the standard Django knobs, deliberately provider-agnostic — the
 credentials come from the provider's console and are **not guessed here**, the
 same rule `OSS_ARCHIVE_STORAGE_CLASS` follows.
 
-The port and TLS mode are not in that list because the defaults already suit
-the intended provider: **`EMAIL_PORT=465` with `EMAIL_USE_SSL=true`**
-(implicit TLS), and `EMAIL_USE_TLS=false`. That is deliberately *not* the more
-common 587-with-STARTTLS. Alibaba DirectMail, which Blueprint Section 2.2
-assumes, offers **25, 80 and 465 only** — there is no 587 — and port 25 is
-disabled outbound on ECS instances. A 587 default could not connect to the
-provider the deployment actually uses, and said so only as a timeout in a
-worker. Port 80 is reachable and is not worth taking: it is plain, and
-STARTTLS on it can be stripped, which is not something to do with a customer's
-information under clause 4.2. The whole procedure is in
-[`infra/directmail.md`](infra/directmail.md).
+The port and TLS mode are not in that list because the defaults are already
+the safer choice: **`EMAIL_PORT=465` with `EMAIL_USE_SSL=true`** (implicit
+TLS), and `EMAIL_USE_TLS=false`. That is deliberately *not* the more common
+587-with-STARTTLS. Implicit TLS cannot be downgraded — the handshake precedes
+any SMTP command, so there is no plaintext phase to interfere with — whereas
+STARTTLS announces itself in cleartext, an active attacker can strip the
+announcement, and Django does not require the upgrade to succeed, so the send
+would proceed unencrypted. For notifications carrying customer verification
+links and sample references, clause 4.2 settles it.
+
+Run both transports at once and you have two sending identities for one
+laboratory and two providers to evaluate under 6.6. Pick one.
 
 For a relay that does want STARTTLS, set the three together — the startup
 checks below refuse a port that contradicts the TLS mode:
@@ -1537,48 +1565,12 @@ EMAIL_USE_TLS=true
 EMAIL_USE_SSL=false
 ```
 
-### Or send as an M365 shared mailbox
-
-SMTP is not the only transport. If the laboratory already has a Microsoft 365
-tenant — which it does, since staff sign in through Entra ID — notifications
-can go out as a shared mailbox through Microsoft Graph instead:
-
-```bash
-DJANGO_EMAIL_BACKEND=apps.notifications.graph.GraphEmailBackend
-DJANGO_DEFAULT_FROM_EMAIL=NexusLIMS <lims-notifications@your-domain>
-GRAPH_MAIL_CLIENT_ID=...
-GRAPH_MAIL_CLIENT_SECRET=...
-GRAPH_MAIL_SENDER=lims-notifications@your-domain
-```
-
-Pick one transport or the other. Running both means two sending identities for
-one laboratory, and two external providers to evaluate under clause 6.6.
-
 **Graph rather than SMTP to Exchange Online**, because a shared mailbox has no
 password and no licence and so cannot authenticate over SMTP at all — the
 workaround of authenticating as a licensed user is refused with `5.7.60 Client
 does not have permissions to send as this sender`. Microsoft is also retiring
 SMTP AUTH client submission; check your Message Center rather than this
 sentence for where that has got to.
-
-What it buys, if the domain is already in M365: SPF, DKIM and DMARC are
-already done, which removes the DirectMail DNS verification **and its DKIM
-support ticket** — the 1–3 working day item that otherwise gates first send.
-One external provider instead of two. A rotatable, revocable Entra credential
-instead of an SMTP password in an environment variable. And Exchange's message
-trace, which is better delivery evidence under 7.5 than "the relay accepted
-it".
-
-What it costs: `Mail.Send` as an application permission is **tenant-wide** —
-as granted, the app can send as anybody, including the Laboratory Director. It
-has to be narrowed with an Exchange application access policy scoping the app
-to a group containing only the notifications mailbox. That step is not
-optional and the application cannot check it for you.
-
-The credential is deliberately a **second app registration**, separate from
-the SSO one, so that rotating the mail secret cannot lock the laboratory out
-of signing in. The whole procedure is in
-[`infra/m365-graph-mail.md`](infra/m365-graph-mail.md).
 
 **`EMAIL_TIMEOUT` is the one that matters most, and the one Django does not
 default.** `smtplib` blocks forever on a socket with no timeout. Sending now
@@ -1633,16 +1625,24 @@ deployment can answer.
 
 ### What is still not done
 
-DirectMail sending domains need **DNS verification**, which
-[`infra/directmail.md`](infra/directmail.md) now sets out step by step: four
-DNS records, a console verification, then a sender address and its SMTP
-password.
+Everything that remains lives in the Microsoft 365 tenant, not in this
+repository, and [`infra/m365-graph-mail.md`](infra/m365-graph-mail.md) sets it
+out step by step: the shared mailbox, its own app registration, an
+admin-consented `Mail.Send`, a client secret, and the environment.
 
-**Start it before you need it.** Three of the four records take minutes, but
-the DKIM value has to be issued by an Alibaba **support ticket with a 1–3
-working day turnaround** — that is the long pole, and nothing else about
-sending email can finish without it. Until the domain verifies, a correctly
-configured relay still rejects every message.
+**The step not to skip is narrowing the permission.** `Mail.Send` at
+application scope sends as any mailbox in the tenant. An Exchange application
+access policy scoped to a group containing only the notifications mailbox is
+what stops that, and `Test-ApplicationAccessPolicy` has to be run in *both*
+directions — a policy that only grants is half-tested. No code here can check
+it for you.
+
+Two smaller things to diarise: **client secrets expire**, and when one does,
+sending stops (loudly — HTTP 401 is classed permanent, so it becomes a
+SystemFailure rather than silence, but a reminder is cheaper than finding out
+that way). And there is still **no bounce handling**: a message Graph accepts
+and Exchange later cannot deliver is recorded as sent, and the bounce lands in
+the shared mailbox for a person to read.
 
 ## Requirement traceability (ISO/IEC 17025:2017 7.11.2)
 

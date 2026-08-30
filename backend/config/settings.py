@@ -310,16 +310,17 @@ LOGIN_REDIRECT_URL = "/admin/"
 # verification and MFA-enrollment messages. Console backend for local dev
 # only -- prints the message (and, critically, the verification/MFA links
 # customers would otherwise only get by email) to the runserver log instead
-# of actually sending anything. Swap for a real SMTP/Alibaba Cloud DirectMail
-# backend before this goes anywhere near production.
+# of actually sending anything. Swap for a real transport -- Graph, or an SMTP
+# relay -- before this goes anywhere near production.
 EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasatlabs.test")
 
 # SMTP transport, used only when DJANGO_EMAIL_BACKEND names the SMTP backend.
-# Provider-agnostic on purpose: Alibaba DirectMail is what Blueprint Section
-# 2.2 assumes, but these are the standard Django knobs and any relay works.
-# The real values come from the DirectMail console (or whichever provider) --
-# there is nothing to guess here, and a wrong guess would silently not send.
+# The primary transport is Graph (below); this is the fallback for a
+# deployment that has an SMTP relay and no M365 tenant. Provider-agnostic --
+# these are the standard Django knobs and any relay works. The real values
+# come from whichever provider's console, and there is nothing to guess here:
+# a wrong guess would silently not send.
 #
 # Without these, Django's SMTP backend falls back to localhost:25 with no
 # credentials, which in a container is nothing at all: every send fails, and
@@ -327,11 +328,14 @@ DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@nasat
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 # 465 (implicit TLS), not the more common 587 (STARTTLS).
 #
-# 587 is the usual submission port and was the default here, but DirectMail --
-# the provider Blueprint Section 2.2 assumes -- does not offer it. Its SMTP
-# ports are 25, 80 and 465, and outbound 25 is disabled on ECS instances, so
-# 465 is the only one that is both reachable and encrypted. A default that
-# cannot connect to the intended provider is not a neutral default.
+# 587 is the usual submission port, and the reason to prefer 465 anyway is
+# that implicit TLS cannot be downgraded: the handshake happens before any
+# SMTP command, so there is no plaintext phase to interfere with. STARTTLS
+# on 587 announces itself in cleartext and an active attacker can strip the
+# announcement; Django does not require the upgrade to succeed, so the send
+# would proceed unencrypted. For a laboratory whose notifications carry
+# customer verification links and sample references, ISO/IEC 17025:2017
+# clause 4.2 makes the safer default the right one.
 #
 # For a relay that does want STARTTLS, set all three together:
 #   EMAIL_PORT=587 EMAIL_USE_TLS=true EMAIL_USE_SSL=false
@@ -614,8 +618,9 @@ if not DEBUG:
         raise RuntimeError(
             "DJANGO_DEFAULT_FROM_EMAIL is still the development address and a real "
             "mail transport is active. A provider that verifies sending domains "
-            "(Alibaba DirectMail does) will reject every message from an "
-            "unverified From, so nothing would leave the building."
+            "will reject every message from an unverified From -- and Graph sends "
+            "as GRAPH_MAIL_SENDER regardless -- so nothing would leave the "
+            "building, or it would leave with the wrong sender."
         )
 
     if EMAIL_BACKEND == GRAPH_EMAIL_BACKEND:
@@ -681,7 +686,7 @@ if not DEBUG:
                 "EMAIL_PORT is 587 but EMAIL_USE_SSL asks for implicit TLS. A 587 "
                 "listener speaks plain SMTP until STARTTLS, so a TLS handshake opening "
                 "the connection never completes. Use EMAIL_USE_TLS=true with 587, or "
-                "move to port 465. Note that Alibaba DirectMail has no 587 at all."
+                "move to port 465, which is the default and cannot be downgraded."
             )
         if bool(EMAIL_HOST_USER) != bool(EMAIL_HOST_PASSWORD):
             raise RuntimeError(

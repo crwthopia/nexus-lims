@@ -12,8 +12,10 @@
  *     rather than adapted.
  *   - The Entra ID App Registration. It lives in Microsoft's tenant, not
  *     Alibaba's, and is created through Azure.
- *   - DirectMail for real SMTP. Sending domains need DNS verification that
- *     Terraform cannot complete on its own.
+ *   - Mail. Sending goes through a Microsoft 365 shared mailbox via Graph,
+ *     which lives in Microsoft's tenant and needs an app registration, an
+ *     admin-consented permission and an Exchange access policy -- none of
+ *     which Terraform against Alibaba can create.
  *
  * See README.md in this directory for what to do before the first apply.
  */

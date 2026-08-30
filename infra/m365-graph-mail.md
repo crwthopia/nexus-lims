@@ -1,8 +1,10 @@
 # Sending as an M365 shared mailbox, through Microsoft Graph
 
-The alternative to Alibaba DirectMail (`directmail.md`). Pick one; running both
-means two sending identities for the same laboratory and two external providers
-to evaluate under ISO/IEC 17025:2017 clause 6.6.
+How the laboratory sends mail. The application also has a generic SMTP backend
+as a fallback for a deployment with no M365 tenant, but this is the path in
+use -- run one or the other, since two means two sending identities for the
+same laboratory and two external providers to evaluate under ISO/IEC
+17025:2017 clause 6.6.
 
 **Why Graph and not SMTP to Exchange Online.** A shared mailbox has no password
 and no licence, so it cannot authenticate over SMTP at all. Authenticating as a
@@ -13,11 +15,12 @@ client submission in Exchange Online. **Check your Message Center for the state
 of your tenant before assuming either way**; the direction of travel is not in
 doubt, but the dates have moved before.
 
-**What this buys over DirectMail.** SPF, DKIM and DMARC are already in place if
-your domain is in M365, so there is no DNS verification and no DKIM support
-ticket — which is the 1–3 working day item that otherwise gates first send.
-One external provider instead of two. And Exchange keeps a message trace,
-which is better delivery evidence under clause 7.5 than "the relay accepted it".
+**What this buys over a third-party relay.** SPF, DKIM and DMARC are already in
+place if your domain is in M365, so there is no DNS verification to do and no
+sending domain to get approved — with most providers that approval is the item
+that gates first send, and it is measured in working days. One external
+provider instead of two. And Exchange keeps a message trace, which is better
+delivery evidence under clause 7.5 than "the relay accepted it".
 
 ---
 
@@ -154,7 +157,7 @@ Exchange actually sent.
   session, which is not implemented: the backend raises rather than sending a
   message without its attachment. Nothing in the notification path attaches
   anything today; reports are linked, not attached.
-- **No bounce handling**, exactly as with DirectMail. A message Graph accepts
+- **No bounce handling.** A message Graph accepts
   and Exchange later cannot deliver is recorded as sent. Bounces land in the
   shared mailbox, where a person has to read them.
 - **Data residency.** Mail sits in whichever geography your M365 tenant was
