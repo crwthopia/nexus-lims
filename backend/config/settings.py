@@ -10,6 +10,7 @@ Alibaba Cloud KMS-backed environment injection (Blueprint Section 7.6).
 
 import os
 import sys
+from email.utils import parseaddr
 from pathlib import Path
 
 from celery.schedules import crontab
@@ -346,6 +347,47 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() == "true"
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "true").lower() == "true"
 
+# --- Microsoft Graph, for sending as an M365 shared mailbox ----------------
+#
+# The alternative transport to SMTP, selected by pointing
+# DJANGO_EMAIL_BACKEND at apps.notifications.graph.GraphEmailBackend. See
+# that module for why a shared mailbox cannot use SMTP at all, and
+# infra/m365-graph-mail.md for the setup.
+#
+# This is deliberately a SECOND app registration, not the AUTH_ADFS one that
+# signs staff in. Two reasons, both operational: rotating the mail secret must
+# never be able to lock the laboratory out of the system, and the SSO
+# registration's permissions are consented for sign-in -- adding tenant-wide
+# Mail.Send to it would widen what a stolen SSO secret is worth.
+#
+# The tenant is genuinely the same tenant, so it falls back to the SSO value
+# rather than asking for the same GUID twice.
+# `or` rather than a get() default: an operator who leaves GRAPH_MAIL_TENANT_ID
+# present but empty in an env file has said nothing, not "use the empty
+# tenant", and a get() default only fires when the key is absent entirely.
+GRAPH_MAIL_TENANT_ID = (
+    os.environ.get("GRAPH_MAIL_TENANT_ID") or os.environ.get("AZURE_AD_TENANT_ID", "")
+)
+GRAPH_MAIL_CLIENT_ID = os.environ.get("GRAPH_MAIL_CLIENT_ID", "")
+GRAPH_MAIL_CLIENT_SECRET = os.environ.get("GRAPH_MAIL_CLIENT_SECRET", "")
+# The shared mailbox this sends as. Application permissions send *as* a
+# mailbox, so this address is the From on every message regardless of what
+# the calling code passes -- which is why DEFAULT_FROM_EMAIL is checked
+# against it at startup.
+GRAPH_MAIL_SENDER = os.environ.get("GRAPH_MAIL_SENDER", "")
+# Sent mail lands in the shared mailbox's Sent Items. On by default because
+# for a laboratory that is a record worth keeping: what was sent, to whom and
+# when, held outside the application's own database, which is a useful second
+# source under ISO/IEC 17025:2017 clause 7.5.
+GRAPH_MAIL_SAVE_TO_SENT_ITEMS = (
+    os.environ.get("GRAPH_MAIL_SAVE_TO_SENT_ITEMS", "true").lower() == "true"
+)
+# Same reasoning as EMAIL_TIMEOUT below, and the same number: requests waits
+# forever by default, and two hung sends stall the Celery pool.
+GRAPH_MAIL_TIMEOUT = int(os.environ.get("GRAPH_MAIL_TIMEOUT", "10"))
+
+GRAPH_EMAIL_BACKEND = "apps.notifications.graph.GraphEmailBackend"
+
 # The setting most worth having, and the one Django does not default.
 #
 # smtplib blocks forever on a socket with no timeout. Sending now happens
@@ -564,6 +606,48 @@ if not DEBUG:
     # never receives their verification link and nothing says so out loud. The
     # notification register would fill with failed rows, which is the right
     # record but the wrong moment to learn.
+    sends_real_mail = EMAIL_BACKEND.endswith("smtp.EmailBackend") or (
+        EMAIL_BACKEND == GRAPH_EMAIL_BACKEND
+    )
+
+    if sends_real_mail and DEFAULT_FROM_EMAIL.endswith(".test"):
+        raise RuntimeError(
+            "DJANGO_DEFAULT_FROM_EMAIL is still the development address and a real "
+            "mail transport is active. A provider that verifies sending domains "
+            "(Alibaba DirectMail does) will reject every message from an "
+            "unverified From, so nothing would leave the building."
+        )
+
+    if EMAIL_BACKEND == GRAPH_EMAIL_BACKEND:
+        missing = [
+            name
+            for name, value in (
+                ("GRAPH_MAIL_TENANT_ID", GRAPH_MAIL_TENANT_ID),
+                ("GRAPH_MAIL_CLIENT_ID", GRAPH_MAIL_CLIENT_ID),
+                ("GRAPH_MAIL_CLIENT_SECRET", GRAPH_MAIL_CLIENT_SECRET),
+                ("GRAPH_MAIL_SENDER", GRAPH_MAIL_SENDER),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                f"The Graph email backend is active but {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} unset. Every notification "
+                "would fail at the first send, in a worker, one at a time."
+            )
+        # Graph sends as the mailbox in the request URL whatever the message
+        # says, so a mismatch here means the address customers see and reply
+        # to is not the one this application believes it used. The backend
+        # refuses the send too; refusing at boot is where it is cheap.
+        if parseaddr(DEFAULT_FROM_EMAIL)[1].lower() != GRAPH_MAIL_SENDER.lower():
+            raise RuntimeError(
+                f"DJANGO_DEFAULT_FROM_EMAIL is {DEFAULT_FROM_EMAIL!r} but the Graph "
+                f"backend sends as {GRAPH_MAIL_SENDER!r}. Graph rewrites the From to "
+                "the mailbox it is scoped to, so customers would see, and reply to, "
+                "an address this application never chose. Set them to the same "
+                "mailbox (a display name on DEFAULT_FROM_EMAIL is fine)."
+            )
+
     if EMAIL_BACKEND.endswith("smtp.EmailBackend"):
         if not EMAIL_HOST:
             raise RuntimeError(
@@ -604,13 +688,6 @@ if not DEBUG:
                 "EMAIL_HOST_USER and EMAIL_HOST_PASSWORD must be set together. One "
                 "without the other is the shape a half-finished deployment takes, "
                 "and it authenticates as nobody."
-            )
-        if DEFAULT_FROM_EMAIL.endswith(".test"):
-            raise RuntimeError(
-                "DJANGO_DEFAULT_FROM_EMAIL is still the development address and the "
-                "SMTP backend is active. A provider that verifies sending domains "
-                "(Alibaba DirectMail does) will reject every message from an "
-                "unverified From, so nothing would leave the building."
             )
 
 

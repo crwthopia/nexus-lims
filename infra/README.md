@@ -25,12 +25,19 @@ marked `sensitive`.
   module to delete rather than adapt.
 - **The Entra ID App Registration.** It lives in Microsoft's tenant and is
   created through Azure, not Alibaba.
-- **DirectMail for real SMTP.** Sending domains need DNS verification
-  Terraform cannot complete on its own, and the DKIM value has to be issued
-  by an Alibaba support ticket with a 1-3 working day turnaround. The
-  procedure, the four records and the port trap (DirectMail has no 587, and
-  25 is blocked on ECS) are in [directmail.md](directmail.md). Raise the DKIM
-  ticket first; it is the long pole.
+- **Mail, by one of two routes.** Either DirectMail or an M365 shared mailbox
+  through Microsoft Graph -- one or the other, since running both means two
+  sending identities and two clause 6.6 provider files.
+  [directmail.md](directmail.md) has the DirectMail procedure: DNS
+  verification Terraform cannot complete on its own, a DKIM value that has to
+  be issued by an Alibaba support ticket with a 1-3 working day turnaround
+  (raise it first; it is the long pole), and the port trap -- DirectMail has
+  no 587, and 25 is blocked on ECS.
+  [m365-graph-mail.md](m365-graph-mail.md) has the Graph procedure, which
+  needs no DNS work at all if the domain is already in M365. Its long pole is
+  instead an admin-consented `Mail.Send` narrowed by an Exchange application
+  access policy: unnarrowed, that permission sends as any mailbox in the
+  tenant.
 - **Remote state.** State belongs in an OSS bucket with locking, but that
   bucket cannot be created by the configuration whose state it holds. Create
   it once, then `terraform init -backend-config=...`.
