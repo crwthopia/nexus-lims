@@ -123,15 +123,18 @@ def test_a_fully_configured_smtp_backend_starts():
     assert module.EMAIL_HOST == "smtp.example"
 
 
-def test_the_transport_defaults_can_reach_directmail():
+def test_the_transport_defaults_cannot_be_downgraded():
     """
-    The port default used to be 587, which DirectMail does not offer at all --
-    its SMTP ports are 25, 80 and 465, and outbound 25 is disabled on ECS. So
-    the shipped default could not connect to the provider the deployment
-    actually uses, and the failure surfaced as a timeout in a worker.
+    465 with implicit TLS, not the more common 587 with STARTTLS.
+
+    STARTTLS announces itself in cleartext and an active attacker can strip
+    the announcement; Django does not require the upgrade to succeed, so the
+    send proceeds unencrypted. Implicit TLS has no plaintext phase to
+    interfere with. For notifications carrying customer verification links,
+    clause 4.2 makes that the default worth having.
 
     The three settings are asserted together because they only mean anything
-    together: 465 with STARTTLS is as unusable as 587 was.
+    together: 465 with STARTTLS is as unusable as 587 with implicit TLS.
     """
     module = _reimport_settings(**_smtp_env())
 
@@ -141,7 +144,7 @@ def test_the_transport_defaults_can_reach_directmail():
 
 
 def test_starttls_on_587_is_still_available_for_other_relays():
-    """The default is DirectMail-shaped, not DirectMail-only."""
+    """A safer default is not a mandate: a relay that wants STARTTLS gets it."""
     module = _reimport_settings(
         **_smtp_env(EMAIL_PORT="587", EMAIL_USE_TLS="true", EMAIL_USE_SSL="false")
     )
