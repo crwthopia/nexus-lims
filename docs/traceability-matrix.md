@@ -35,7 +35,7 @@ Each of these is either a requirement genuinely without a test, or a test that v
 - **FR-C4-05** — implemented at `backend/apps/testing/models.py:134`, `backend/apps/testing/migrations/0001_initial.py:108`
 - **FR-C5-01** — implemented at `backend/apps/samples/models.py:143`, `backend/apps/samples/views.py:226`
 - **FR-C5-04** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:2`
-- **FR-D1-02** — implemented at `backend/apps/documents/views.py:4`, `frontend/src/pages/DocumentsList.tsx:39`
+- **FR-D1-02** — implemented at `backend/apps/documents/views.py:4`, `frontend/src/pages/DocumentsList.tsx:37`
 - **FR-S1-01** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:3`
 
 ## Matrix
@@ -56,7 +56,7 @@ Each of these is either a requirement genuinely without a test, or a test that v
 | **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:143`<br>`backend/apps/samples/views.py:226` | **none** |
 | **FR-C5-04** | Blueprint Section 3.1 | `backend/apps/accounts/models.py:190`<br>`backend/apps/accounts/services.py:2` | **none** |
 | **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:324` | 21 |
-| **FR-D1-02** | Blueprint Section 5.1<br>Blueprint Section 6 | `backend/apps/documents/views.py:4`<br>`frontend/src/pages/DocumentsList.tsx:39` | **none** |
+| **FR-D1-02** | Blueprint Section 5.1<br>Blueprint Section 6 | `backend/apps/documents/views.py:4`<br>`frontend/src/pages/DocumentsList.tsx:37` | **none** |
 | **FR-D1-03** | — | `backend/apps/documents/serializers.py:16`<br>`backend/apps/documents/views.py:61` | 14 |
 | **FR-E3-02** | — | `backend/apps/equipment/serializers.py:54`<br>`backend/apps/equipment/views.py:69` | 32 |
 | **FR-E9-01** | Blueprint Section 6 | `backend/apps/investigations/views.py:2` | 18 |

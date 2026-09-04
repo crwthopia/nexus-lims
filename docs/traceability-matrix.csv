@@ -46,7 +46,7 @@ FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/
 FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/apps/reporting/views.py:32; frontend/src/pages/SampleDetail.tsx:324,backend/tests/test_report_generation.py::test_the_list_includes_display_fields_a_ui_can_render
 FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/apps/reporting/views.py:32; frontend/src/pages/SampleDetail.tsx:324,backend/tests/test_report_generation.py::test_the_object_key_is_versioned_so_a_correction_cannot_overwrite_the_issued_pdf
 FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/apps/reporting/views.py:32; frontend/src/pages/SampleDetail.tsx:324,backend/tests/test_report_generation.py::test_the_pipeline_uploads_a_retrievable_pdf
-FR-D1-02,Blueprint Section 5.1; Blueprint Section 6,backend/apps/documents/views.py:4; frontend/src/pages/DocumentsList.tsx:39,
+FR-D1-02,Blueprint Section 5.1; Blueprint Section 6,backend/apps/documents/views.py:4; frontend/src/pages/DocumentsList.tsx:37,
 FR-D1-03,,backend/apps/documents/serializers.py:16; backend/apps/documents/views.py:61,backend/tests/test_documents.py::test_approving_a_version_archives_prior_current_and_syncs_document
 FR-D1-03,,backend/apps/documents/serializers.py:16; backend/apps/documents/views.py:61,backend/tests/test_documents.py::test_write_requires_qa_officer_or_lab_supervisor_role
 FR-D1-03,,backend/apps/documents/serializers.py:16; backend/apps/documents/views.py:61,frontend/src/pages/DocumentDetail.test.tsx:109 re-reads the document afterwards rather than patching one row
