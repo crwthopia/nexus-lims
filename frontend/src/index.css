@@ -41,6 +41,16 @@
   --color-overlay: rgba(4, 7, 12, 0.66); /* behind the mobile nav drawer and
                                      the command palette */
 
+  /* Chart marks (components/charts/). Two slots, not a ramp: the dashboard's
+     magnitude charts are single-series and use slot 1 alone, and the only
+     categorical chart on it distinguishes the two analytical service lines.
+     Both were run through the data-viz validator against this exact surface
+     rather than eyeballed -- lightness band, chroma floor, CVD separation
+     (worst all-pairs deltaE 26.8 protan, well past the 8 target), and >= 3:1
+     contrast on --color-surface. Adding a third means re-running it. */
+  --color-chart-1: #3987e5;
+  --color-chart-2: #d95926;
+
   /* Brand cyan (NexusLIMS wordmark, brand/). Two values across the themes,
      for the same reason --color-primary and --color-accent are two tokens:
      #06B6D4 is 7.96:1 here and 2.16:1 on the light canvas, under even the
@@ -140,6 +150,11 @@
   --color-accent-soft: #e8effc;   /* tint behind an active nav item and the
                                      icon tiles; accent on it: 5.85:1 */
   --color-overlay: rgba(14, 22, 32, 0.42);
+
+  /* The same two hues stepped for a white surface, validated as a set
+     against it -- not the dark values lightened. */
+  --color-chart-1: #2a78d6;
+  --color-chart-2: #eb6834;
 
   /* Brand cyan, deepened for this ground -- see the dark theme's note. */
   --color-brand: #0E7490;         /* 5.36:1 on surface, 4.77:1 on canvas */
@@ -915,6 +930,293 @@ a:focus-visible {
      asks of a focus indicator. */
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Charts and figures
+   ========================================================================== */
+
+/*
+ * Two fixed rules run through everything here, and both are the reason the
+ * dashboard stays readable rather than merely colourful:
+ *
+ * - Marks wear the chart colours; *text* never does. Values, labels, ticks
+ *   and legends use the theme's ink tokens, and identity comes from a
+ *   coloured swatch beside the text. A categorical hue light enough to
+ *   read as a mark is not legible as 12px type.
+ * - Grid and axes are recessive hairlines. The data is the only thing
+ *   allowed to be loud.
+ */
+
+.chart {
+  position: relative;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.chart-tick {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.chart-caplabel {
+  fill: var(--color-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chart-bar {
+  fill: var(--color-chart-1);
+  transition: opacity 0.12s ease;
+}
+
+.chart-bar[data-hovered="true"] {
+  opacity: 0.75;
+}
+
+.chart-fill-1 {
+  background: var(--color-chart-1);
+}
+
+.chart-fill-2 {
+  background: var(--color-chart-2);
+}
+
+.chart-fill-muted {
+  background: var(--color-border-strong);
+}
+
+/* Anchored to the hovered column and lifted clear of the plot; pointer
+   events off so moving towards it never dismisses it. */
+/* Inside the plot, not above it: anchored to the card's top edge the
+   tooltip would be drawn over the card header, or clipped out of the card
+   entirely on the topmost chart. */
+.chart-tooltip {
+  position: absolute;
+  top: 4px;
+  transform: translate(-50%, 0);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.chart-tooltip-detail {
+  color: var(--color-text-muted);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-legend li[data-hovered="true"] .chart-legend-label {
+  color: var(--color-text);
+}
+
+.chart-legend-label {
+  font-weight: 600;
+}
+
+.chart-legend-value {
+  color: var(--color-text-muted);
+}
+
+.chart-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
+/* The stacked mix bar. The 2px gaps are surface-coloured spacers rather
+   than strokes: a border around each segment would add ink that is not
+   data, and the gap separates just as well. */
+.mixbar {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.mixbar-segment {
+  min-width: 4px;
+  transition: opacity 0.12s ease;
+}
+
+.mixbar-segment[data-hovered="true"] {
+  opacity: 0.75;
+}
+
+/* Ranked bars. */
+.barlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.barlist-row[data-hovered="true"] .barlist-bar {
+  opacity: 0.75;
+}
+
+.barlist-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.barlist-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barlist-sublabel {
+  margin-left: 8px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.barlist-value {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.barlist-track {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-hover);
+  overflow: hidden;
+}
+
+/* Rounded at the data end, square at the baseline -- a bar rounded at both
+   ends reads as floating clear of the axis it grows from. */
+.barlist-bar {
+  height: 100%;
+  border-radius: 2px var(--radius-pill) var(--radius-pill) 2px;
+  background: var(--color-chart-1);
+  transition: opacity 0.12s ease;
+}
+
+.barlist-detail {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+/* Stat tiles. */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-tile {
+  padding: 16px 18px;
+}
+
+.stat-label {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stat-value {
+  margin-top: 6px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+/* Not colour-coded: a component holding "turnaround days" cannot know that
+   up is bad, and a green arrow on a worsening number is worse than none. */
+.stat-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.stat-delta-label {
+  font-weight: 400;
+}
+
+/* Screen-reader-only, for the text that explains a figure to someone who
+   cannot see its shape. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ==========================================================================

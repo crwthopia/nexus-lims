@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **532-test automated regression suite** (`backend/tests/`, pytest +
+- **555-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,7 +55,7 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **257-test frontend suite** (Vitest + React Testing Library): 199 in the
+- **267-test frontend suite** (Vitest + React Testing Library): 209 in the
   Staff Console and 58 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
@@ -692,6 +692,104 @@ Being explicit, since the dashboard depends on the difference:
 - **`Invoice.amount` is still a typed lump sum.** Wiring invoices to
   order lines changes a money path, so it is its own change with its own
   tests rather than a rider on this one.
+
+
+## Dashboard
+
+The console opens on `/dashboard`: what the lab is doing, which analyses
+are carrying it, how fast it is turning work around, and what is stuck.
+One endpoint (`GET /api/v1/analytics/dashboard/`) computes all of it —
+the browser is never handed a worklist to reduce for itself.
+
+**Every money figure on it is list-price value, and the screen says so in
+those words.** Work performed × the rate in force *on the day it was
+requested* — which is a real answer to "what is this bench worth", and is
+not revenue. An `Order` has no line items yet and `Invoice.amount` is a
+typed lump sum, so nothing in the database records what was actually
+billed for a given analysis. The distinction is one word wide and would
+be the easiest thing on the screen to get wrong, so a test asserts the
+word "revenue" does not appear on it.
+
+Pricing per *day* rather than at today's rate is what the catalogue's
+versioned prices bought: a July increase must not retroactively revalue
+April's work, and `test_work_is_valued_at_the_rate_in_force_when_it_was_requested`
+is the test that says so.
+
+### Attribution, and what it can't do yet
+
+A TestMethod reaches an offering through a many-to-many, so a request can
+be credited to a rate-card line only when its method belongs to **exactly
+one** active offering. Three cases can't be, and all three are counted and
+shown under the ranking rather than dropped or spread evenly:
+
+| Case | Why it can't be attributed |
+|---|---|
+| `no_offering` | The method belongs to no active offering — the catalogue mapping is incomplete |
+| `ambiguous` | It belongs to several: BOD sold standalone *and* inside a potability panel. Without order lines, nothing says which was sold |
+| `unpriced` | Attributable, but the offering had no price on the day of the request |
+
+Dropping them would understate the bench; spreading them evenly would
+invent the split. The count on screen is the honest measure of how much
+catalogue work is left, and it links to the Catalogue to do it. Order
+lines are what will resolve the ambiguous case properly.
+
+### Which analyses are "leading" has two answers
+
+The panel run three hundred times is what fills the bench; the
+characterisation run forty times at ten times the price is what pays for
+it. So the ranking is a parameter (`?rank=volume|value`), and it is
+resolved **server-side** — ranking by value changes which offerings make
+the top eight at all, so the ordering and the fold into "other" have to
+move together. Re-sorting the same eight rows in the browser would
+quietly drop a low-volume, high-value offering off the card.
+
+### The charts
+
+Four forms, each picked for the data's job rather than for variety, and
+the palette was **validated rather than eyeballed** — the two chart hues
+were run through a data-viz validator against each theme's own card
+surface for lightness band, chroma floor, colour-vision-deficiency
+separation (worst all-pairs ΔE 26.8 protan against a target of 8) and
+≥3:1 contrast. The values live in `--color-chart-1/2`, one pair per theme;
+adding a third means re-running it.
+
+| What | Form | Why not something else |
+|---|---|---|
+| Leading analyses | Ranked bars with the value beside each | The labels are rate-card names too long to hang off an axis. Every bar is the *same* hue: length already encodes magnitude, so shading each bar darker where it is bigger would spend the one free channel restating it |
+| Tests per month | Columns, one series | One series means one hue and **no legend** — the card's title already says what is plotted. Only the last column is labelled; a number on every cap is the fastest way to make a small chart unreadable |
+| Service-line mix | One horizontal stacked bar | Not a donut. Two segments in a ring is the shape a pie is worst at — the reader compares arcs instead of lengths — and every segment is direct-labelled with its own swatch, so identity never rests on colour alone |
+| KPIs and turnaround | Stat tiles | When the data is a single value the number *is* the visualisation; a one-bar bar chart adds ink that carries nothing |
+
+Three details that came out of rendering it and looking at it, which is
+the step no amount of care in the code replaces:
+
+- **The hover handler sits on the column group, not on the hit rectangle
+  beneath the bar.** The bar is painted over that rectangle, so pointing
+  at the obvious place — the middle of the column — landed on the bar and
+  hit nothing. It looked fine and did nothing.
+- **The column chart measures its container instead of using a fixed
+  viewBox.** A 720-unit box scaled into a 360px phone halves every font
+  size with it, and 11px axis labels arrived at 5px.
+- **Axis maxima round up to a clean number** (421 → 500). Otherwise the
+  ticks read 0 / 211 / 421, which are three numbers nobody asked for.
+
+Marks follow one set of specs throughout: bars capped at 24px with a
+4px-rounded data-end and a **square foot on the baseline** (rounded at
+both ends, a bar appears to float clear of the axis it grows from),
+hairline solid gridlines, and text in the theme's ink tokens — never in a
+series colour, which is legible as a mark and not as 12px type.
+
+### What it reports, and as of when
+
+Rates are for the reporting period; **queue depths are current state**, and
+the card says which is which. "Open investigations over the last 90 days"
+would mean nothing — an investigation opened last year is still open
+today, and that is the point. Turnaround is measured on samples *approved*
+in the window rather than samples that arrived in it: bucketing by arrival
+would silently exclude everything still in progress and flatter the
+number. The comparison in each stat tile is the immediately preceding
+period of equal length, and it is omitted entirely when that period had
+nothing in it — a "+100%" against zero is arithmetic, not information.
 
 
 ## Console shell
@@ -2266,7 +2364,7 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 257 tests: 199 in
+frontend (`npm run test:watch` while developing). 267 tests: 209 in
 `frontend/`, 58 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
@@ -2288,6 +2386,8 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `backend/tests/test_price_list_import.py` | The importer against the file people actually have: peso signs, thousands separators and blank spacer rows accepted; a missing column, an unparseable price or an unmatched method reference refused with the line number; a bad row rolling back the whole file; a dry run writing nothing; re-import updating the offering and superseding its price |
 | `frontend/src/pages/CatalogueList.test.tsx` | That the list shows the server's net and gross rather than the published amount, so two rows quoted differently can be compared; an unpriced offering saying so instead of showing zero; a withdrawn one marked rather than hidden; the add form gated on `CATALOGUE_WRITE_ROLES`; Training absent from the service-line choices; the filter reaching the query string |
 | `frontend/src/pages/OfferingDetail.test.tsx` | Repricing posting a *new* price rather than patching the current one (patching is what would erase the history the versioning exists for); the effective date omitted when blank rather than sent as `""`; a back-dated price sent when one is given; the superseded window shown in the history; the required role named rather than the panel hidden |
+| `backend/tests/test_analytics_dashboard.py` | Work valued at the rate in force on the day it was requested (a later rise must not revalue earlier work), and net of VAT however the rate was quoted; the three unattributable cases counted rather than dropped or spread; a withdrawn offering no longer attracting work; the tail folded against whichever measure is ranking; the comparison window being the preceding period of equal length; a quiet month rendered as a zero rather than a gap; turnaround measured arrival→approval; rates being for the period while queue depths are current state; a malformed date as a 400 and a misspelled rank as the default view |
+| `frontend/src/pages/Dashboard.test.tsx` | That the money is called list price and never "revenue"; the comparison omitted when the previous period was empty; the unattributed count and its reasons on screen (and silent when there are none); the ranking re-asking the server rather than re-sorting locally; the mix legend carrying labels and values rather than relying on colour; "nothing approved" instead of a zero turnaround |
 | `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
 | `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |

@@ -4,6 +4,7 @@ import type {
   ApprovalAction,
   CalibrationRecord,
   CreditNote,
+  DashboardData,
   Document,
   DocumentDetail,
   DocumentVersion,
@@ -663,5 +664,25 @@ export function useSetOfferingPrice(id: number) {
       note?: string;
     }) => apiPost<ServiceOfferingDetail>(`/service-offerings/${id}/set-price/`, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+/**
+ * The dashboard is one request: the server aggregates, so the browser is
+ * never handed a worklist to reduce for itself.
+ */
+export function useDashboard(params: { from?: string; to?: string; rank?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+  // Sent to the server rather than sorted here: ranking by value changes
+  // which offerings make the top eight, so the fold into "other" has to be
+  // computed against the same measure.
+  if (params.rank) query.set("rank", params.rank);
+  const qs = query.toString();
+
+  return useQuery({
+    queryKey: ["analytics-dashboard", params],
+    queryFn: () => apiGet<DashboardData>(`/analytics/dashboard/${qs ? `?${qs}` : ""}`),
   });
 }

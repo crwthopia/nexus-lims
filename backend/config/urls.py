@@ -38,6 +38,7 @@ api_v1_patterns = [
     path("", include("apps.investigations.urls")),
     path("", include("apps.training.urls")),
     path("", include("apps.catalogue.urls")),
+    path("", include("apps.analytics.urls")),
 ]
 
 urlpatterns = [

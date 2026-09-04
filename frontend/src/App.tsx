@@ -18,6 +18,7 @@ import { TrainingList } from "./pages/TrainingList";
 import { TrainingSessionDetail } from "./pages/TrainingSessionDetail";
 import { ReportsList } from "./pages/ReportsList";
 import { BillingList } from "./pages/BillingList";
+import { Dashboard } from "./pages/Dashboard";
 import { CatalogueList } from "./pages/CatalogueList";
 import { OfferingDetail } from "./pages/OfferingDetail";
 import { InvoiceDetail } from "./pages/InvoiceDetail";
@@ -33,7 +34,10 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/samples" replace />} />
+        {/* The console opens on the dashboard now: it answers "how is the
+            lab doing" before anyone has to pick a worklist. */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/samples" element={<SamplesList />} />
         <Route path="/samples/:id" element={<SampleDetail />} />
         <Route path="/review-queue" element={<ReviewQueue />} />

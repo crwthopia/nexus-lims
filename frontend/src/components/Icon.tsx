@@ -13,6 +13,7 @@
  */
 
 export type IconName =
+  | "dashboard"
   | "samples"
   | "documents"
   | "investigations"
@@ -33,6 +34,8 @@ export type IconName =
   | "enter";
 
 const PATHS: Record<IconName, string[]> = {
+  // Four panes: the overview.
+  dashboard: ["M4 4h7v7H4z", "M13 4h7v4.5h-7z", "M13 10.5h7V20h-7z", "M4 13h7v7H4z"],
   // Flask: the sample worklist.
   samples: ["M9 3h6", "M10 3v6.5L4.7 18a2 2 0 0 0 1.7 3h11.2a2 2 0 0 0 1.7-3L14 9.5V3", "M7.2 14h9.6"],
   documents: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h4"],

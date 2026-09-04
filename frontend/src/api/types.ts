@@ -716,3 +716,57 @@ export const CATALOGUE_WRITE_ROLES: RoleName[] = ["lab_supervisor", "system_admi
  * validator (backend/apps/catalogue/models.py).
  */
 export const CATALOGUE_SERVICE_LINES: ServiceLine[] = ["failure_analysis", "water_environmental"];
+
+// --- Dashboard analytics (backend/apps/analytics) -------------------------
+
+export interface LeadingAnalysis {
+  offering_id: number;
+  code: string;
+  name: string;
+  service_line: ServiceLine;
+  request_count: number;
+  list_value_net: string;
+}
+
+/**
+ * Requests that could not be credited to one line of the rate card. Reported
+ * rather than dropped or spread: the count is the honest measure of how much
+ * catalogue mapping is still outstanding.
+ */
+export interface UnattributedRequests {
+  /** The method belongs to no active offering. */
+  no_offering: number;
+  /** It belongs to several — sold standalone and inside a panel, say. */
+  ambiguous: number;
+  /** Attributable, but the offering had no price on the day of the request. */
+  unpriced: number;
+}
+
+export interface TurnaroundSummary {
+  sample_count: number;
+  median_days: number | null;
+  p90_days: number | null;
+}
+
+export interface DashboardData {
+  /** Which measure ordered `leading_analyses` — and therefore which one the fold into "other" was computed against. */
+  rank: "volume" | "value";
+  window: { from: string; to: string; days: number; previous_from: string; previous_to: string };
+  totals: { samples_received: number; test_requests: number; list_value_net: string; currency: string };
+  previous_totals: { samples_received: number; test_requests: number; list_value_net: string };
+  leading_analyses: LeadingAnalysis[];
+  leading_analyses_other: { offering_count: number; request_count: number; list_value_net: string };
+  unattributed_requests: UnattributedRequests;
+  service_line_mix: { service_line: ServiceLine; label: string; sample_count: number }[];
+  monthly: { month: string; request_count: number; list_value_net: string }[];
+  turnaround: TurnaroundSummary & { by_service_line: (TurnaroundSummary & { service_line: ServiceLine })[] };
+  quality: {
+    results_entered: number;
+    out_of_spec: number;
+    out_of_spec_pct: number | null;
+    open_investigations: number;
+    samples_awaiting_review: number;
+    instruments_out_of_calibration: number;
+    open_system_failures: number;
+  };
+}

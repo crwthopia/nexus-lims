@@ -34,6 +34,12 @@ export interface NavSection {
 
 const SECTIONS: NavSection[] = [
   {
+    label: "Workspace",
+    items: [
+      { to: "/dashboard", label: "Dashboard", icon: "dashboard", keywords: "overview analytics leading analyses revenue turnaround" },
+    ],
+  },
+  {
     label: "Worklist",
     items: [
       { to: "/samples", label: "Samples", icon: "samples", keywords: "specimens chain of custody" },
