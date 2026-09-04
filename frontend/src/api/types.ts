@@ -646,3 +646,73 @@ export const SYSTEM_FAILURE_SEVERITY_LABELS: Record<SystemFailureSeverity, strin
 
 /** FAILURE_WRITE_ROLES (backend/apps/audit/views.py) -- keep in sync by hand. */
 export const SYSTEM_FAILURE_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];
+
+// --- Service catalogue (backend/apps/catalogue) ---------------------------
+
+export type VatTreatment = "exclusive" | "inclusive";
+
+export const SERVICE_LINE_LABELS: Record<ServiceLine, string> = {
+  failure_analysis: "Failure Analysis",
+  water_environmental: "Water / Environmental",
+  training: "Training",
+};
+
+export const VAT_TREATMENT_LABELS: Record<VatTreatment, string> = {
+  exclusive: "VAT-exclusive (net)",
+  inclusive: "VAT-inclusive (gross)",
+};
+
+/**
+ * A price as published, plus the three figures derived from it. The server
+ * computes net/VAT/gross precisely so no screen has to know which way this
+ * particular rate was quoted -- see backend/apps/catalogue/models.py.
+ */
+export interface OfferingPrice {
+  id: number;
+  offering: number;
+  amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  effective_from: string;
+  effective_to: string | null;
+  note: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  is_current: boolean;
+  created_at: string;
+  created_by: number | null;
+  created_by_display_name: string | null;
+}
+
+export interface ServiceOffering {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  service_line: ServiceLine;
+  test_methods: number[];
+  test_method_names: string[];
+  turnaround_days: number | null;
+  is_accredited: boolean;
+  is_active: boolean;
+  /** Null for an offering that has never been priced, or is priced from a future date. */
+  current_price: OfferingPrice | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceOfferingDetail extends ServiceOffering {
+  prices: OfferingPrice[];
+}
+
+/** CATALOGUE_WRITE_ROLES (backend/apps/catalogue/views.py) -- keep in sync by hand. */
+export const CATALOGUE_WRITE_ROLES: RoleName[] = ["lab_supervisor", "system_administrator"];
+
+/**
+ * Training is priced by its own course catalogue, so it is not offered
+ * here -- the server refuses it with a check constraint as well as a
+ * validator (backend/apps/catalogue/models.py).
+ */
+export const CATALOGUE_SERVICE_LINES: ServiceLine[] = ["failure_analysis", "water_environmental"];

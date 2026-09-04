@@ -18,6 +18,8 @@ import { TrainingList } from "./pages/TrainingList";
 import { TrainingSessionDetail } from "./pages/TrainingSessionDetail";
 import { ReportsList } from "./pages/ReportsList";
 import { BillingList } from "./pages/BillingList";
+import { CatalogueList } from "./pages/CatalogueList";
+import { OfferingDetail } from "./pages/OfferingDetail";
 import { InvoiceDetail } from "./pages/InvoiceDetail";
 
 function App() {
@@ -46,6 +48,8 @@ function App() {
         <Route path="/training" element={<TrainingList />} />
         <Route path="/training-sessions/:id" element={<TrainingSessionDetail />} />
         <Route path="/reports" element={<ReportsList />} />
+        <Route path="/catalogue" element={<CatalogueList />} />
+        <Route path="/catalogue/:id" element={<OfferingDetail />} />
         <Route path="/billing" element={<BillingList />} />
         <Route path="/system-failures" element={<SystemFailuresList />} />
         <Route path="/invoices/:id" element={<InvoiceDetail />} />

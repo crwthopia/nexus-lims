@@ -71,7 +71,10 @@ const SECTIONS: NavSection[] = [
   },
   {
     label: "Commercial",
-    items: [{ to: "/billing", label: "Billing", icon: "billing", keywords: "invoices payments credit notes" }],
+    items: [
+      { to: "/catalogue", label: "Catalogue", icon: "catalogue", keywords: "services price list rate card offerings analyses" },
+      { to: "/billing", label: "Billing", icon: "billing", keywords: "invoices payments credit notes" },
+    ],
   },
 ];
 

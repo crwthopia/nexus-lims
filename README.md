@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **456-test automated regression suite** (`backend/tests/`, pytest +
+- **532-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,7 +55,7 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **242-test frontend suite** (Vitest + React Testing Library): 184 in the
+- **257-test frontend suite** (Vitest + React Testing Library): 199 in the
   Staff Console and 58 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
@@ -559,6 +559,140 @@ statuses that mean the same thing to a reviewer share a colour, so a
 worklist reads as four groups (waiting / in progress / accepted / rejected)
 rather than eleven unrelated hues, and `disposed` is muted rather than red
 because it is terminal bookkeeping, not a failure.
+
+## Service catalogue and pricing
+
+**Nothing in the schema priced analytical work before this.** A
+`TrainingCourse` carries a price, because a course is sold as a course. A
+Sample arrives against a `TestMethod` — and a TestMethod is a *method*, an
+SOP reference and its specification limits, not a line on a rate card.
+`Invoice.amount` was a single figure typed in by staff with nothing
+recording what it was for. So "which analyses earn the most" could not be
+answered from this database at all, however the question was asked, and
+that is why the catalogue is the foundation the dashboard is built on
+rather than a feature beside it.
+
+`apps/catalogue/` adds two entities, deliberately kept apart:
+
+- **`ServiceOffering`** is what a customer buys: a code (`WQ-BOD5` — the
+  thing quoted on a purchase order, so the natural key here), a name, one
+  service line, and the `TestMethod`s that fulfil it. The mapping is
+  many-to-many because a good part of any water lab's revenue is panels:
+  "Potability" is one price and one turnaround to the customer and six
+  methods to the lab. Modelling it as a set is what will let one order line
+  raise the six TestRequests that fulfil it, and what lets those six be
+  attributed back to the one thing that was actually sold.
+- **`OfferingPrice`** is what it cost over a stated period. Prices are
+  **versioned, never edited**: an invoice raised in March has to keep
+  quoting March's rate however many times the card changes afterwards, and
+  "what did we charge last year" is a question a lab gets asked by its own
+  auditors.
+
+Training is *not* in it. Training's catalogue is `training.TrainingCourse`
+and always was — CPD units, an early-bird and a student discount, sessions
+with capacity. A second price for the same thing is a second price to get
+wrong, so the catalogue covers the analytical service lines only, and a
+check constraint enforces that rather than a comment asking politely.
+
+### VAT is a property of the price
+
+NASAT quotes **both ways**: some rates are published VAT-exclusive (net,
+VAT added at invoicing) and some VAT-inclusive (what the customer pays).
+Storing which kind a figure is, next to the figure, is the only way a total
+can be computed without someone remembering — and a screen that lists a net
+rate beside a gross one invites a comparison that is wrong by 12%.
+
+So every price carries `vat_treatment` and `vat_rate_pct` (12.00 by
+default; a zero-rated service is a *value*, not a special case in code),
+and the API always returns all three figures:
+
+| Quoted | `amount` | net | VAT | gross |
+|---|---|---|---|---|
+| VAT-exclusive | ₱1,000.00 | ₱1,000.00 | ₱120.00 | ₱1,120.00 |
+| VAT-inclusive | ₱1,120.00 | ₱1,000.00 | ₱120.00 | ₱1,120.00 |
+
+Two details in that arithmetic are load-bearing, and both are tested:
+
+- **VAT is the difference of the two rounded figures**, not a third
+  independently-rounded number. Round all three separately and net + VAT
+  fails to equal gross by a centavo often enough to reach an invoice.
+- **Rounding is half-up, as an invoice does.** Decimal's default is
+  banker's rounding, which turns ₱0.125 into ₱0.12 — defensible
+  statistically, and not what a customer reading a receipt expects.
+
+### Superseding, not editing
+
+`services.set_price()` is the only way a price is written, by the API and
+the CSV importer alike, and it closes the outgoing price the day before the
+incoming one starts, in one transaction. Two cases it handles so no caller
+has to:
+
+- **Correcting a rate entered this morning** is not a new period in the
+  history, it is a fix to the one you just made — a same-day write updates
+  that row, which is also what the `(offering, effective_from)` unique
+  constraint says.
+- **Back-dating** closes any price whose window contains the new start
+  date, and inherits the *following* price's start as its own end, so
+  windows can't overlap even when prices arrive out of order.
+
+The price-history endpoint is read-only for the same reason: a row that
+could be edited or deleted directly would be a hole in exactly the record
+an auditor asks to see.
+
+### Loading a rate card
+
+A price list arrives as a spreadsheet, from someone who is not going to
+type two hundred rows into a web form:
+
+```bash
+cd backend
+python manage.py import_price_list rates.csv --dry-run          # parse, validate, report, write nothing
+python manage.py import_price_list rates.csv --effective-from 2026-01-01
+```
+
+Required columns are `code`, `name`, `service_line`, `price` and
+`vat_treatment`; `vat_rate_pct`, `description`, `turnaround_days`,
+`accredited`, `active`, `test_methods` (`;`-separated method references)
+and `note` are optional. Headers are matched case- and space-insensitively,
+`₱1,250.00` parses, and blank spacer rows are skipped — the file people
+actually have, in other words.
+
+What it refuses is as deliberate as what it accepts. **A bad row rolls back
+the whole file**: a rate card is one document, and half of one loaded is
+worse than none, because nothing on screen afterwards says which half. **A
+method reference that matches nothing is an error**, not a silent omission
+— an offering mapped to five of its six methods looks complete and quietly
+under-reports the sixth everywhere it is counted. Re-importing the same
+`code` updates that offering and supersedes its price rather than creating
+a duplicate, so the same file can be re-run after a correction.
+
+### Who can change a price
+
+Read is open to any authenticated staff member: an analyst booking a sample
+in needs to see what was ordered and what it costs, and hiding the rate card
+from the people doing the work has never made a lab quieter. Write is held
+to **Lab Supervisor** and **System Administrator** — a price change is a
+commercial decision with an audit trail (`simple_history` on both models),
+not a correction anyone passing can make.
+
+**Customers cannot reach the catalogue at all yet.** Publishing a rate card
+to the portal is a business decision NASAT has not made, and the safe
+default for a price list is that it goes out when someone decides it
+should, not because an endpoint happened to exist.
+
+### What this does not do yet
+
+Being explicit, since the dashboard depends on the difference:
+
+- **Orders still have no line items.** An `Order` groups samples; it does
+  not yet say which offerings were bought, so revenue cannot be attributed
+  per analysis from real invoices. What the catalogue makes possible *now*
+  is list-price analysis — work performed × the rate in force — which is a
+  useful and honest number as long as it is labelled as one.
+- **`Invoice.amount` is still a typed lump sum.** Wiring invoices to
+  order lines changes a money path, so it is its own change with its own
+  tests rather than a rider on this one.
+
 
 ## Console shell
 
@@ -2132,7 +2266,7 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 242 tests: 184 in
+frontend (`npm run test:watch` while developing). 257 tests: 199 in
 `frontend/`, 58 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
@@ -2150,6 +2284,10 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/components/ProtectedRoute.test.tsx` | The three-state guard: renders for an authenticated user, redirects on 401/403, and shows a loading state *instead of redirecting* while `staff-me` is still in flight |
 | `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
 | `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
+| `backend/tests/test_catalogue.py` | The VAT arithmetic both ways, including that a net-quoted and a gross-quoted rate for the same money produce identical figures, that net + VAT equals gross at awkward amounts, half-up rounding, and a zero-rated service; price windows staying contiguous when prices arrive in order, back-dated, or corrected the same day; role gating on write and openness on read; the training refusal at both the serializer and the check constraint; code normalisation; price history being read-only over the API |
+| `backend/tests/test_price_list_import.py` | The importer against the file people actually have: peso signs, thousands separators and blank spacer rows accepted; a missing column, an unparseable price or an unmatched method reference refused with the line number; a bad row rolling back the whole file; a dry run writing nothing; re-import updating the offering and superseding its price |
+| `frontend/src/pages/CatalogueList.test.tsx` | That the list shows the server's net and gross rather than the published amount, so two rows quoted differently can be compared; an unpriced offering saying so instead of showing zero; a withdrawn one marked rather than hidden; the add form gated on `CATALOGUE_WRITE_ROLES`; Training absent from the service-line choices; the filter reaching the query string |
+| `frontend/src/pages/OfferingDetail.test.tsx` | Repricing posting a *new* price rather than patching the current one (patching is what would erase the history the versioning exists for); the effective date omitted when blank rather than sent as `""`; a back-dated price sent when one is given; the superseded window shown in the history; the required role named rather than the panel hidden |
 | `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
 | `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |

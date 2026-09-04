@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from apps.accounts.models import CustomerUser, Role, StaffUser
 from apps.billing.models import Invoice, Payment
+from apps.catalogue.models import OfferingPrice, ServiceOffering
 from apps.documents.models import Document, DocumentVersion
 from apps.equipment.models import CalibrationRecord, Instrument, StandardReagent
 from apps.investigations.models import Investigation
@@ -228,3 +229,23 @@ class PaymentFactory(factory.django.DjangoModelFactory):
     method = Payment.Method.BANK_TRANSFER
     recorded_by = factory.SubFactory(StaffUserFactory)
     status = Payment.Status.PENDING_CONFIRMATION
+
+
+class ServiceOfferingFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ServiceOffering
+
+    code = factory.Sequence(lambda n: f"WQ-{n:04d}")
+    name = factory.Sequence(lambda n: f"Offering {n}")
+    service_line = ServiceLine.WATER_ENVIRONMENTAL
+    turnaround_days = 5
+
+
+class OfferingPriceFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = OfferingPrice
+
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE
+    effective_from = factory.LazyFunction(lambda: timezone.localdate())

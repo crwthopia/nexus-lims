@@ -21,6 +21,8 @@ import type {
   ReviewAction,
   Sample,
   SampleDetail,
+  ServiceOffering,
+  ServiceOfferingDetail,
   StandardReagent,
   TestMethod,
   TestRequest,
@@ -592,5 +594,74 @@ export function useCloseSystemFailure(id: number) {
     mutationFn: (corrective_action: string) =>
       apiPost<SystemFailure>(`/system-failures/${id}/close/`, { corrective_action }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-failures"] }),
+  });
+}
+
+// --- Service catalogue ----------------------------------------------------
+
+export function useServiceOfferings(params: { service_line?: string; active?: string; q?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.service_line) query.set("service_line", params.service_line);
+  if (params.active) query.set("active", params.active);
+  if (params.q) query.set("q", params.q);
+  const qs = query.toString();
+
+  return useQuery({
+    queryKey: ["service-offerings", params],
+    queryFn: () => apiGet<Paginated<ServiceOffering>>(`/service-offerings/${qs ? `?${qs}` : ""}`),
+  });
+}
+
+export function useServiceOffering(id: number) {
+  return useQuery({
+    queryKey: ["service-offerings", id],
+    queryFn: () => apiGet<ServiceOfferingDetail>(`/service-offerings/${id}/`),
+  });
+}
+
+export function useCreateServiceOffering() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      code: string;
+      name: string;
+      service_line: string;
+      description?: string;
+      turnaround_days?: number | null;
+      is_accredited?: boolean;
+    }) => apiPost<ServiceOffering>("/service-offerings/", data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+export function useUpdateServiceOffering(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Partial<Pick<ServiceOffering, "name" | "description" | "turnaround_days" | "is_accredited" | "is_active">>) =>
+      apiPatch<ServiceOffering>(`/service-offerings/${id}/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+/**
+ * Prices are superseded, never edited: this posts a new one and the server
+ * closes the outgoing price the day before it starts. The response is the
+ * whole offering, history included, so the screen re-renders from one
+ * round trip rather than refetching.
+ */
+export function useSetOfferingPrice(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      amount: string;
+      vat_treatment: string;
+      vat_rate_pct?: string;
+      effective_from?: string;
+      note?: string;
+    }) => apiPost<ServiceOfferingDetail>(`/service-offerings/${id}/set-price/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
   });
 }

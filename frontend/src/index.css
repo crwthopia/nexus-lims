@@ -874,6 +874,25 @@ textarea {
   font-size: 0.875rem;
 }
 
+/* A labelled control: the <label> wraps its input, so clicking the text
+   focuses the field without an id/for pair to keep in step. Same class,
+   same rules as the Customer Portal's. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.field input,
+.field select,
+.field textarea {
+  color: var(--color-text);
+  font-weight: 400;
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--color-text-muted);
