@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useCreateReport,
@@ -100,6 +101,13 @@ export function SampleDetail() {
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
             <dl className="field-grid">
               <Field label="Service line" value={sample.service_line.replace("_", " ")} />
+              {/* The order is where what was sold (and its price) lives;
+                  a walk-in sample has none, which is why this is nullable
+                  on the model in the first place. */}
+              <Field
+                label="Order"
+                value={sample.order ? <Link to={`/orders/${sample.order}`}>#{sample.order}</Link> : "—"}
+              />
               <Field label="Client reference" value={sample.client_reference || "—"} />
               <Field label="Sampling point" value={sample.sampling_point || "—"} />
               <Field label="Container" value={`${sample.container_count}× ${sample.container_type || "unspecified"}`} />
@@ -413,7 +421,7 @@ function SampleReports({ sampleId }: { sampleId: number }) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <>
       <dt style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>{label}</dt>

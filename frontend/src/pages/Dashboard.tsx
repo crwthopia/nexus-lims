@@ -69,7 +69,7 @@ export function Dashboard() {
     <div>
       <PageHeader
         title="Dashboard"
-        description="Demand, turnaround and quality across the lab. Values are list price — what the work is worth at the rate card, not what was invoiced."
+        description="Demand, turnaround and quality across the lab. List price is what the work is worth at the rate card; billed is what invoices actually say."
         actions={
           <select
             value={days}
@@ -112,6 +112,21 @@ export function Dashboard() {
                 "on the previous period",
               )}
               hint="net of VAT, at the rate in force"
+            />
+            <StatTile
+              label="Billed"
+              value={formatMoney(data.totals.billed_net, data.totals.currency)}
+              delta={delta(
+                Number(data.totals.billed_net),
+                Number(data.previous_totals.billed_net),
+                "on the previous period",
+              )}
+              // Deliberately beside list price rather than replacing it:
+              // billed is real money but only for work already invoiced,
+              // which lags the bench by however long billing takes.
+              hint={`net of VAT, ${data.totals.invoice_lines.toLocaleString()} invoice line${
+                data.totals.invoice_lines === 1 ? "" : "s"
+              }`}
             />
             <StatTile
               label="Turnaround (median)"
@@ -166,7 +181,10 @@ export function Dashboard() {
                         sublabel: row.code,
                         value: rank === "value" ? Number(row.list_value_net) : row.request_count,
                         display: `${row.request_count.toLocaleString()} · ${formatMoney(row.list_value_net)}`,
-                        detail: SERVICE_LINE_LABELS[row.service_line],
+                        detail:
+                          Number(row.billed_net) > 0
+                            ? `${SERVICE_LINE_LABELS[row.service_line]} · ${formatMoney(row.billed_net)} billed`
+                            : SERVICE_LINE_LABELS[row.service_line],
                       })),
                       ...(data.leading_analyses_other.offering_count > 0
                         ? [

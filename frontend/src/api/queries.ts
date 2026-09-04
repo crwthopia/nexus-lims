@@ -13,6 +13,8 @@ import type {
   InstrumentDetail,
   Invoice,
   InvoiceDetail,
+  OrderDetail,
+  OrderItem,
   Investigation,
   Paginated,
   Payment,
@@ -684,5 +686,44 @@ export function useDashboard(params: { from?: string; to?: string; rank?: string
   return useQuery({
     queryKey: ["analytics-dashboard", params],
     queryFn: () => apiGet<DashboardData>(`/analytics/dashboard/${qs ? `?${qs}` : ""}`),
+  });
+}
+
+
+// --- Orders and their lines -----------------------------------------------
+
+export function useOrder(id: number) {
+  return useQuery({
+    queryKey: ["orders", id],
+    queryFn: () => apiGet<OrderDetail>(`/orders/${id}/`),
+  });
+}
+
+/**
+ * The body carries an offering, a quantity and a discount — never a price.
+ * The server snapshots the rate in force (backend/apps/samples/
+ * order_services.py); a client that could send `unit_amount` could sell at
+ * any price it liked.
+ */
+export function useAddOrderItem(orderId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { offering: number; quantity?: number; discount_pct?: string }) =>
+      apiPost<OrderItem>(`/orders/${orderId}/items/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["orders", orderId] }),
+  });
+}
+
+/** Bills everything on the order that hasn't been billed yet. */
+export function useInvoiceOrder(orderId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<InvoiceDetail>(`/orders/${orderId}/invoice/`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
   });
 }

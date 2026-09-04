@@ -1,13 +1,58 @@
 from rest_framework import serializers
 
-from apps.samples.models import ChainOfCustodyEvent, Order, Sample
+from apps.billing.models import Invoice
+from apps.samples.models import ChainOfCustodyEvent, Order, OrderItem, Sample
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    """
+    The price fields are all read-only, and that is the point of the model:
+    they are snapshotted from the catalogue when the line is created
+    (apps/samples/order_services.py). A writable `unit_amount` here would
+    let a caller invent a price; a computed one would reprice history.
+    """
+
+    offering_code = serializers.CharField(source="offering.code", read_only=True)
+    offering_name = serializers.CharField(source="offering.name", read_only=True)
+    line_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    net_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    vat_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    gross_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    is_invoiced = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderItem
+        fields = [
+            "id", "order", "offering", "offering_code", "offering_name", "quantity", "discount_pct",
+            "unit_amount", "currency", "vat_treatment", "vat_rate_pct", "source_price",
+            "line_amount", "net_amount", "vat_amount", "gross_amount", "is_invoiced", "created_at",
+        ]
+        read_only_fields = [
+            "id", "unit_amount", "currency", "vat_treatment", "vat_rate_pct", "source_price", "created_at",
+        ]
+
+    def get_is_invoiced(self, item):
+        """Billed on an invoice that has not been voided -- see billing.services.unbilled_items."""
+        return item.invoice_lines.exclude(invoice__status=Invoice.Status.VOID).exists()
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    item_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Order
-        fields = ["id", "customer", "service_line", "status", "created_at"]
+        fields = ["id", "customer", "service_line", "status", "item_count", "created_at"]
         read_only_fields = ["id", "status", "created_at"]
+
+    def get_item_count(self, order):
+        return order.items.count()
+
+
+class OrderDetailSerializer(OrderSerializer):
+    items = OrderItemSerializer(many=True, read_only=True)
+
+    class Meta(OrderSerializer.Meta):
+        fields = [*OrderSerializer.Meta.fields, "items"]
 
 
 class ChainOfCustodyEventSerializer(serializers.ModelSerializer):

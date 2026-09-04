@@ -11,6 +11,7 @@ import {
 } from "../api/types";
 import type { PaymentMethod, PaymentStatus } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
+import { formatMoney } from "../money";
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const PAYMENT_STATUSES = Object.keys(PAYMENT_STATUS_LABELS) as PaymentStatus[];
@@ -52,11 +53,68 @@ export function InvoiceDetail() {
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
             <dl className="field-grid">
-              <Field label="Amount" value={`${invoice.currency} ${invoice.amount}`} />
+              {/* Net and VAT come from the lines and are absent on an
+                  invoice billed as one typed figure — there is no split to
+                  report there, and inventing one would be a claim the
+                  record doesn't support. */}
+              {invoice.net_total !== null && (
+                <Field label="Net" value={formatMoney(invoice.net_total, invoice.currency)} />
+              )}
+              {invoice.vat_total !== null && (
+                <Field label="VAT" value={formatMoney(invoice.vat_total, invoice.currency)} />
+              )}
+              <Field label={invoice.net_total === null ? "Amount" : "Total"} value={formatMoney(invoice.amount, invoice.currency)} />
               <Field label="Order" value={invoice.order ? `#${invoice.order}` : "—"} />
               <Field label="Enrollment" value={invoice.enrollment ? `#${invoice.enrollment}` : "—"} />
               <Field label="Created" value={new Date(invoice.created_at).toLocaleString()} />
             </dl>
+          </div>
+
+          <div className="card table-card">
+            <div className="card-head">
+              <div>
+                <h2>What is being billed</h2>
+                <p>
+                  Snapshotted when the invoice was raised — renaming an offering or repricing the rate card never
+                  rewrites an invoice that was sent.
+                </p>
+              </div>
+            </div>
+            {invoice.lines.length === 0 ? (
+              <div className="card-state">
+                Billed as a single amount, with no line breakdown — a walk-in job or a training enrollment.
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Net</th>
+                    <th>VAT</th>
+                    <th>Gross</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.lines.map((line) => (
+                    <tr key={line.id} style={{ cursor: "default" }}>
+                      <td>{line.description}</td>
+                      <td>{line.quantity}</td>
+                      <td>
+                        {formatMoney(line.unit_amount, line.currency)}{" "}
+                        <span style={{ color: "var(--color-text-muted)" }}>
+                          {line.vat_treatment === "inclusive" ? "incl." : "excl."}
+                        </span>
+                      </td>
+                      <td>{formatMoney(line.net_amount, line.currency)}</td>
+                      <td>{formatMoney(line.vat_amount, line.currency)}</td>
+                      <td>{formatMoney(line.gross_amount, line.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="card" style={{ padding: 20 }}>

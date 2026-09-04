@@ -485,9 +485,14 @@ export interface Invoice {
   order: number | null;
   enrollment: number | null;
   customer_email: string | null;
+  /** What is owed: the gross. Derived from the lines when there are any. */
   amount: string;
   currency: string;
   status: InvoiceStatus;
+  /** Null on an invoice with no lines — a typed figure has no VAT split to report. */
+  net_total: string | null;
+  vat_total: string | null;
+  line_count: number;
   created_at: string;
 }
 
@@ -509,6 +514,7 @@ export interface Payment {
 
 export interface InvoiceDetail extends Invoice {
   payments: Payment[];
+  lines: InvoiceLine[];
 }
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
@@ -717,6 +723,63 @@ export const CATALOGUE_WRITE_ROLES: RoleName[] = ["lab_supervisor", "system_admi
  */
 export const CATALOGUE_SERVICE_LINES: ServiceLine[] = ["failure_analysis", "water_environmental"];
 
+// --- Order and invoice lines ---------------------------------------------
+
+/**
+ * A line of what was ordered. Every price field is a **snapshot** taken
+ * when the line was created, not a live read of the rate card — repricing
+ * the catalogue must never reprice a sold line. The server owns them; a
+ * client can send only the offering, quantity and discount.
+ */
+export interface OrderItem {
+  id: number;
+  order: number;
+  offering: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  source_price: number | null;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  is_invoiced: boolean;
+  created_at: string;
+}
+
+/** The order's own lines — see the existing `Order` above for the record itself. */
+export interface OrderDetail extends Order {
+  item_count: number;
+  items: OrderItem[];
+}
+
+/** A billed line, snapshotted again away from the order line it came from. */
+export interface InvoiceLine {
+  id: number;
+  invoice: number;
+  order_item: number | null;
+  description: string;
+  quantity: number;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  discount_pct: string;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  created_at: string;
+}
+
+/** ORDER_ITEM_WRITE_ROLES (backend/apps/samples/views.py) — keep in sync by hand. */
+export const ORDER_ITEM_WRITE_ROLES: RoleName[] = ["sample_receiver", "lab_supervisor", "system_administrator"];
+
 // --- Dashboard analytics (backend/apps/analytics) -------------------------
 
 export interface LeadingAnalysis {
@@ -726,6 +789,8 @@ export interface LeadingAnalysis {
   service_line: ServiceLine;
   request_count: number;
   list_value_net: string;
+  /** What invoice lines naming this offering actually billed, net of VAT. Exact, where the two figures above are inferred. */
+  billed_net: string;
 }
 
 /**
@@ -752,10 +817,17 @@ export interface DashboardData {
   /** Which measure ordered `leading_analyses` — and therefore which one the fold into "other" was computed against. */
   rank: "volume" | "value";
   window: { from: string; to: string; days: number; previous_from: string; previous_to: string };
-  totals: { samples_received: number; test_requests: number; list_value_net: string; currency: string };
-  previous_totals: { samples_received: number; test_requests: number; list_value_net: string };
+  totals: {
+    samples_received: number;
+    test_requests: number;
+    list_value_net: string;
+    billed_net: string;
+    invoice_lines: number;
+    currency: string;
+  };
+  previous_totals: { samples_received: number; test_requests: number; list_value_net: string; billed_net: string };
   leading_analyses: LeadingAnalysis[];
-  leading_analyses_other: { offering_count: number; request_count: number; list_value_net: string };
+  leading_analyses_other: { offering_count: number; request_count: number; list_value_net: string; billed_net: string };
   unattributed_requests: UnattributedRequests;
   service_line_mix: { service_line: ServiceLine; label: string; sample_count: number }[];
   monthly: { month: string; request_count: number; list_value_net: string }[];

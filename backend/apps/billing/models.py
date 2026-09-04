@@ -8,10 +8,14 @@ means (cash, bank transfer, or an accepted Purchase Order). Payment.method
 is deliberately open to add a `gateway` value later without a schema rewrite.
 """
 
+from decimal import Decimal
+
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
+from apps.catalogue.money import VatTreatment, money, split
+from apps.samples.models import VAT_TREATMENT_CHOICES
 
 
 class Invoice(models.Model):
@@ -48,6 +52,100 @@ class Invoice(models.Model):
 
     def __str__(self):
         return f"Invoice #{self.id}: {self.amount} {self.currency} ({self.get_status_display()})"
+
+    # --- totals -----------------------------------------------------------
+    #
+    # `amount` stays the authority for what is owed, and stays writable:
+    # a walk-in job or a training enrollment is still invoiced as one
+    # figure, and this system has always let staff do that. What changes is
+    # that an invoice raised *from an order* now has lines, and `amount` is
+    # then maintained from them (see services.recalculate) rather than typed
+    # -- so the total and the breakdown cannot disagree.
+
+    @property
+    def has_lines(self) -> bool:
+        return self.lines.exists()
+
+    def line_totals(self) -> tuple[Decimal, Decimal, Decimal]:
+        """(net, vat, gross) summed over the lines. Zeroes when there are none."""
+        net = vat = gross = Decimal("0.00")
+        for line in self.lines.all():
+            net += line.net_amount
+            vat += line.vat_amount
+            gross += line.gross_amount
+        return money(net), money(vat), money(gross)
+
+
+class InvoiceLine(models.Model):
+    """
+    One billed line, snapshotted away from the order it came from.
+
+    Every figure here is copied, including the description: an invoice is a
+    document that was sent to a customer, and it must keep saying what it
+    said on the day it was sent however the order, the offering or the rate
+    card change afterwards. `order_item` records where the line came from
+    and is PROTECTed so that history cannot be deleted; it is not read for
+    any of the numbers.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
+    order_item = models.ForeignKey(
+        "samples.OrderItem", null=True, blank=True, on_delete=models.PROTECT, related_name="invoice_lines",
+        help_text="The order line billed. Null for a line entered by hand on an invoice with no order behind it.",
+    )
+    description = models.CharField(
+        max_length=255,
+        help_text="What the customer sees. Snapshotted, so renaming an offering never rewrites an issued invoice.",
+    )
+    quantity = models.PositiveIntegerField(default=1)
+    unit_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="PHP")
+    vat_treatment = models.CharField(max_length=16, choices=VAT_TREATMENT_CHOICES, default=VatTreatment.EXCLUSIVE)
+    vat_rate_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("12.00"))
+    discount_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    history = HistoricalRecords(get_user=get_history_user)
+
+    class Meta:
+        db_table = "invoice_line"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gt=0), name="invoice_line_quantity_positive"),
+            models.CheckConstraint(check=models.Q(unit_amount__gte=0), name="invoice_line_unit_amount_not_negative"),
+            models.CheckConstraint(
+                check=models.Q(discount_pct__gte=0) & models.Q(discount_pct__lte=100),
+                name="invoice_line_discount_within_range",
+            ),
+            # An order line is billed once. Without this, raising the same
+            # invoice twice -- a double-click, a retried request -- bills a
+            # customer twice for one piece of work, and nothing downstream
+            # would notice.
+            models.UniqueConstraint(
+                fields=["order_item"], condition=models.Q(order_item__isnull=False),
+                name="invoice_line_one_per_order_item",
+            ),
+        ]
+
+    def __str__(self):
+        return f"InvoiceLine #{self.id}: {self.description}"
+
+    @property
+    def line_amount(self) -> Decimal:
+        return money(self.unit_amount * self.quantity * (Decimal(1) - self.discount_pct / Decimal(100)))
+
+    @property
+    def net_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[0]
+
+    @property
+    def vat_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[1]
+
+    @property
+    def gross_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[2]
 
 
 class Payment(models.Model):

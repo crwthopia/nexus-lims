@@ -36,11 +36,33 @@ function invoice(overrides = {}) {
     amount: "15000.00",
     currency: "PHP",
     status: "issued",
+    net_total: null,
+    vat_total: null,
+    line_count: 0,
     created_at: "2026-08-01T09:00:00Z",
     payments: [],
+    lines: [],
     ...overrides,
   };
 }
+
+const LINE = {
+  id: 9,
+  invoice: 4,
+  order_item: 3,
+  description: "WQ-BOD5 — BOD (5-day)",
+  quantity: 2,
+  unit_amount: "1200.00",
+  currency: "PHP",
+  vat_treatment: "exclusive",
+  vat_rate_pct: "12.00",
+  discount_pct: "0.00",
+  line_amount: "2400.00",
+  net_amount: "2400.00",
+  vat_amount: "288.00",
+  gross_amount: "2688.00",
+  created_at: "2026-08-01T09:00:00Z",
+};
 
 function render(user = staffUser({ roles: [role("lab_supervisor")] }), inv = invoice(), extra = {}) {
   const stub = stubApi({
@@ -211,5 +233,41 @@ describe("the payments list", () => {
     renderWithProviders(<InvoiceDetail />, { route: "/invoices/4", path: "/invoices/:id" });
 
     expect(await screen.findByText("Couldn't load this invoice.")).toBeInTheDocument();
+  });
+});
+
+
+/**
+ * The breakdown beneath the total.
+ *
+ * An invoice raised from an order carries lines; one billed as a single
+ * typed figure — a walk-in job, a training enrollment — carries none, and
+ * the screen has to say so rather than showing an empty table or, worse,
+ * a net and VAT split it cannot know.
+ */
+describe("what is being billed", () => {
+  it("shows the lines with their own net, VAT and gross", async () => {
+    render(undefined, invoice({ lines: [LINE], net_total: "2400.00", vat_total: "288.00", line_count: 1, amount: "2688.00" }));
+
+    const row = (await screen.findByText("WQ-BOD5 — BOD (5-day)")).closest("tr")!;
+    expect(within(row).getByText("₱2,400.00")).toBeInTheDocument();
+    expect(within(row).getByText("₱288.00")).toBeInTheDocument();
+    expect(within(row).getByText("₱2,688.00")).toBeInTheDocument();
+  });
+
+  it("says an invoice with no lines was billed as one amount", async () => {
+    render(undefined, invoice());
+
+    expect(await screen.findByText(/billed as a single amount/i)).toBeInTheDocument();
+  });
+
+  it("reports no VAT split where the record does not have one", async () => {
+    // Inventing a split for a typed figure would be a claim the record
+    // does not support.
+    render(undefined, invoice());
+
+    await screen.findByText(/billed as a single amount/i);
+    expect(screen.queryByText("Net")).not.toBeInTheDocument();
+    expect(screen.queryByText("VAT")).not.toBeInTheDocument();
   });
 });

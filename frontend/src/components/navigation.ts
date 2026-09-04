@@ -113,5 +113,6 @@ export function titleForPath(pathname: string): string {
   if (pathname.startsWith("/test-requests/")) return "Testing Queue";
   if (pathname.startsWith("/training-sessions/")) return "Training";
   if (pathname.startsWith("/invoices/")) return "Billing";
+  if (pathname.startsWith("/orders/")) return "Samples";
   return "Staff Console";
 }

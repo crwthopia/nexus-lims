@@ -24,8 +24,20 @@ function dashboardData(overrides = {}) {
   return {
     rank: "volume",
     window: { from: "2026-06-07", to: "2026-09-04", days: 90, previous_from: "2026-03-09", previous_to: "2026-06-06" },
-    totals: { samples_received: 412, test_requests: 1183, list_value_net: "1874500.00", currency: "PHP" },
-    previous_totals: { samples_received: 366, test_requests: 1042, list_value_net: "1612000.00" },
+    totals: {
+      samples_received: 412,
+      test_requests: 1183,
+      list_value_net: "1874500.00",
+      billed_net: "1204000.00",
+      invoice_lines: 96,
+      currency: "PHP",
+    },
+    previous_totals: {
+      samples_received: 366,
+      test_requests: 1042,
+      list_value_net: "1612000.00",
+      billed_net: "1010000.00",
+    },
     leading_analyses: [
       {
         offering_id: 1,
@@ -34,9 +46,10 @@ function dashboardData(overrides = {}) {
         service_line: "water_environmental",
         request_count: 264,
         list_value_net: "492800.00",
+        billed_net: "320000.00",
       },
     ],
-    leading_analyses_other: { offering_count: 0, request_count: 0, list_value_net: "0.00" },
+    leading_analyses_other: { offering_count: 0, request_count: 0, list_value_net: "0.00", billed_net: "0.00" },
     unattributed_requests: { no_offering: 0, ambiguous: 0, unpriced: 0 },
     service_line_mix: [
       { service_line: "water_environmental", label: "Water / Environmental Testing", sample_count: 291 },
@@ -86,6 +99,18 @@ describe("Dashboard", () => {
     expect(screen.queryByText(/revenue/i)).not.toBeInTheDocument();
   });
 
+  it("shows billed money beside list price rather than in place of it", async () => {
+    // They are different numbers: billed is real but lags the bench by
+    // however long invoicing takes, so collapsing them would misstate
+    // whichever one the reader assumed.
+    renderDashboard();
+
+    expect(await screen.findByText("Billed")).toBeInTheDocument();
+    expect(screen.getByText("₱1,204,000.00")).toBeInTheDocument();
+    expect(screen.getByText("List-price value")).toBeInTheDocument();
+    expect(screen.getByText("₱1,874,500.00")).toBeInTheDocument();
+  });
+
   it("compares against the preceding period of equal length", async () => {
     renderDashboard();
 
@@ -97,7 +122,9 @@ describe("Dashboard", () => {
   it("draws no comparison when the previous period had nothing to compare with", async () => {
     // A "+100%" against zero is arithmetic, not information.
     renderDashboard(
-      dashboardData({ previous_totals: { samples_received: 0, test_requests: 0, list_value_net: "0.00" } }),
+      dashboardData({
+        previous_totals: { samples_received: 0, test_requests: 0, list_value_net: "0.00", billed_net: "0.00" },
+      }),
     );
 
     await screen.findByText("List-price value");

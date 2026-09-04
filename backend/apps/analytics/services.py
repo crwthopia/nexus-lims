@@ -6,12 +6,20 @@ requests, samples, approvals, results -- and priced from the catalogue's
 rate card. Two consequences follow, and both are stated on the screen
 rather than buried here:
 
-**This is list-price value, not revenue.** An Order has no line items yet
-and `Invoice.amount` is still a typed lump sum, so nothing in the database
-says what was actually billed for a given analysis. What can be computed
-honestly is work performed x the rate in force on the day it was requested
--- which is what a lab means by "what is this bench worth", and is not the
-same as money received. Calling it revenue would be a lie of one word.
+**List-price value and billed revenue are two different numbers, and both
+are reported.** List price is work performed x the rate in force on the
+day it was requested: what the bench is worth, computable from the moment
+the catalogue exists. Billed is what invoice lines actually say -- real
+money, but only for work that has been invoiced, which lags the bench by
+however long billing takes. Neither is a substitute for the other, and
+collapsing them into one figure called "revenue" would misstate whichever
+one the reader assumed.
+
+**Billed revenue is attributed exactly, because an invoice line names its
+offering.** That is the whole reason order lines were worth building: the
+volume figures below still reach the rate card through a method's
+many-to-many and can be ambiguous, but a billed peso knows precisely what
+it was for.
 
 **Not every request can be attributed to an offering.** A TestMethod
 reaches an offering through a many-to-many, so a method that belongs to no
@@ -30,6 +38,7 @@ from decimal import Decimal
 from django.db.models import Count, Q
 
 from apps.audit.models import SystemFailure
+from apps.billing.models import Invoice, InvoiceLine
 from apps.catalogue.models import OfferingPrice, ServiceOffering
 from apps.equipment.models import Instrument
 from apps.investigations.models import Investigation
@@ -155,6 +164,43 @@ def _accumulate(rows, pricer):
     return per_offering, per_month, unattributed, total
 
 
+def _billed(start, end):
+    """
+    What was invoiced in the window, from invoice lines.
+
+    Net of VAT, so it is comparable with the list-price figure beside it --
+    a gross total set against a net one reads as 12% growth that never
+    happened. Void invoices are excluded: a voided invoice is a document
+    that was withdrawn, and counting it as revenue would be counting money
+    nobody owes.
+
+    Summed in Python rather than SQL because the net of a line depends on
+    how its rate was quoted, and that conditional belongs in one place
+    (catalogue/money.py) rather than being rewritten as a CASE expression
+    that can drift from it.
+    """
+    lines = (
+        InvoiceLine.objects.filter(
+            invoice__created_at__date__gte=start,
+            invoice__created_at__date__lte=end,
+        )
+        .exclude(invoice__status=Invoice.Status.VOID)
+        .select_related("order_item__offering")
+    )
+
+    total = Decimal("0.00")
+    per_offering = defaultdict(lambda: {"net": Decimal("0.00"), "lines": 0})
+    for line in lines:
+        net = line.net_amount
+        total += net
+        offering = line.order_item.offering if line.order_item_id else None
+        if offering is not None:
+            per_offering[offering.id]["net"] += net
+            per_offering[offering.id]["lines"] += 1
+
+    return {"net": total, "per_offering": per_offering, "line_count": len(lines)}
+
+
 def _percentile(values, fraction):
     """
     Nearest-rank percentile on a sorted list, or None when there is nothing
@@ -237,6 +283,7 @@ def _totals(start, end, pricer):
     rows = _request_rows(start, end)
     per_offering, per_month, unattributed, total = _accumulate(rows, pricer)
     samples = Sample.objects.filter(created_at__date__gte=start, created_at__date__lte=end).count()
+    billed = _billed(start, end)
     return {
         "per_offering": per_offering,
         "per_month": per_month,
@@ -244,6 +291,7 @@ def _totals(start, end, pricer):
         "test_requests": total["count"],
         "list_value_net": total["net"],
         "samples_received": samples,
+        "billed": billed,
     }
 
 
@@ -287,6 +335,13 @@ def dashboard(*, date_from=None, date_to=None, today=None, leading_limit=8, rank
             "service_line": offerings[offering_id].service_line,
             "request_count": totals["count"],
             "list_value_net": str(totals["net"].quantize(Decimal("0.01"))),
+            # Exact, where the volume figures beside it are inferred: an
+            # invoice line names the offering it billed.
+            "billed_net": str(
+                current["billed"]["per_offering"].get(offering_id, {}).get("net", Decimal("0.00")).quantize(
+                    Decimal("0.01")
+                )
+            ),
         }
         for offering_id, totals in current["per_offering"].items()
     ]
@@ -315,12 +370,15 @@ def dashboard(*, date_from=None, date_to=None, today=None, leading_limit=8, rank
             "samples_received": current["samples_received"],
             "test_requests": current["test_requests"],
             "list_value_net": str(current["list_value_net"].quantize(Decimal("0.01"))),
+            "billed_net": str(current["billed"]["net"].quantize(Decimal("0.01"))),
+            "invoice_lines": current["billed"]["line_count"],
             "currency": "PHP",
         },
         "previous_totals": {
             "samples_received": previous["samples_received"],
             "test_requests": previous["test_requests"],
             "list_value_net": str(previous["list_value_net"].quantize(Decimal("0.01"))),
+            "billed_net": str(previous["billed"]["net"].quantize(Decimal("0.01"))),
         },
         # Truncated for the chart, with the remainder folded into one row
         # rather than a ninth colour -- see the dashboard screen.
@@ -331,6 +389,12 @@ def dashboard(*, date_from=None, date_to=None, today=None, leading_limit=8, rank
             "list_value_net": str(
                 sum(
                     (Decimal(row["list_value_net"]) for row in leading[leading_limit:]),
+                    Decimal("0.00"),
+                ).quantize(Decimal("0.01"))
+            ),
+            "billed_net": str(
+                sum(
+                    (Decimal(row["billed_net"]) for row in leading[leading_limit:]),
                     Decimal("0.00"),
                 ).quantize(Decimal("0.01"))
             ),

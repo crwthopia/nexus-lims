@@ -360,3 +360,65 @@ def test_a_misspelled_rank_shows_the_default_view_rather_than_an_error(login_as_
 
     assert response.status_code == 200
     assert response.data["rank"] == "volume"
+
+
+# --- billed revenue --------------------------------------------------------
+
+
+def test_billed_revenue_comes_from_invoice_lines_and_is_net_of_vat():
+    """
+    Comparable with the list-price figure beside it: a gross total set
+    against a net one reads as 12% of growth that never happened.
+    """
+    from apps.billing import services as billing
+    from tests.factories import OrderFactory, OrderItemFactory
+
+    order = OrderFactory()
+    OrderItemFactory(order=order, unit_amount=Decimal("1000.00"), quantity=2)
+    billing.invoice_order(order)
+
+    totals = dashboard(date_from=timezone.localdate() - datetime.timedelta(days=1), date_to=timezone.localdate(), today=timezone.localdate())["totals"]
+
+    assert totals["billed_net"] == "2000.00"
+    assert totals["invoice_lines"] == 1
+
+
+def test_a_voided_invoice_is_not_revenue():
+    from apps.billing import services as billing
+    from apps.billing.models import Invoice
+    from tests.factories import OrderFactory, OrderItemFactory
+
+    order = OrderFactory()
+    OrderItemFactory(order=order, unit_amount=Decimal("1000.00"))
+    invoice = billing.invoice_order(order)
+    invoice.status = Invoice.Status.VOID
+    invoice.save()
+
+    totals = dashboard(date_from=timezone.localdate() - datetime.timedelta(days=1), date_to=timezone.localdate(), today=timezone.localdate())["totals"]
+
+    assert totals["billed_net"] == "0.00"
+
+
+def test_billed_revenue_is_attributed_to_the_offering_the_line_names():
+    """
+    Exact, where the volume figures are inferred: an invoice line knows
+    which offering it billed, even for a method sold under several.
+    """
+    from apps.billing import services as billing
+    from tests.factories import OrderFactory, OrderItemFactory
+
+    method = TestMethodFactory(name="BOD")
+    standalone = priced_offering("1000.00", code="WQ-BOD5", methods=[method])
+    priced_offering("5000.00", code="WQ-POT", methods=[method])  # the ambiguity, deliberately
+    request_on(datetime.date(2026, 7, 1), method)
+
+    order = OrderFactory()
+    OrderItemFactory(order=order, offering=standalone, unit_amount=Decimal("1000.00"))
+    billing.invoice_order(order)
+
+    result = dashboard(date_from=datetime.date(2026, 6, 1), date_to=timezone.localdate(), today=timezone.localdate())
+
+    # The request stays ambiguous by volume...
+    assert result["unattributed_requests"]["ambiguous"] == 1
+    # ...but the peso is not ambiguous at all.
+    assert result["totals"]["billed_net"] == "1000.00"

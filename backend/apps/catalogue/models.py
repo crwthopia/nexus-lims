@@ -28,12 +28,13 @@ was. Every price exposes all three numbers -- net, VAT, gross -- so no
 caller has to do that arithmetic, or get it wrong.
 """
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
+from apps.catalogue.money import split
 from apps.samples.models import ServiceLine
 
 # Training is a service line, but its catalogue is `training.TrainingCourse`
@@ -43,19 +44,6 @@ from apps.samples.models import ServiceLine
 # be wrong within a month. The catalogue covers the analytical service
 # lines only, and the constraint below is what keeps that true.
 CATALOGUE_SERVICE_LINES = [ServiceLine.FAILURE_ANALYSIS, ServiceLine.WATER_ENVIRONMENTAL]
-
-TWO_PLACES = Decimal("0.01")
-
-
-def _money(value: Decimal) -> Decimal:
-    """
-    Round half-up to centavos, which is what an invoice does.
-
-    Decimal's default is ROUND_HALF_EVEN ("banker's rounding"), so a
-    naively-quantized 0.125 becomes 0.12 -- defensible statistically, and
-    not what a customer reading a receipt expects.
-    """
-    return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
 class ServiceOffering(models.Model):
@@ -196,26 +184,17 @@ class OfferingPrice(models.Model):
     # Computed rather than stored: a stored net/VAT/gross triple can drift
     # out of agreement with the amount it was derived from, and there is no
     # way to tell afterwards which of the four was the one someone meant.
+    # The arithmetic itself lives in catalogue/money.py, shared with the
+    # order and invoice lines that copy these figures.
 
     @property
     def net_amount(self) -> Decimal:
-        if self.vat_treatment == self.VatTreatment.EXCLUSIVE:
-            return _money(self.amount)
-        divisor = Decimal(1) + (self.vat_rate_pct / Decimal(100))
-        return _money(self.amount / divisor)
-
-    @property
-    def gross_amount(self) -> Decimal:
-        if self.vat_treatment == self.VatTreatment.INCLUSIVE:
-            return _money(self.amount)
-        return _money(self.amount * (Decimal(1) + self.vat_rate_pct / Decimal(100)))
+        return split(self.amount, self.vat_treatment, self.vat_rate_pct)[0]
 
     @property
     def vat_amount(self) -> Decimal:
-        """
-        Taken as the difference of the two rounded figures rather than
-        rounded separately, so net + VAT always equals gross exactly. Round
-        all three independently and they disagree by a centavo often enough
-        to matter on an invoice.
-        """
-        return self.gross_amount - self.net_amount
+        return split(self.amount, self.vat_treatment, self.vat_rate_pct)[1]
+
+    @property
+    def gross_amount(self) -> Decimal:
+        return split(self.amount, self.vat_treatment, self.vat_rate_pct)[2]

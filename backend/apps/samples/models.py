@@ -9,11 +9,23 @@ note): regulated lines (Water/Environmental) hard-enforce Reviewer != Approver,
 non-regulated lines (Failure Analysis) permit a self-approve bypass.
 """
 
+from decimal import Decimal
+
 from django.db import models
 from django_fsm import FSMField, FSMModelMixin, transition
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
+from apps.catalogue.money import VatTreatment, money, split
+
+# The two ways a figure can be quoted, as model choices. Declared here as
+# well as on catalogue.OfferingPrice because a line's snapshot has to stand
+# on its own -- it is what the customer was billed, whatever the catalogue
+# says now.
+VAT_TREATMENT_CHOICES = [
+    (VatTreatment.EXCLUSIVE, "VAT-exclusive (net)"),
+    (VatTreatment.INCLUSIVE, "VAT-inclusive (gross)"),
+]
 
 
 class ServiceLine(models.TextChoices):
@@ -50,6 +62,90 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order #{self.id} ({self.get_service_line_display()})"
+
+
+class OrderItem(models.Model):
+    """
+    One line of what a customer ordered: an offering, a quantity, and the
+    price it was sold at.
+
+    **The price is a snapshot, not a join.** `unit_amount`, `vat_treatment`
+    and `vat_rate_pct` are copied from the catalogue when the line is
+    created and never read live again. Joining the rate card at display
+    time would silently reprice every historical order the next time the
+    card changed -- which is the specific accident that versioned prices
+    (apps/catalogue/models.py) exist to prevent, and it would undo them.
+    `source_price` records *which* published rate was copied, for anyone
+    who later asks why a line says what it says; it is provenance, not the
+    authority.
+
+    This is also what makes revenue attributable per analysis. Before it, a
+    TestRequest reached the rate card only through its method's
+    many-to-many, so a method sold both standalone and inside a panel could
+    not be credited to either without guessing (see apps/analytics).
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    offering = models.ForeignKey(
+        "catalogue.ServiceOffering", on_delete=models.PROTECT, related_name="order_items",
+        help_text="PROTECTed: an offering that has been sold cannot be deleted out from under the orders that reference it.",
+    )
+    quantity = models.PositiveIntegerField(default=1)
+
+    # --- the price snapshot ----------------------------------------------
+    unit_amount = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text="The offering's published figure at the moment this line was created. Whether it includes VAT is stated by vat_treatment.",
+    )
+    currency = models.CharField(max_length=3, default="PHP")
+    vat_treatment = models.CharField(max_length=16, choices=VAT_TREATMENT_CHOICES, default=VatTreatment.EXCLUSIVE)
+    vat_rate_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("12.00"))
+    discount_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("0.00"),
+        help_text="Applied to the line before VAT is split out, so a discounted VAT-inclusive rate still reconciles.",
+    )
+    source_price = models.ForeignKey(
+        "catalogue.OfferingPrice", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="Which published rate this line copied. Provenance only -- the snapshot above is what the line is billed at.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    history = HistoricalRecords(get_user=get_history_user)
+
+    class Meta:
+        db_table = "order_item"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gt=0), name="order_item_quantity_positive"),
+            models.CheckConstraint(check=models.Q(unit_amount__gte=0), name="order_item_unit_amount_not_negative"),
+            models.CheckConstraint(
+                check=models.Q(discount_pct__gte=0) & models.Q(discount_pct__lte=100),
+                name="order_item_discount_within_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"OrderItem #{self.id}: {self.quantity} x {self.offering_id}"
+
+    @property
+    def line_amount(self) -> Decimal:
+        """The line as quoted: unit x quantity, less the discount, before the VAT split."""
+        gross_of_discount = self.unit_amount * self.quantity
+        return money(gross_of_discount * (Decimal(1) - self.discount_pct / Decimal(100)))
+
+    @property
+    def net_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[0]
+
+    @property
+    def vat_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[1]
+
+    @property
+    def gross_amount(self) -> Decimal:
+        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[2]
 
 
 class Sample(FSMModelMixin, models.Model):

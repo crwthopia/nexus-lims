@@ -20,7 +20,7 @@ from apps.catalogue.models import OfferingPrice, ServiceOffering
 from apps.documents.models import Document, DocumentVersion
 from apps.equipment.models import CalibrationRecord, Instrument, StandardReagent
 from apps.investigations.models import Investigation
-from apps.samples.models import Order, Sample, ServiceLine
+from apps.samples.models import Order, OrderItem, Sample, ServiceLine
 from apps.testing.models import TestMethod, TestRequest, TestResult
 from apps.training.models import CreditNote, Enrollment, TrainingCourse, TrainingSession
 
@@ -249,3 +249,21 @@ class OfferingPriceFactory(factory.django.DjangoModelFactory):
     amount = "1000.00"
     vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE
     effective_from = factory.LazyFunction(lambda: timezone.localdate())
+
+
+class OrderItemFactory(factory.django.DjangoModelFactory):
+    """
+    Note the price fields: a real line snapshots them from the catalogue
+    (apps/samples/order_services.add_item). The factory sets them directly
+    so a test can state the money it means without building a rate card
+    first -- tests that care about the snapshot itself call add_item.
+    """
+
+    class Meta:
+        model = OrderItem
+
+    order = factory.SubFactory(OrderFactory)
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    quantity = 1
+    unit_amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE

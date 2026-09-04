@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **555-test automated regression suite** (`backend/tests/`, pytest +
+- **583-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,7 +55,7 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **267-test frontend suite** (Vitest + React Testing Library): 209 in the
+- **279-test frontend suite** (Vitest + React Testing Library): 221 in the
   Staff Console and 58 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
@@ -680,18 +680,90 @@ to the portal is a business decision NASAT has not made, and the safe
 default for a price list is that it goes out when someone decides it
 should, not because an endpoint happened to exist.
 
-### What this does not do yet
+## Order lines and invoice lines
 
-Being explicit, since the dashboard depends on the difference:
+The catalogue says what things cost; these say what was sold and what was
+billed. Two models, and the same idea in both: **a price is copied, never
+joined.**
 
-- **Orders still have no line items.** An `Order` groups samples; it does
-  not yet say which offerings were bought, so revenue cannot be attributed
-  per analysis from real invoices. What the catalogue makes possible *now*
-  is list-price analysis — work performed × the rate in force — which is a
-  useful and honest number as long as it is labelled as one.
-- **`Invoice.amount` is still a typed lump sum.** Wiring invoices to
-  order lines changes a money path, so it is its own change with its own
-  tests rather than a rider on this one.
+- **`OrderItem`** — an offering, a quantity, a discount, and a snapshot of
+  the rate in force when the line was created: `unit_amount`,
+  `vat_treatment`, `vat_rate_pct`, `currency`. `source_price` records
+  *which* published rate was copied, for anyone who later asks why a line
+  says what it says; it is provenance, and none of the numbers are read
+  from it.
+- **`InvoiceLine`** — the same fields again, snapshotted a second time when
+  the invoice is raised, plus the description. An invoice is a document
+  that was sent to someone: renaming an offering, repricing the rate card,
+  or editing the order afterwards must not rewrite what a customer was told
+  they owed.
+
+Joining the rate card at display time instead would silently reprice every
+historical order the next time the card changed — undoing the versioned
+prices the catalogue exists to provide. The API enforces the same thing
+from the other end: a client sends an offering, a quantity and a discount,
+and never a price. A `unit_amount` a caller could set is a price a caller
+could invent, and the rate card would be decoration.
+
+### The totals
+
+`Invoice.amount` stays what it always was — what is owed, gross — and stays
+writable, because a walk-in job or a training enrollment is still billed as
+one typed figure. What changes is that an invoice raised *from an order*
+now has lines, and `amount` is maintained from them rather than typed, so
+the total and the breakdown cannot disagree. `net_total` and `vat_total`
+are derived per request and are **null** on an invoice with no lines:
+there is no split to report on a typed figure, and inventing one would be a
+claim the record does not support.
+
+Discounts apply to the line *before* VAT is split out, so a discounted
+VAT-inclusive rate still reconciles. The arithmetic itself moved into
+`apps/catalogue/money.py` when the third caller appeared — three copies of
+a VAT split would eventually have been two.
+
+### One line, one billing
+
+`InvoiceLine.order_item` carries a unique constraint, which is what makes a
+double-clicked Raise Invoice button fail at the database instead of
+charging a customer twice. Raising an invoice bills the *unbilled*
+remainder, so an order part-billed in March and finished in July gets a
+second invoice for the July work rather than a duplicate of March's.
+
+**Voiding an invoice does not free its lines to be billed again**, and that
+limit is worth stating plainly because the friendlier behaviour is the
+obvious thing to want. Excepting void invoices from the constraint cannot
+be expressed in an index — a Postgres index predicate cannot reach into
+`invoice` to read a status — so it would have to be either a copy of that
+status kept on the line, which is drift in the money path, or nothing but a
+check in application code that a future caller can bypass by not calling
+it. The escape hatch is the honest one: an invoice raised in error is
+voided *and* the order corrected. Re-adding the line records that the first
+sale was cancelled and a new one made, which is what happened.
+
+### Who does what
+
+Ordering is intake work, so adding a line takes **Sample Receiver**, Lab
+Supervisor or System Administrator — whoever books a sample in is who says
+what was ordered. Billing it is a different job with a different list
+(`BILLING_WRITE_ROLES`). Both tables carry RLS policies joining through
+`order` and `invoice` respectively, written *before* the portal reads them:
+`apps/training/migrations/0002` exists because two tables were reachable
+from the portal with nothing behind a viewset's own `.filter()`, and a
+policy written before the endpoint cannot be forgotten when the endpoint
+arrives.
+
+### What this changes on the dashboard
+
+**Billed revenue is now a real figure, and it sits beside list price rather
+than replacing it.** They answer different questions: list price is what
+the bench is worth and is knowable immediately; billed is money and lags by
+however long invoicing takes. Collapsing them into one number called
+"revenue" would misstate whichever one the reader assumed.
+
+Billed money is also attributed *exactly*, which is the deeper payoff: the
+volume figures still reach the rate card through a method's many-to-many
+and can be ambiguous, but an invoice line names its offering, so a peso
+knows what it was for even when the test request that earned it does not.
 
 
 ## Dashboard
@@ -701,14 +773,13 @@ are carrying it, how fast it is turning work around, and what is stuck.
 One endpoint (`GET /api/v1/analytics/dashboard/`) computes all of it —
 the browser is never handed a worklist to reduce for itself.
 
-**Every money figure on it is list-price value, and the screen says so in
-those words.** Work performed × the rate in force *on the day it was
-requested* — which is a real answer to "what is this bench worth", and is
-not revenue. An `Order` has no line items yet and `Invoice.amount` is a
-typed lump sum, so nothing in the database records what was actually
-billed for a given analysis. The distinction is one word wide and would
-be the easiest thing on the screen to get wrong, so a test asserts the
-word "revenue" does not appear on it.
+**Two money figures, side by side, and neither is called "revenue".**
+*List price* is work performed × the rate in force *on the day it was
+requested*: what the bench is worth, knowable the moment the catalogue
+exists. *Billed* is what invoice lines actually say: real money, but only
+for work already invoiced, which lags the bench by however long billing
+takes. Collapsing them into one figure would misstate whichever one the
+reader assumed, so a test asserts the word "revenue" appears on neither.
 
 Pricing per *day* rather than at today's rate is what the catalogue's
 versioned prices bought: a July increase must not retroactively revalue
@@ -730,8 +801,11 @@ shown under the ranking rather than dropped or spread evenly:
 
 Dropping them would understate the bench; spreading them evenly would
 invent the split. The count on screen is the honest measure of how much
-catalogue work is left, and it links to the Catalogue to do it. Order
-lines are what will resolve the ambiguous case properly.
+catalogue work is left, and it links to the Catalogue to do it.
+
+This applies to the *volume* figures only. **Billed money is attributed
+exactly**, because an invoice line names its offering — so a peso knows
+what it was for even when the test request that earned it does not.
 
 ### Which analyses are "leading" has two answers
 
@@ -2364,7 +2438,7 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 267 tests: 209 in
+frontend (`npm run test:watch` while developing). 279 tests: 221 in
 `frontend/`, 58 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
@@ -2384,10 +2458,13 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
 | `backend/tests/test_catalogue.py` | The VAT arithmetic both ways, including that a net-quoted and a gross-quoted rate for the same money produce identical figures, that net + VAT equals gross at awkward amounts, half-up rounding, and a zero-rated service; price windows staying contiguous when prices arrive in order, back-dated, or corrected the same day; role gating on write and openness on read; the training refusal at both the serializer and the check constraint; code normalisation; price history being read-only over the API |
 | `backend/tests/test_price_list_import.py` | The importer against the file people actually have: peso signs, thousands separators and blank spacer rows accepted; a missing column, an unparseable price or an unmatched method reference refused with the line number; a bad row rolling back the whole file; a dry run writing nothing; re-import updating the offering and superseding its price |
+| `frontend/src/pages/InvoiceDetail.test.tsx` (lines) | The billed breakdown with its own net/VAT/gross per line; an invoice with no lines saying it was billed as one amount rather than showing an empty table; no VAT split reported where the record has none |
 | `frontend/src/pages/CatalogueList.test.tsx` | That the list shows the server's net and gross rather than the published amount, so two rows quoted differently can be compared; an unpriced offering saying so instead of showing zero; a withdrawn one marked rather than hidden; the add form gated on `CATALOGUE_WRITE_ROLES`; Training absent from the service-line choices; the filter reaching the query string |
 | `frontend/src/pages/OfferingDetail.test.tsx` | Repricing posting a *new* price rather than patching the current one (patching is what would erase the history the versioning exists for); the effective date omitted when blank rather than sent as `""`; a back-dated price sent when one is given; the superseded window shown in the history; the required role named rather than the panel hidden |
 | `backend/tests/test_analytics_dashboard.py` | Work valued at the rate in force on the day it was requested (a later rise must not revalue earlier work), and net of VAT however the rate was quoted; the three unattributable cases counted rather than dropped or spread; a withdrawn offering no longer attracting work; the tail folded against whichever measure is ranking; the comparison window being the preceding period of equal length; a quiet month rendered as a zero rather than a gap; turnaround measured arrival→approval; rates being for the period while queue depths are current state; a malformed date as a 400 and a misspelled rank as the default view |
 | `frontend/src/pages/Dashboard.test.tsx` | That the money is called list price and never "revenue"; the comparison omitted when the previous period was empty; the unattributed count and its reasons on screen (and silent when there are none); the ranking re-asking the server rather than re-sorting locally; the mix legend carrying labels and values rather than relying on colour; "nothing approved" instead of a zero turnaround |
+| `backend/tests/test_order_lines.py` | The snapshot holding when the catalogue is repriced; an unpriced offering refused rather than sold for nothing; a discount applied before the VAT split; net + VAT equalling gross on every line; an invoice copying its lines and totalling them; the description surviving a rename of the offering; editing an order line not changing an issued invoice; one billing per order line, at the service *and* at the database; only the unbilled remainder invoiced; the void limit and its escape hatch; a mixed-currency order refused rather than summed; role gating on both jobs; a client-sent `unit_amount` ignored; the RLS policies on both new tables, straight at the database |
+| `frontend/src/pages/OrderDetail.test.tsx` | That the form posts an offering and quantity and never a price; the invoice button naming how many lines it will bill and disabling once there are none; billed lines marked; the two role gates; the order's net/VAT/gross totals |
 | `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
 | `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
