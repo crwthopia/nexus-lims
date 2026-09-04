@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useApproveDocumentVersion, useCreateDocumentVersion, useDocument } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_WRITE_ROLES } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 export function DocumentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -39,16 +40,15 @@ export function DocumentDetail() {
 
   return (
     <div>
-      <Link to="/documents" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to documents
-      </Link>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{doc.title}</h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {DOCUMENT_TYPE_LABELS[doc.type]}
-        </span>
-      </div>
+      <PageHeader
+        back={{ to: "/documents", label: "documents" }}
+        title={doc.title}
+        meta={
+          <span className="badge badge-neutral">
+            {DOCUMENT_TYPE_LABELS[doc.type]}
+          </span>
+        }
+      />
 
       <div className="card" style={{ padding: 20, marginBottom: 20 }}>
         <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Versions</h2>
@@ -119,7 +119,7 @@ export function DocumentDetail() {
                 value={versionNumber}
                 onChange={(e) => setVersionNumber(Number(e.target.value))}
                 required
-                style={{ ...inputStyle, width: 80 }}
+                style={{ width: 80 }}
               />
             </label>
             <label style={{ ...labelStyle, flex: 1, minWidth: 220 }}>
@@ -129,12 +129,11 @@ export function DocumentDetail() {
                 onChange={(e) => setFileId(e.target.value)}
                 placeholder="oss://documents/sop-123-v2.pdf"
                 required
-                style={inputStyle}
               />
             </label>
             <label style={labelStyle}>
               Effective date (optional)
-              <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} style={inputStyle} />
+              <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
             </label>
             <button type="submit" className="btn btn-primary" disabled={createVersion.isPending}>
               Add version
@@ -152,10 +151,3 @@ export function DocumentDetail() {
 }
 
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" } as const;
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

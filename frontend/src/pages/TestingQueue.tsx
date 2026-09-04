@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTestRequestQueue } from "../api/queries";
+import { PageHeader } from "../components/PageHeader";
 import { TEST_REQUEST_STATUS_LABELS } from "../api/types";
 
 /**
@@ -14,18 +15,13 @@ export function TestingQueue() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Testing Queue</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          Test requests assigned or in progress.
-        </p>
-      </div>
+      <PageHeader title="Testing Queue" description="Test requests assigned or in progress." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load the queue.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load the queue.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>Nothing queued up right now.</div>
+          <div className="card-state">Nothing queued up right now.</div>
         )}
         {data && data.results.length > 0 && (
           <table>

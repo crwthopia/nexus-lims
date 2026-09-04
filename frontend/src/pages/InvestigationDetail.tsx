@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useCloseInvestigation, useInvestigation, useUpdateInvestigation } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { INVESTIGATION_STATUS_LABELS, INVESTIGATION_TYPE_LABELS, INVESTIGATION_WRITE_ROLES } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 export function InvestigationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -36,25 +37,19 @@ export function InvestigationDetail() {
 
   return (
     <div>
-      <Link to="/investigations" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to investigations
-      </Link>
+      <PageHeader
+        back={{ to: "/investigations", label: "investigations" }}
+        title={`Investigation #${investigation.id}${
+          investigation.related_sample_code ? ` — ${investigation.related_sample_code}` : ""
+        }`}
+        meta={<span className="badge badge-neutral">{INVESTIGATION_STATUS_LABELS[investigation.status]}</span>}
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>
-          Investigation #{investigation.id}
-          {investigation.related_sample_code && ` — ${investigation.related_sample_code}`}
-        </h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {INVESTIGATION_STATUS_LABELS[investigation.status]}
-        </span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-            <dl style={fieldGridStyle}>
+            <dl className="field-grid">
               <Field label="Type" value={INVESTIGATION_TYPE_LABELS[investigation.type]} />
               <Field
                 label="Related to"
@@ -137,7 +132,6 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" } as const;
 const textareaStyle = {
   padding: 8,

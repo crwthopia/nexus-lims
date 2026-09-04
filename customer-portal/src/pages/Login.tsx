@@ -28,14 +28,14 @@ export function Login() {
   const errorMessage = errorBody?.detail ?? (login.isError ? "Something went wrong." : null);
 
   return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "70vh" }}>
+    <div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           login.mutate();
         }}
-        className="card"
-        style={{ padding: 40, width: 360, display: "flex", flexDirection: "column", gap: 14 }}
+        className="card auth-card"
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         <div>
           <h1 style={{ fontSize: "1.3rem", margin: "0 0 4px" }}>Log in</h1>

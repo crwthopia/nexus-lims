@@ -25,6 +25,7 @@ import {
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
 import type { ReportType } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -85,20 +86,19 @@ export function SampleDetail() {
 
   return (
     <div>
-      <Link to="/samples" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to samples
-      </Link>
+      <PageHeader
+        back={{ to: "/samples", label: "samples" }}
+        title={sample.unique_sample_code}
+        meta={
+          <StatusBadge status={sample.status} />
+        }
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{sample.unique_sample_code}</h1>
-        <StatusBadge status={sample.status} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-            <dl style={fieldGridStyle}>
+            <dl className="field-grid">
               <Field label="Service line" value={sample.service_line.replace("_", " ")} />
               <Field label="Client reference" value={sample.client_reference || "—"} />
               <Field label="Sampling point" value={sample.sampling_point || "—"} />
@@ -422,4 +422,3 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;

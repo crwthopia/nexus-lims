@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInvestigations } from "../api/queries";
+import { PageHeader } from "../components/PageHeader";
 import { INVESTIGATION_STATUS_LABELS, INVESTIGATION_TYPE_LABELS } from "../api/types";
 import type { InvestigationStatus } from "../api/types";
 
@@ -13,28 +14,26 @@ export function InvestigationsList() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Investigations</h1>
-          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-            Nonconforming-work CAPA tracking (ISO/IEC 17025:2017 7.10).
-          </p>
-        </div>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="btn" style={{ cursor: "pointer" }}>
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {INVESTIGATION_STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Investigations"
+        description="Nonconforming-work CAPA tracking (ISO/IEC 17025:2017 7.10)."
+        actions={
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="btn" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {INVESTIGATION_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        }
+      />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load investigations.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load investigations.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No investigations match this filter.</div>
+          <div className="card-state">No investigations match this filter.</div>
         )}
         {data && data.results.length > 0 && (
           <table>

@@ -55,8 +55,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **224-test frontend suite** (Vitest + React Testing Library): 168 in the
-  Staff Console and 56 in the Customer Portal — every screen on either side
+- **242-test frontend suite** (Vitest + React Testing Library): 184 in the
+  Staff Console and 58 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -494,11 +494,15 @@ inherited colour, which means unreadable text in precisely one theme.
 
 Both frontends run a dark theme matched to the **NexusCRM Enterprise**
 console, so the two products read as one suite. It lives entirely in the
-`:root` custom properties at the top of each app's `src/index.css` — the two
-blocks are identical, and are the only place colour is defined. There are no
-hardcoded colours left in any component. That last point is what made adding
-a second theme cheap: a light palette is a second block of the same tokens,
-not a sweep through the components.
+`:root` custom properties at the top of each app's `src/index.css` — the
+colour tokens are identical across the two apps, value for value, and are
+the only place colour is defined. (The non-colour tokens differ by one
+line: the console declares the widths of a nav rail the portal doesn't
+have.) There are no hardcoded colours left in any component. That last
+point is what made adding a second theme cheap: a light palette is a second
+block of the same tokens, not a sweep through the components — and the same
+is what made the shell cheap, since `--color-sidebar`, `--color-accent-soft`
+and `--color-overlay` were three more measured pairs rather than a redesign.
 
 **A light theme ships alongside it, opt-in.** Dark stays the default,
 because the palette was matched to a sibling product on purpose and
@@ -555,6 +559,105 @@ statuses that mean the same thing to a reviewer share a colour, so a
 worklist reads as four groups (waiting / in progress / accepted / rejected)
 rather than eleven unrelated hues, and `disposed` is muted rather than red
 because it is terminal bookkeeping, not a failure.
+
+## Console shell
+
+The Staff Console is a **fixed nav rail, a sticky header, and the routed
+screen between them** — the arrangement the NexusCRM Enterprise console
+uses, so someone who works in both products doesn't relearn where things
+are. It replaced a single row of top-level links, which had simply run out
+of room: ten destinations across one line left no space for a section
+label, so Documents, Investigations and System failures sat beside Billing
+with nothing saying they were different kinds of work.
+
+**The navigation is data, not JSX** (`components/navigation.ts`), and three
+things read it: the rail, the command palette, and the header's title. That
+is the whole reason it exists as a list — the first time the rail and the
+palette were written separately, they disagreed, and the failure mode is a
+destination the palette offers to a user whose roles can't open it. Role
+gating is applied once, on the way out of `navSections()`.
+
+Sections mirror how a lab divides the work rather than the URL space:
+**Worklist** (Samples, the two queues, Reports) is where an analyst lives,
+**Quality** is what a QA officer opens, **Laboratory** is equipment and
+training, **Commercial** is billing. Empty sections are dropped, so a
+`sample_receiver` never sees a "Worklist" heading over a lone link.
+
+Three states are remembered or derived rather than assumed:
+
+- **Collapsed**, persisted per browser (`src/sidebar.ts`), for people who
+  want the full width on a wide worklist. Every `localStorage` access is
+  wrapped for the same reason the theme's is — private browsing throws on
+  *access*, and a rail preference must never be why the console won't load.
+  Collapsed hides labels from the accessibility tree along with the pixels,
+  and each item keeps a `title`.
+- **Narrow** (below 900px), where the rail leaves the flow entirely and
+  becomes a drawer over the content with a dismissing scrim, because 248px
+  out of a phone's width is most of the screen. The collapsed icon rail is
+  deliberately *not* reused there: 72px still costs a fifth of a small
+  screen and leaves labels nowhere. The drawer closes on every route
+  change, which is the classic mobile-nav bug.
+- **The header's title**, derived from the path. A detail route names the
+  section it belongs to (`/samples/8` → "Samples"), including the three
+  whose collection isn't itself in the rail — `/test-requests/…`,
+  `/training-sessions/…`, `/invoices/…`. The record's own identity is the
+  page's `<h1>`, not the header's.
+
+**Ctrl-K / Cmd-K opens a command palette**, and it searches the console's
+own destinations and nothing else. That limit is deliberate rather than a
+first step: the API has no cross-resource search endpoint, and a palette
+that quietly returned only sections while looking like it searched records
+would be worse than one that never claimed to. The list is a listbox owned
+by the input (`aria-activedescendant`), not a set of focusable buttons —
+focus has to stay in the field so typing keeps filtering while the arrows
+move the selection — and the highlight follows the pointer as well as the
+keyboard, so the mouse and Enter can never disagree about which row opens.
+
+**The Customer Portal keeps a header, not a rail, on purpose.** The console
+is somewhere staff spend a shift; the portal is six links a customer visits
+to collect a report, on a page a signed-out visitor can land on cold, since
+the Training catalogue is browsable with no account (Blueprint Section
+4.3). A rail on that page reads as an application someone has been dropped
+into the middle of. Everything below the header — cards, tables, buttons,
+badges, forms, the whole token set — is the same CSS in both apps, so they
+still read as one product.
+
+### Shared component styles
+
+The palette was never the problem; the *shapes* were. Alongside the colour
+tokens, `index.css` now carries a radius scale (`--radius-sm`/`--radius`/
+`--radius-lg`/`--radius-pill`), a per-theme shadow scale (a black shadow is
+invisible on a near-black canvas, so dark leans on its borders and light on
+a genuine soft drop), and the shell metrics the rail and header share.
+
+Five patterns that had been copy-pasted into every screen are now classes,
+which is what makes a breakpoint able to reach them at all:
+
+| Class | Was |
+|---|---|
+| `.page-header` (+ `PageHeader.tsx`) | An inline title/description/actions block written out again in each of the seventeen routed screens (every one but the login card), drifted to three bottom margins and two title sizes |
+| `.card-state` | `style={{ padding: 24 }}` — and two colour variants of it — on every loading, empty and error line |
+| `.table-card` | `style={{ overflow: "hidden" }}`, which clipped the table's corners but let a wide worklist push the whole page sideways on a phone; it now scrolls inside the card |
+| `.detail-grid` / `.stack` | The `2fr 1fr` detail layout, inline in six pages and therefore unreachable from a media query — it now stacks below 900px instead of squeezing the Actions panel into a third of a phone |
+| `.field-grid` | The same `fieldGridStyle` const, copied into six pages; one column below 560px |
+
+The nine copies of `inputStyle` are gone the same way, and fixing a real
+bug on the way out: each one re-bordered its control with the hairline
+`--color-border` (1.22:1), which this README's own Theme section says is
+wrong for a form control — the global rule uses `--color-border-strong`
+(3.27:1), which is what WCAG 1.4.11 asks of the only thing marking a
+control's extent.
+
+Two accessibility rules hold throughout the chrome. **An active state
+carries a tint *and* a colour change, never a tint alone** — a background
+difference is the first thing a high-contrast setting takes away (WCAG
+1.4.1) — which is why the rail's current item, the portal's current link
+and the palette's selected row all change both. And **every icon is
+decorative**: `components/Icon.tsx` renders one table of path data with
+`aria-hidden` on each glyph, so the control around it carries the name. The
+icon-only header buttons (theme, log out, rail toggle) are named by
+`aria-label`; the theme toggle's name is still "Light"/"Dark", naming what
+happens rather than what is true now, exactly as the text button did.
 
 ## Staff Console (React frontend)
 
@@ -855,10 +958,9 @@ stops once nothing is in flight — generation is a background job, so a row
 becomes `ready` with no user action, but an idle screen shouldn't be
 issuing requests.
 
-Adding this eighth nav item pushed the header past the 1100px content
-container, so the header bar is now full-width while `<main>` stays
-constrained — a two-row header or a clipped nav link being the alternative.
-Below about 1100px the nav scrolls horizontally rather than wrapping.
+Reports was the eighth entry in what was then a single row of links across
+the top, which is what eventually made that row untenable and produced the
+nav rail described under Console shell above.
 
 ## Customer Portal (React frontend)
 
@@ -2030,8 +2132,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 212 tests: 156 in
-`frontend/`, 56 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 242 tests: 184 in
+`frontend/`, 58 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client
@@ -2048,6 +2150,8 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/components/ProtectedRoute.test.tsx` | The three-state guard: renders for an authenticated user, redirects on 401/403, and shows a loading state *instead of redirecting* while `staff-me` is still in flight |
 | `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
 | `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
+| `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
+| `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
 | `frontend/src/pages/BillingList.test.tsx` | `BILLING_WRITE_ROLES` gating the invoice form (a hand-maintained mirror of the server's list); billing an order vs an enrollment sending exactly one of the two; the status filter reaching the API |
 | `frontend/src/pages/EquipmentList.test.tsx` | `EQUIPMENT_WRITE_ROLES` gating both write forms; filtering for `out_of_calibration`, the status FR-E3-02 sets automatically; a reagent's CRM reference and expiry being sent, since FR-C3-02 depends on both |
@@ -2061,6 +2165,7 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
 | `customer-portal/src/pages/Account.test.tsx` | The three states of TOTP enrollment: no secret revealed before one is requested, `mfa_enabled` **not** claimed between issuing the secret and confirming a code, the account re-read after confirming rather than set locally, and the code field surviving a wrong code so the customer isn't sent back to a secret they already stored |
 | `customer-portal/src/pages/MyCreditNotes.test.tsx` | Redemption posting the entered enrollment; no control offered on an already-applied note; a click with nothing entered posting nothing rather than `NaN`; per-row entry state, so typing against one note cannot redeem another |
+| `customer-portal/src/components/Layout.test.tsx` | One header serving both audiences: a signed-out visitor offered the public Training catalogue and a way in, with none of the links that would 403; a customer offered their own screens, their account, and a way out |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
 
 Two things worth knowing before adding more:

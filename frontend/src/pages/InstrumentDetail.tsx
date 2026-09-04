@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useCalibrationRecordsForInstrument, useCreateCalibrationRecord, useInstrument } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { EQUIPMENT_WRITE_ROLES, INSTRUMENT_MODEL_LABELS, INSTRUMENT_STATUS_LABELS } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 export function InstrumentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,22 +31,21 @@ export function InstrumentDetail() {
 
   return (
     <div>
-      <Link to="/equipment" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to equipment
-      </Link>
+      <PageHeader
+        back={{ to: "/equipment", label: "equipment" }}
+        title={instrument.name}
+        meta={
+          <span className="badge badge-neutral">
+            {INSTRUMENT_STATUS_LABELS[instrument.status]}
+          </span>
+        }
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{instrument.name}</h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {INSTRUMENT_STATUS_LABELS[instrument.status]}
-        </span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-            <dl style={fieldGridStyle}>
+            <dl className="field-grid">
               <Field label="Model" value={INSTRUMENT_MODEL_LABELS[instrument.model]} />
               <Field label="Calibration due" value={instrument.calibration_due_date || "—"} />
               <Field label="Custodian" value={instrument.custodian_display_name || "—"} />
@@ -100,7 +100,7 @@ export function InstrumentDetail() {
             <form onSubmit={submitCalibration} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={labelStyle}>
                 Result
-                <select value={result} onChange={(e) => setResult(e.target.value)} style={inputStyle}>
+                <select value={result} onChange={(e) => setResult(e.target.value)}>
                   <option value="pass">Pass</option>
                   <option value="fail">Fail</option>
                   <option value="conditional">Conditional</option>
@@ -108,7 +108,7 @@ export function InstrumentDetail() {
               </label>
               <label style={labelStyle}>
                 Next due date
-                <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} required style={inputStyle} />
+                <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} required />
               </label>
               <button type="submit" className="btn btn-primary" disabled={logCalibration.isPending} style={{ alignSelf: "start" }}>
                 Log calibration
@@ -133,12 +133,4 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" } as const;
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

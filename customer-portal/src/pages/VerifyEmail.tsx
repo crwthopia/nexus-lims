@@ -24,8 +24,8 @@ export function VerifyEmail() {
   }, [token]);
 
   return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "70vh" }}>
-      <div className="card" style={{ padding: 40, width: 420, textAlign: "center" }}>
+    <div>
+      <div className="card auth-card" style={{ textAlign: "center" }}>
         {!token && (
           <>
             <h1 style={{ fontSize: "1.3rem", margin: "0 0 8px" }}>Missing verification link</h1>

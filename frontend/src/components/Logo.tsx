@@ -9,7 +9,7 @@
  * outside the apps.
  */
 
-export function Logo({ compact = false }: { compact?: boolean }) {
+export function Logo({ compact = false, wordmark = true }: { compact?: boolean; wordmark?: boolean }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
       <svg viewBox="0 0 96 96" width={compact ? 24 : 28} height={compact ? 24 : 28} aria-hidden="true">
@@ -31,10 +31,14 @@ export function Logo({ compact = false }: { compact?: boolean }) {
           <circle cx="67" cy="63" r="10" />
         </g>
       </svg>
-      <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.01em" }}>
-        <span style={{ color: "var(--color-text)" }}>Nexus</span>
-        <span style={{ color: "var(--color-brand)" }}>LIMS</span>
-      </span>
+      {/* The collapsed nav rail shows the mark alone; the tile is the part
+          that still reads at 24px, and the wordmark would only be clipped. */}
+      {wordmark && (
+        <span className="brand-text" style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.01em" }}>
+          <span style={{ color: "var(--color-text)" }}>Nexus</span>
+          <span style={{ color: "var(--color-brand)" }}>LIMS</span>
+        </span>
+      )}
     </span>
   );
 }

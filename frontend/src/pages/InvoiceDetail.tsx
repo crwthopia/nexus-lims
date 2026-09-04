@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useInvoice, useRecordPayment } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
@@ -10,6 +10,7 @@ import {
   PAYMENT_STATUS_LABELS,
 } from "../api/types";
 import type { PaymentMethod, PaymentStatus } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const PAYMENT_STATUSES = Object.keys(PAYMENT_STATUS_LABELS) as PaymentStatus[];
@@ -40,25 +41,17 @@ export function InvoiceDetail() {
 
   return (
     <div>
-      <Link to="/billing" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to billing
-      </Link>
+      <PageHeader
+        back={{ to: "/billing", label: "billing" }}
+        title={`Invoice #${invoice.id}${invoice.customer_email ? ` — ${invoice.customer_email}` : ""}`}
+        meta={<span className="badge badge-neutral">{INVOICE_STATUS_LABELS[invoice.status]}</span>}
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>
-          Invoice #{invoice.id}
-          {invoice.customer_email && ` — ${invoice.customer_email}`}
-        </h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {INVOICE_STATUS_LABELS[invoice.status]}
-        </span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-            <dl style={fieldGridStyle}>
+            <dl className="field-grid">
               <Field label="Amount" value={`${invoice.currency} ${invoice.amount}`} />
               <Field label="Order" value={invoice.order ? `#${invoice.order}` : "—"} />
               <Field label="Enrollment" value={invoice.enrollment ? `#${invoice.enrollment}` : "—"} />
@@ -103,7 +96,7 @@ export function InvoiceDetail() {
             <form onSubmit={submitPayment} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={labelStyle}>
                 Method
-                <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} style={inputStyle}>
+                <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
                   {PAYMENT_METHODS.map((m) => (
                     <option key={m} value={m}>
                       {PAYMENT_METHOD_LABELS[m]}
@@ -113,11 +106,11 @@ export function InvoiceDetail() {
               </label>
               <label style={labelStyle}>
                 Reference number
-                <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} style={inputStyle} />
+                <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
               </label>
               <label style={labelStyle}>
                 Status
-                <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)} style={inputStyle}>
+                <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)}>
                   {PAYMENT_STATUSES.map((s) => (
                     <option key={s} value={s}>
                       {PAYMENT_STATUS_LABELS[s]}
@@ -127,7 +120,7 @@ export function InvoiceDetail() {
               </label>
               <label style={labelStyle}>
                 Notes
-                <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+                <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
               </label>
               <button type="submit" className="btn btn-primary" disabled={recordPayment.isPending} style={{ alignSelf: "start" }}>
                 Record payment
@@ -152,12 +145,4 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" } as const;
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

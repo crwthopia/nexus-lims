@@ -4,6 +4,7 @@ import { useReportDownloadUrl, useReports } from "../api/queries";
 import { REPORT_STATUS_LABELS, REPORT_TYPE_LABELS } from "../api/types";
 import type { Report, ReportStatus } from "../api/types";
 import { describeApiError } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
 
 const STATUS_OPTIONS = Object.keys(REPORT_STATUS_LABELS) as ReportStatus[];
 
@@ -45,29 +46,26 @@ export function ReportsList() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Reports</h1>
-          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-            Generated COAs and certificates (Blueprint Section 2.1a). Reports are generated from an
-            approved sample.
-          </p>
-        </div>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="btn" style={{ cursor: "pointer" }}>
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {REPORT_STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Reports"
+        description="Generated COAs and certificates (Blueprint Section 2.1a). Reports are generated from an approved sample."
+        actions={
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="btn" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {REPORT_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        }
+      />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load reports.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load reports.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>
+          <div className="card-state">
             No reports match this filter. Generate one from an approved sample.
           </div>
         )}

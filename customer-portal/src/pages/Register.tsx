@@ -28,8 +28,8 @@ export function Register() {
 
   if (submitted) {
     return (
-      <div style={{ display: "grid", placeItems: "center", minHeight: "70vh" }}>
-        <div className="card" style={{ padding: 40, width: 420, textAlign: "center" }}>
+      <div>
+        <div className="card auth-card" style={{ textAlign: "center" }}>
           <h1 style={{ fontSize: "1.3rem", margin: "0 0 12px" }}>Check your email</h1>
           <p style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
             We sent a verification link to <strong>{email}</strong>. Click it to activate your account, then log in.
@@ -43,14 +43,14 @@ export function Register() {
   }
 
   return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "70vh" }}>
+    <div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           register.mutate();
         }}
-        className="card"
-        style={{ padding: 40, width: 380, display: "flex", flexDirection: "column", gap: 14 }}
+        className="card auth-card"
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         <div>
           <h1 style={{ fontSize: "1.3rem", margin: "0 0 4px" }}>Create an account</h1>

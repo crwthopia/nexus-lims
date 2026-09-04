@@ -31,7 +31,7 @@ export function Logo({ compact = false }: { compact?: boolean }) {
           <circle cx="67" cy="63" r="10" />
         </g>
       </svg>
-      <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.01em" }}>
+      <span className="brand-text" style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.01em" }}>
         <span style={{ color: "var(--color-text)" }}>Nexus</span>
         <span style={{ color: "var(--color-brand)" }}>LIMS</span>
       </span>

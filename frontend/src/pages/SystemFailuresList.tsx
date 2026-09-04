@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import { describeApiError } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
 import {
   useAcknowledgeSystemFailure,
   useCloseSystemFailure,
@@ -125,18 +126,14 @@ export function SystemFailuresList() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>System failures</h1>
-          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-            Failures the system recorded, and what was done about them (ISO/IEC 17025:2017 7.11.3(e)).
-          </p>
-        </div>
+      <PageHeader
+        title="System failures"
+        description="Failures the system recorded, and what was done about them (ISO/IEC 17025:2017 7.11.3(e))."
+        actions={
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           className="btn"
-          style={{ cursor: "pointer" }}
           aria-label="Filter by status"
         >
           <option value="open,acknowledged">Needs attention</option>
@@ -147,13 +144,14 @@ export function SystemFailuresList() {
             </option>
           ))}
         </select>
-      </div>
+        }
+      />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load the failure register.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load the failure register.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>
+          <div className="card-state">
             No system failures match this filter.
           </div>
         )}

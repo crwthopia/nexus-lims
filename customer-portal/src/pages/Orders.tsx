@@ -1,21 +1,19 @@
 import { useMyOrders } from "../api/queries";
 import { ORDER_STATUS_LABELS } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 export function Orders() {
   const { data, isLoading, isError } = useMyOrders();
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>My Orders</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>Lab testing orders placed through NexusLIMS.</p>
-      </div>
+      <PageHeader title="My Orders" description="Lab testing orders placed through NexusLIMS." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load your orders.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load your orders.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No orders yet.</div>
+          <div className="card-state">No orders yet.</div>
         )}
         {data && data.results.length > 0 && (
           <table>

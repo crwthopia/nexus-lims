@@ -3,6 +3,7 @@ import { useEnrollInSession, useTrainingCourses, useTrainingSessions } from "../
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { TRAINING_SESSION_STATUS_LABELS } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 /** Public per the backend (AllowAny) -- Blueprint 4.3: customers browse the catalog before necessarily having an account. */
 export function TrainingCatalog() {
@@ -15,18 +16,13 @@ export function TrainingCatalog() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Training</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          CPD-accredited technical trainings and workshops.
-        </p>
-      </div>
+      <PageHeader title="Training" description="CPD-accredited technical trainings and workshops." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load the training catalog.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load the training catalog.</div>}
         {sessions && sessions.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No sessions scheduled right now.</div>
+          <div className="card-state">No sessions scheduled right now.</div>
         )}
         {sessions && sessions.results.length > 0 && (
           <table>

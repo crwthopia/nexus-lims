@@ -9,8 +9,8 @@ export function Login() {
   if (isAuthenticated) return <Navigate to="/samples" replace />;
 
   return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "80vh" }}>
-      <div className="card" style={{ padding: 40, width: 360, textAlign: "center" }}>
+    <div className="container">
+      <div className="card auth-card">
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
           <h1 style={{ fontSize: "1.4rem", margin: 0 }}>
             <Logo />
