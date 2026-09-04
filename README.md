@@ -45,7 +45,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **583-test automated regression suite** (`backend/tests/`, pytest +
+- **589-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,8 +55,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **279-test frontend suite** (Vitest + React Testing Library): 221 in the
-  Staff Console and 58 in the Customer Portal — every screen on either side
+- **286-test frontend suite** (Vitest + React Testing Library): 221 in the
+  Staff Console and 65 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -751,6 +751,38 @@ what was ordered. Billing it is a different job with a different list
 from the portal with nothing behind a viewset's own `.filter()`, and a
 policy written before the endpoint cannot be forgotten when the endpoint
 arrives.
+
+### What the customer sees
+
+A customer opens one of their own orders and gets the lines: what was
+tested, how much of it, at what rate, what discount was applied, and what
+each line comes to. The rate is shown deliberately — it is their money, and
+a line that hid what it cost, or quietly folded a discount into the total,
+would be worse than one that said nothing.
+
+The serializer is narrower than the console's, and the omissions are the
+point. `source_price` is a catalogue row id: provenance for whoever has to
+explain a figure internally, and a handle on a rate card the customer
+cannot open. The offering's own id is the same. What is left is what
+somebody checking an order against their own records actually needs.
+
+Three details the page gets right rather than conveniently:
+
+- **Every line says how its rate was quoted** (`+ VAT` or `incl. VAT`).
+  NASAT publishes both ways, and a column of figures where that differs
+  silently invites exactly the wrong comparison.
+- **The totals are summed server-side.** A net line added to a gross one
+  is out by 12%, and this is the page a customer is most likely to check
+  against an invoice. An order priced in two currencies reports no single
+  total at all — a sum of two currencies is money in neither.
+- **"Not yet invoiced" is shown, not hidden.** Someone looking at an order
+  wants to know what is still coming, and the invoices raised against it
+  are listed underneath so "what was I billed for this" is one click.
+
+The RLS policy on `order_item` was already there, written a change earlier
+precisely so that it could not be forgotten when this endpoint arrived. A
+test drives it straight at the database, and another checks that one
+customer asking for another's order gets a 404.
 
 ### What this changes on the dashboard
 
@@ -2438,8 +2470,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 279 tests: 221 in
-`frontend/`, 58 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 286 tests: 221 in
+`frontend/`, 65 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client
@@ -2464,6 +2496,7 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `backend/tests/test_analytics_dashboard.py` | Work valued at the rate in force on the day it was requested (a later rise must not revalue earlier work), and net of VAT however the rate was quoted; the three unattributable cases counted rather than dropped or spread; a withdrawn offering no longer attracting work; the tail folded against whichever measure is ranking; the comparison window being the preceding period of equal length; a quiet month rendered as a zero rather than a gap; turnaround measured arrival→approval; rates being for the period while queue depths are current state; a malformed date as a 400 and a misspelled rank as the default view |
 | `frontend/src/pages/Dashboard.test.tsx` | That the money is called list price and never "revenue"; the comparison omitted when the previous period was empty; the unattributed count and its reasons on screen (and silent when there are none); the ranking re-asking the server rather than re-sorting locally; the mix legend carrying labels and values rather than relying on colour; "nothing approved" instead of a zero turnaround |
 | `backend/tests/test_order_lines.py` | The snapshot holding when the catalogue is repriced; an unpriced offering refused rather than sold for nothing; a discount applied before the VAT split; net + VAT equalling gross on every line; an invoice copying its lines and totalling them; the description surviving a rename of the offering; editing an order line not changing an issued invoice; one billing per order line, at the service *and* at the database; only the unbilled remainder invoiced; the void limit and its escape hatch; a mixed-currency order refused rather than summed; role gating on both jobs; a client-sent `unit_amount` ignored; the RLS policies on both new tables, straight at the database |
+| `customer-portal/src/pages/OrderDetail.test.tsx` | The customer's own order: each line with its rate and total; the VAT treatment stated per line; the server's totals used rather than the column summed locally; a two-currency order saying so instead of totalling; what is still to be invoiced; the invoices raised against the order |
 | `frontend/src/pages/OrderDetail.test.tsx` | That the form posts an offering and quantity and never a price; the invoice button naming how many lines it will bill and disabling once there are none; billed lines marked; the two role gates; the order's net/VAT/gross totals |
 | `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
 | `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |

@@ -1,5 +1,5 @@
 import { useMySamples } from "../api/queries";
-import { SAMPLE_STATUS_LABELS } from "../api/types";
+import { SAMPLE_STATUS_LABELS, SERVICE_LINE_LABELS } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 
 export function Samples() {
@@ -30,7 +30,7 @@ export function Samples() {
               {data.results.map((s) => (
                 <tr key={s.id} style={{ cursor: "default" }}>
                   <td style={{ fontWeight: 600 }}>{s.unique_sample_code}</td>
-                  <td>{s.service_line.replace("_", " ")}</td>
+                  <td>{SERVICE_LINE_LABELS[s.service_line]}</td>
                   <td>{SAMPLE_STATUS_LABELS[s.status]}</td>
                   <td>{s.client_reference || "—"}</td>
                   <td>{new Date(s.created_at).toLocaleDateString()}</td>

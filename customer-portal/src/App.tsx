@@ -5,6 +5,7 @@ import { Register } from "./pages/Register";
 import { VerifyEmail } from "./pages/VerifyEmail";
 import { Login } from "./pages/Login";
 import { Orders } from "./pages/Orders";
+import { OrderDetail } from "./pages/OrderDetail";
 import { Samples } from "./pages/Samples";
 import { TrainingCatalog } from "./pages/TrainingCatalog";
 import { MyEnrollments } from "./pages/MyEnrollments";
@@ -27,6 +28,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Orders />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/orders/:id"
+          element={
+            <ProtectedRoute>
+              <OrderDetail />
             </ProtectedRoute>
           }
         />

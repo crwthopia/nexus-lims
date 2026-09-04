@@ -1,13 +1,18 @@
+import { useNavigate } from "react-router-dom";
 import { useMyOrders } from "../api/queries";
-import { ORDER_STATUS_LABELS } from "../api/types";
+import { ORDER_STATUS_LABELS, SERVICE_LINE_LABELS } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 
 export function Orders() {
   const { data, isLoading, isError } = useMyOrders();
+  const navigate = useNavigate();
 
   return (
     <div>
-      <PageHeader title="My Orders" description="Lab testing orders placed through NexusLIMS." />
+      <PageHeader
+        title="My Orders"
+        description="Lab testing orders placed through NexusLIMS. Open one to see what it covers and what it costs."
+      />
 
       <div className="card table-card">
         {isLoading && <div className="card-state">Loading…</div>}
@@ -27,9 +32,9 @@ export function Orders() {
             </thead>
             <tbody>
               {data.results.map((o) => (
-                <tr key={o.id} style={{ cursor: "default" }}>
+                <tr key={o.id} onClick={() => navigate(`/orders/${o.id}`)}>
                   <td style={{ fontWeight: 600 }}>#{o.id}</td>
-                  <td>{o.service_line.replace("_", " ")}</td>
+                  <td>{SERVICE_LINE_LABELS[o.service_line]}</td>
                   <td>{ORDER_STATUS_LABELS[o.status]}</td>
                   <td>{new Date(o.created_at).toLocaleDateString()}</td>
                 </tr>

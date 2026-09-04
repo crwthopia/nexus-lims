@@ -4,6 +4,7 @@ import type {
   CreditNote,
   Enrollment,
   Invoice,
+  MyOrderDetail,
   MyReport,
   Order,
   Paginated,
@@ -17,6 +18,18 @@ export function useMyOrders() {
   return useQuery({
     queryKey: ["my-orders"],
     queryFn: () => apiGet<Paginated<Order>>("/my/orders/"),
+  });
+}
+
+/**
+ * One order with its lines. Separate from the list query rather than
+ * fattening it: a customer with two hundred orders should not fetch every
+ * line of every one of them to look at a table of four columns.
+ */
+export function useMyOrder(id: number) {
+  return useQuery({
+    queryKey: ["my-orders", id],
+    queryFn: () => apiGet<MyOrderDetail>(`/my/orders/${id}/`),
   });
 }
 

@@ -410,3 +410,102 @@ def test_a_customer_sees_the_breakdown_of_their_own_invoice(login_as_customer):
     assert row["amount"] == "1120.00"
     assert row["net_total"] == "1000.00"
     assert row["vat_total"] == "120.00"
+
+
+# --- what the customer sees ------------------------------------------------
+
+
+def test_a_customer_sees_their_own_order_lines_and_totals(login_as_customer):
+    from tests.factories import CustomerUserFactory
+
+    customer = CustomerUserFactory()
+    order = OrderFactory(customer=customer)
+    offering = offering_at("1200.00", code="WQ-BOD5", name="BOD (5-day)")
+    order_services.add_item(order, offering, quantity=2)
+
+    client = login_as_customer(customer)
+    response = client.get(f"/api/v1/my/orders/{order.id}/")
+
+    assert response.status_code == 200
+    line = response.data["items"][0]
+    assert (line["offering_code"], line["quantity"]) == ("WQ-BOD5", 2)
+    assert line["unit_amount"] == "1200.00"
+    assert line["net_amount"] == "2400.00"
+    assert line["gross_amount"] == "2688.00"
+    assert response.data["totals"] == {
+        "net": "2400.00", "vat": "288.00", "gross": "2688.00", "currency": "PHP",
+    }
+
+
+def test_the_customer_view_omits_the_internal_provenance():
+    """
+    `source_price` is a catalogue row id: provenance for whoever has to
+    explain a figure internally, and a handle on a rate card the customer
+    cannot open. The staff serializer carries it; this one does not.
+    """
+    from apps.samples.serializers import CustomerOrderItemSerializer, OrderItemSerializer
+
+    assert "source_price" in OrderItemSerializer.Meta.fields
+    assert "source_price" not in CustomerOrderItemSerializer.Meta.fields
+    assert "offering" not in CustomerOrderItemSerializer.Meta.fields
+
+
+def test_a_customer_cannot_read_another_customers_order(login_as_customer):
+    from tests.factories import CustomerUserFactory
+
+    mine, theirs = CustomerUserFactory(), CustomerUserFactory()
+    their_order = OrderFactory(customer=theirs)
+    OrderItemFactory(order=their_order)
+
+    client = login_as_customer(mine)
+    response = client.get(f"/api/v1/my/orders/{their_order.id}/")
+
+    assert response.status_code == 404
+
+
+def test_the_customer_sees_which_lines_have_been_billed(login_as_customer):
+    from tests.factories import CustomerUserFactory
+
+    customer = CustomerUserFactory()
+    order = OrderFactory(customer=customer)
+    OrderItemFactory(order=order, unit_amount=Decimal("1000.00"))
+    billing.invoice_order(order)
+    OrderItemFactory(order=order, unit_amount=Decimal("500.00"))
+
+    client = login_as_customer(customer)
+    response = client.get(f"/api/v1/my/orders/{order.id}/")
+
+    assert [line["is_invoiced"] for line in response.data["items"]] == [True, False]
+    assert [invoice["amount"] for invoice in response.data["invoices"]] == ["1120.00"]
+
+
+def test_a_voided_invoice_does_not_show_a_line_as_billed(login_as_customer):
+    """A withdrawn invoice is not a bill, and the customer's view says so."""
+    from tests.factories import CustomerUserFactory
+
+    customer = CustomerUserFactory()
+    order = OrderFactory(customer=customer)
+    OrderItemFactory(order=order)
+    invoice = billing.invoice_order(order)
+    invoice.status = Invoice.Status.VOID
+    invoice.save()
+
+    client = login_as_customer(customer)
+    response = client.get(f"/api/v1/my/orders/{order.id}/")
+
+    assert response.data["items"][0]["is_invoiced"] is False
+
+
+def test_an_order_mixing_currencies_reports_no_single_total(login_as_customer):
+    """Summing two currencies would produce a number that is money in neither."""
+    from tests.factories import CustomerUserFactory
+
+    customer = CustomerUserFactory()
+    order = OrderFactory(customer=customer)
+    OrderItemFactory(order=order, currency="PHP")
+    OrderItemFactory(order=order, currency="USD")
+
+    client = login_as_customer(customer)
+    response = client.get(f"/api/v1/my/orders/{order.id}/")
+
+    assert response.data["totals"]["currency"] is None

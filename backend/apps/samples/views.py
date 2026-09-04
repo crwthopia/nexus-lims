@@ -36,6 +36,7 @@ from apps.samples import order_services
 from apps.samples.models import ChainOfCustodyEvent, Order, Sample
 from apps.samples.serializers import (
     ChainOfCustodyEventSerializer,
+    CustomerOrderDetailSerializer,
     OrderDetailSerializer,
     OrderItemSerializer,
     OrderSerializer,
@@ -160,8 +161,14 @@ class CustomerOrderViewSet(viewsets.ReadOnlyModelViewSet):
     authentication_classes = [CustomerSessionAuthentication]
     permission_classes = [IsCustomerAuthenticated]
 
+    def get_serializer_class(self):
+        return CustomerOrderDetailSerializer if self.action == "retrieve" else OrderSerializer
+
     def get_queryset(self):
-        return Order.objects.filter(customer=self.request.user)
+        return (
+            Order.objects.filter(customer=self.request.user)
+            .prefetch_related("items__offering", "items__invoice_lines__invoice", "invoices")
+        )
 
 
 class CustomerSampleViewSet(viewsets.ReadOnlyModelViewSet):
