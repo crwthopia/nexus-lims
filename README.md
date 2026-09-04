@@ -33,8 +33,10 @@ was invented outside that grounding.
   per-customer data isolation at the database level.
 - **Celery worker + beat**, running the two automations the Blueprint
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
-  capacity check), with a real S3-compatible object storage client
-  (`boto3` against OSS's S3-compatible API — see Object storage below).
+  capacity check) plus three the system grew of its own — audit partition
+  creation, the open-failure digest, and quotation expiry — with a real
+  S3-compatible object storage client (`boto3` against OSS's S3-compatible
+  API — see Object storage below).
 - **System failure register** (ISO/IEC 17025:2017 7.11.3(e)): the failures
   the system already detected are recorded durably instead of only logged,
   with what it did about them automatically, and a corrective action a
@@ -45,7 +47,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **589-test automated regression suite** (`backend/tests/`, pytest +
+- **623-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,8 +57,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **286-test frontend suite** (Vitest + React Testing Library): 221 in the
-  Staff Console and 65 in the Customer Portal — every screen on either side
+- **302-test frontend suite** (Vitest + React Testing Library): 230 in the
+  Staff Console and 72 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -679,6 +681,116 @@ not a correction anyone passing can make.
 to the portal is a business decision NASAT has not made, and the safe
 default for a price list is that it goes out when someone decides it
 should, not because an endpoint happened to exist.
+
+## Quotations
+
+The priced offer that goes out **before** any work starts — and the one
+step of the commercial path that was still happening outside the system: a
+spreadsheet, an email, and a PO number typed into an order afterwards. The
+consequence was that the price a customer was quoted and the price they
+were billed had no connection anybody could check, which is the same gap
+versioned prices and snapshotted lines exist to close everywhere else.
+
+Two rules give a quotation its meaning, and both are enforced rather than
+described.
+
+### A sent quotation is immutable
+
+It is a document a customer is reading. Editing it afterwards would make
+"what did we quote them" unanswerable. So `PATCH` on anything but a draft
+is a 400, the console takes the line form away the moment it is sent
+(rather than leaving it there to fail on save, which teaches the rule one
+click at a time), and the supported way to change an offer is
+`POST /quotations/{id}/revise/` — a fresh draft carrying the same lines,
+pointing back at what it `supersedes`. The revision copies the lines **at
+their quoted figures**, so changing one line does not silently reprice the
+rest.
+
+### A quote honoured is a quote honoured
+
+Accepting copies the quoted figures onto the order at the rate quoted,
+however the rate card has moved since. Without that a quotation is a
+non-binding guess the customer discovers at invoice time, and
+`test_a_quote_honoured_is_a_quote_honoured` is the test that says so: a
+nine-fold price rise between sending and accepting leaves the order line at
+the quoted ₱1,000.
+
+Accepting attaches to the order it was quoted against, or opens one if
+there wasn't one. Either way the lines land as ordinary `OrderItem`s, so
+everything downstream — invoicing, the dashboard's billed revenue,
+the customer's own view of the order — works with no further wiring.
+
+### The lifecycle
+
+`draft → sent → accepted | declined | expired`, as a django-fsm `FSMField`
+with `protected=True`, so `status` moves through a transition or not at
+all — the rule Sample and TrainingSession already live by. The guards sit
+in `services.py` rather than on the transitions, because each one is a
+check *plus* a state change *plus* a side effect and `@transition` is only
+the middle of the three:
+
+- **send** refuses an empty quotation (it offers nothing) and one whose
+  validity has already passed (it would be expired on arrival), stamps
+  `sent_at`, and emails the customer a notice through the one notification
+  path the rest of the system uses. The notice carries the reference, the
+  total and the date; the breakdown stays in their account, where it
+  cannot be altered in transit or forwarded to somebody it was not priced
+  for — the same rule as report PDFs.
+- **accept** refuses an expired offer, writes the order lines, and records
+  **who** answered. A customer accepting in the portal and a coordinator
+  recording a purchase order that arrived by email are both real, and
+  `accepted_by_customer` vs `decided_by_staff` tells them apart. Declining
+  deliberately writes neither of those as an acceptance: reusing that
+  column for a no would make an acceptance audit say something false.
+
+### Expiry is a date, not a status
+
+`valid_until` is on the row, so `is_expired` is always true the moment it
+lapses, and acceptance checks *that* rather than the stored status — a
+quotation that lapsed at midnight is lapsed at 00:01, not at 03:30 when
+the nightly sweep runs. What the sweep
+(`apps.quotations.tasks.expire_quotations`, in the beat schedule beside
+the other three) adds is the state: without it a lapsed offer sits in
+`sent` forever and every count of what is outstanding is wrong. Both
+screens show "lapsed" from the date rather than the status, so neither
+invites a click that the server will refuse.
+
+### References
+
+`Q-2026-00042`, assigned on first save and derived from the id rather than
+a counter: two quotations created at once cannot collide over one, because
+the database has already decided which is which. Gaps are fine — a
+quotation is not a tax-sequential document, and a deleted draft leaving a
+hole in the numbering is better than a lock on every insert.
+
+### Who sees what
+
+Staff build and issue (`/quotations/`, gated to Sample Receiver, Training
+Coordinator, Lab Supervisor, System Administrator); the customer being
+quoted reads and answers their own (`/my/quotations/`). Two viewsets over
+one table rather than one with a branch, as with every other
+customer-facing resource here — a single viewset that decides what to show
+by inspecting `request.user` is one refactor away from showing the wrong
+person the wrong offer.
+
+**Drafts are excluded from the customer's list**, and that is correctness
+rather than tidiness: a draft is an offer the lab has not made, and
+showing someone a price nobody has decided on is worse than showing them
+nothing. RLS policies on `quotation` and `quotation_item` scope both
+tables to the customer they belong to — the most disclosure-sensitive rows
+in the commercial chain, since what one customer was quoted is exactly
+what another must not see.
+
+### One shared definition of a priced line
+
+Quotation lines made three copies of the same shape (order, invoice,
+quotation), so the snapshot fields and the VAT arithmetic moved into an
+abstract `PricedLine` (`apps/catalogue/lines.py`). Abstract rather than a
+table: these lines share nothing at the database level and should not
+share a primary key space or a delete cascade. What they share is a
+definition — and the first thing that would have drifted between three
+copies is the VAT split, which is the part nobody notices is wrong.
+
 
 ## Order lines and invoice lines
 
@@ -2470,8 +2582,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 286 tests: 221 in
-`frontend/`, 65 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 302 tests: 230 in
+`frontend/`, 72 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client
@@ -2495,8 +2607,11 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/pages/OfferingDetail.test.tsx` | Repricing posting a *new* price rather than patching the current one (patching is what would erase the history the versioning exists for); the effective date omitted when blank rather than sent as `""`; a back-dated price sent when one is given; the superseded window shown in the history; the required role named rather than the panel hidden |
 | `backend/tests/test_analytics_dashboard.py` | Work valued at the rate in force on the day it was requested (a later rise must not revalue earlier work), and net of VAT however the rate was quoted; the three unattributable cases counted rather than dropped or spread; a withdrawn offering no longer attracting work; the tail folded against whichever measure is ranking; the comparison window being the preceding period of equal length; a quiet month rendered as a zero rather than a gap; turnaround measured arrival→approval; rates being for the period while queue depths are current state; a malformed date as a 400 and a misspelled rank as the default view |
 | `frontend/src/pages/Dashboard.test.tsx` | That the money is called list price and never "revenue"; the comparison omitted when the previous period was empty; the unattributed count and its reasons on screen (and silent when there are none); the ranking re-asking the server rather than re-sorting locally; the mix legend carrying labels and values rather than relying on colour; "nothing approved" instead of a zero turnaround |
+| `backend/tests/test_quotations.py` | The two invariants: a sent quotation refusing new lines and refusing a PATCH, and a quote honoured after a nine-fold price rise; an empty or already-lapsed quotation refused at send; the notice carrying no figures a customer could not check in their account; acceptance writing the order lines, attaching to an existing order where there is one, and refusing when expired, declined or still a draft; who answered recorded, and declining never claiming a customer accepted; revision copying lines at their quoted figures; the sweep moving lapsed offers out of `sent` and leaving answered ones alone; expiry true from the date rather than the sweep; the customer seeing sent quotations but not drafts, accepting their own and not another's, and the RLS policies straight at the database |
 | `backend/tests/test_order_lines.py` | The snapshot holding when the catalogue is repriced; an unpriced offering refused rather than sold for nothing; a discount applied before the VAT split; net + VAT equalling gross on every line; an invoice copying its lines and totalling them; the description surviving a rename of the offering; editing an order line not changing an issued invoice; one billing per order line, at the service *and* at the database; only the unbilled remainder invoiced; the void limit and its escape hatch; a mixed-currency order refused rather than summed; role gating on both jobs; a client-sent `unit_amount` ignored; the RLS policies on both new tables, straight at the database |
 | `customer-portal/src/pages/OrderDetail.test.tsx` | The customer's own order: each line with its rate and total; the VAT treatment stated per line; the server's totals used rather than the column summed locally; a two-currency order saying so instead of totalling; what is still to be invoiced; the invoices raised against the order |
+| `frontend/src/pages/QuotationDetail.test.tsx` | That a draft is a form and a sent quotation is a document — the line form disappears rather than failing on save; an empty quotation not sendable; both answers offered on a sent one, and acceptance disabled once lapsed; the transition posted rather than a status patched; the order an accepted quotation became; the required role named rather than the panel hidden |
+| `customer-portal/src/pages/QuotationDetail.test.tsx` | The terms beside the button — total including VAT and the lapse date; how each rate was quoted; accept posted as an action rather than a status; no answer offered on a lapsed offer (decided from the date, not the stored status); what was decided shown once answered; the server's refusal surfaced rather than swallowed |
 | `frontend/src/pages/OrderDetail.test.tsx` | That the form posts an offering and quantity and never a price; the invoice button naming how many lines it will bill and disabling once there are none; billed lines marked; the two role gates; the order's net/VAT/gross totals |
 | `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
 | `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |

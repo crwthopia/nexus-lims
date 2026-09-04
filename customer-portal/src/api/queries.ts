@@ -5,6 +5,8 @@ import type {
   Enrollment,
   Invoice,
   MyOrderDetail,
+  MyQuotation,
+  MyQuotationDetail,
   MyReport,
   Order,
   Paginated,
@@ -117,5 +119,39 @@ export function useMyReports() {
 export function useReportDownloadUrl() {
   return useMutation({
     mutationFn: (reportId: number) => apiGet<ReportDownload>(`/my/reports/${reportId}/download/`),
+  });
+}
+
+
+// --- Quotations -----------------------------------------------------------
+
+export function useMyQuotations() {
+  return useQuery({
+    queryKey: ["my-quotations"],
+    queryFn: () => apiGet<Paginated<MyQuotation>>("/my/quotations/"),
+  });
+}
+
+export function useMyQuotation(id: number) {
+  return useQuery({
+    queryKey: ["my-quotations", id],
+    queryFn: () => apiGet<MyQuotationDetail>(`/my/quotations/${id}/`),
+  });
+}
+
+/**
+ * Accepting is a commitment, so it is a POST to a named action rather than
+ * a status field the client sets: the server checks the offer is still
+ * open, copies the quoted figures onto an order, and records who answered.
+ */
+export function useAnswerQuotation(id: number, answer: "accept" | "decline") {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<MyQuotationDetail>(`/my/quotations/${id}/${answer}/`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-quotations"] });
+      queryClient.invalidateQueries({ queryKey: ["my-orders"] });
+    },
   });
 }

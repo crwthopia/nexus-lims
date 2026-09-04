@@ -347,8 +347,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 220px;
-  padding: 5px 10px 5px 5px;
+  padding: 5px;
   border-radius: var(--radius-pill);
   color: var(--color-text);
   font-size: 0.82rem;

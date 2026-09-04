@@ -6,6 +6,8 @@ import { VerifyEmail } from "./pages/VerifyEmail";
 import { Login } from "./pages/Login";
 import { Orders } from "./pages/Orders";
 import { OrderDetail } from "./pages/OrderDetail";
+import { Quotations } from "./pages/Quotations";
+import { QuotationDetail } from "./pages/QuotationDetail";
 import { Samples } from "./pages/Samples";
 import { TrainingCatalog } from "./pages/TrainingCatalog";
 import { MyEnrollments } from "./pages/MyEnrollments";
@@ -36,6 +38,22 @@ function App() {
           element={
             <ProtectedRoute>
               <OrderDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/quotations"
+          element={
+            <ProtectedRoute>
+              <Quotations />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/quotations/:id"
+          element={
+            <ProtectedRoute>
+              <QuotationDetail />
             </ProtectedRoute>
           }
         />

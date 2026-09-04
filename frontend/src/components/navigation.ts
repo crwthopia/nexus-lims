@@ -78,6 +78,7 @@ const SECTIONS: NavSection[] = [
   {
     label: "Commercial",
     items: [
+      { to: "/quotations", label: "Quotations", icon: "quotation", keywords: "quotes offers pricing proposals" },
       { to: "/catalogue", label: "Catalogue", icon: "catalogue", keywords: "services price list rate card offerings analyses" },
       { to: "/billing", label: "Billing", icon: "billing", keywords: "invoices payments credit notes" },
     ],

@@ -1,8 +1,8 @@
 requirement,clauses,implementation,test
-FR-C1-01,,backend/apps/samples/models.py:218; backend/apps/samples/serializers.py:159,
-FR-C1-09,,backend/apps/samples/models.py:222; backend/apps/samples/views.py:254,
-FR-C1-13,,backend/apps/samples/models.py:226,
-FR-C3-01,,backend/apps/samples/models.py:230; backend/apps/testing/serializers.py:73,
+FR-C1-01,,backend/apps/samples/models.py:180; backend/apps/samples/serializers.py:159,
+FR-C1-09,,backend/apps/samples/models.py:184; backend/apps/samples/views.py:254,
+FR-C1-13,,backend/apps/samples/models.py:188,
+FR-C3-01,,backend/apps/samples/models.py:192; backend/apps/testing/serializers.py:73,
 FR-C3-02,Blueprint Section 7.1,backend/apps/accounts/models.py:90; backend/apps/accounts/permissions.py:2; backend/apps/testing/ingestion.py:39; backend/apps/testing/models.py:140; backend/apps/testing/serializers.py:101; frontend/src/pages/TestRequestDetail.tsx:131; backend/apps/accounts/migrations/0002_initial.py:23; backend/apps/testing/migrations/0001_initial.py:141,backend/tests/test_testing_competency_and_oos.py::test_certified_analyst_can_enter_result
 FR-C3-02,Blueprint Section 7.1,backend/apps/accounts/models.py:90; backend/apps/accounts/permissions.py:2; backend/apps/testing/ingestion.py:39; backend/apps/testing/models.py:140; backend/apps/testing/serializers.py:101; frontend/src/pages/TestRequestDetail.tsx:131; backend/apps/accounts/migrations/0002_initial.py:23; backend/apps/testing/migrations/0001_initial.py:141,backend/tests/test_testing_competency_and_oos.py::test_client_supplied_is_out_of_spec_is_ignored
 FR-C3-02,Blueprint Section 7.1,backend/apps/accounts/models.py:90; backend/apps/accounts/permissions.py:2; backend/apps/testing/ingestion.py:39; backend/apps/testing/models.py:140; backend/apps/testing/serializers.py:101; frontend/src/pages/TestRequestDetail.tsx:131; backend/apps/accounts/migrations/0002_initial.py:23; backend/apps/testing/migrations/0001_initial.py:141,backend/tests/test_testing_competency_and_oos.py::test_expired_standard_reagent_is_rejected
@@ -21,9 +21,9 @@ FR-C3-08,ISO/IEC 17025:2017 7.10,backend/apps/notifications/messages.py:147; bac
 FR-C3-08,ISO/IEC 17025:2017 7.10,backend/apps/notifications/messages.py:147; backend/apps/testing/ingestion.py:54; backend/apps/testing/models.py:134; backend/apps/testing/serializers.py:19; backend/apps/testing/migrations/0001_initial.py:108,backend/tests/test_testing_competency_and_oos.py::test_expired_standard_reagent_is_rejected
 FR-C3-08,ISO/IEC 17025:2017 7.10,backend/apps/notifications/messages.py:147; backend/apps/testing/ingestion.py:54; backend/apps/testing/models.py:134; backend/apps/testing/serializers.py:19; backend/apps/testing/migrations/0001_initial.py:108,backend/tests/test_testing_competency_and_oos.py::test_out_of_spec_value_is_auto_flagged
 FR-C3-08,ISO/IEC 17025:2017 7.10,backend/apps/notifications/messages.py:147; backend/apps/testing/ingestion.py:54; backend/apps/testing/models.py:134; backend/apps/testing/serializers.py:19; backend/apps/testing/migrations/0001_initial.py:108,backend/tests/test_testing_competency_and_oos.py::test_uncertified_analyst_is_blocked_from_entering_a_result
-FR-C4-04,,backend/apps/samples/models.py:234; backend/apps/samples/views.py:288; backend/apps/testing/models.py:84,
+FR-C4-04,,backend/apps/samples/models.py:196; backend/apps/samples/views.py:288; backend/apps/testing/models.py:84,
 FR-C4-05,,backend/apps/testing/models.py:134; backend/apps/testing/migrations/0001_initial.py:108,
-FR-C5-01,ASTM E1578-18 6.6.1; Blueprint Section 2.1,backend/apps/samples/models.py:239; backend/apps/samples/views.py:318,
+FR-C5-01,ASTM E1578-18 6.6.1; Blueprint Section 2.1,backend/apps/samples/models.py:201; backend/apps/samples/views.py:318,
 FR-C5-04,Blueprint Section 3.1,backend/apps/accounts/models.py:190; backend/apps/accounts/services.py:2,
 FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/apps/reporting/views.py:32; frontend/src/pages/SampleDetail.tsx:332,backend/tests/test_report_generation.py::test_a_client_supplied_file_id_and_status_are_ignored
 FR-C6-03,Blueprint Section 8.3,backend/apps/reporting/serializers.py:9; backend/apps/reporting/views.py:32; frontend/src/pages/SampleDetail.tsx:332,backend/tests/test_report_generation.py::test_a_coa_renders_the_sample_and_its_results

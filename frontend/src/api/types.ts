@@ -780,6 +780,76 @@ export interface InvoiceLine {
 /** ORDER_ITEM_WRITE_ROLES (backend/apps/samples/views.py) — keep in sync by hand. */
 export const ORDER_ITEM_WRITE_ROLES: RoleName[] = ["sample_receiver", "lab_supervisor", "system_administrator"];
 
+// --- Quotations -----------------------------------------------------------
+
+export type QuotationStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
+
+export const QUOTATION_STATUS_LABELS: Record<QuotationStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  declined: "Declined",
+  expired: "Expired",
+};
+
+export interface QuotationItem {
+  id: number;
+  quotation: number;
+  offering: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  source_price: number | null;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+}
+
+export interface Quotation {
+  id: number;
+  reference: string;
+  customer: number;
+  customer_email: string;
+  service_line: ServiceLine;
+  order: number | null;
+  supersedes: number | null;
+  status: QuotationStatus;
+  valid_until: string;
+  notes: string;
+  item_count: number;
+  /** Summed server-side; `currency` is null on a quotation priced in more than one. */
+  totals: { net: string; vat: string; gross: string; currency: string | null };
+  /**
+   * Past its date, whatever the status says. The nightly sweep moves `sent`
+   * rows to `expired`, but a quotation that lapsed at midnight is lapsed at
+   * 00:01 — so the screen trusts this, not the status.
+   */
+  is_expired: boolean;
+  sent_at: string | null;
+  decided_at: string | null;
+  prepared_by: number | null;
+  prepared_by_display_name: string | null;
+  created_at: string;
+}
+
+export interface QuotationDetail extends Quotation {
+  items: QuotationItem[];
+}
+
+/** QUOTATION_WRITE_ROLES (backend/apps/quotations/views.py) — keep in sync by hand. */
+export const QUOTATION_WRITE_ROLES: RoleName[] = [
+  "sample_receiver",
+  "training_coordinator",
+  "lab_supervisor",
+  "system_administrator",
+];
+
 // --- Dashboard analytics (backend/apps/analytics) -------------------------
 
 export interface LeadingAnalysis {

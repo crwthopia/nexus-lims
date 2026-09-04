@@ -20,6 +20,7 @@ from apps.catalogue.models import OfferingPrice, ServiceOffering
 from apps.documents.models import Document, DocumentVersion
 from apps.equipment.models import CalibrationRecord, Instrument, StandardReagent
 from apps.investigations.models import Investigation
+from apps.quotations.models import Quotation, QuotationItem
 from apps.samples.models import Order, OrderItem, Sample, ServiceLine
 from apps.testing.models import TestMethod, TestRequest, TestResult
 from apps.training.models import CreditNote, Enrollment, TrainingCourse, TrainingSession
@@ -263,6 +264,28 @@ class OrderItemFactory(factory.django.DjangoModelFactory):
         model = OrderItem
 
     order = factory.SubFactory(OrderFactory)
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    quantity = 1
+    unit_amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE
+
+
+class QuotationFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Quotation
+
+    customer = factory.SubFactory(CustomerUserFactory)
+    service_line = ServiceLine.WATER_ENVIRONMENTAL
+    valid_until = factory.LazyFunction(lambda: timezone.localdate() + datetime.timedelta(days=30))
+
+
+class QuotationItemFactory(factory.django.DjangoModelFactory):
+    """Sets the price fields directly; a real line snapshots them (quotations.services.add_item)."""
+
+    class Meta:
+        model = QuotationItem
+
+    quotation = factory.SubFactory(QuotationFactory)
     offering = factory.SubFactory(ServiceOfferingFactory)
     quantity = 1
     unit_amount = "1000.00"

@@ -14,8 +14,7 @@ from django.db import models
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
-from apps.catalogue.money import VatTreatment, money, split
-from apps.samples.models import VAT_TREATMENT_CHOICES
+from apps.catalogue.lines import PricedLine, sum_lines
 
 
 class Invoice(models.Model):
@@ -68,15 +67,10 @@ class Invoice(models.Model):
 
     def line_totals(self) -> tuple[Decimal, Decimal, Decimal]:
         """(net, vat, gross) summed over the lines. Zeroes when there are none."""
-        net = vat = gross = Decimal("0.00")
-        for line in self.lines.all():
-            net += line.net_amount
-            vat += line.vat_amount
-            gross += line.gross_amount
-        return money(net), money(vat), money(gross)
+        return sum_lines(self.lines.all())
 
 
-class InvoiceLine(models.Model):
+class InvoiceLine(PricedLine):
     """
     One billed line, snapshotted away from the order it came from.
 
@@ -98,12 +92,7 @@ class InvoiceLine(models.Model):
         max_length=255,
         help_text="What the customer sees. Snapshotted, so renaming an offering never rewrites an issued invoice.",
     )
-    quantity = models.PositiveIntegerField(default=1)
-    unit_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=3, default="PHP")
-    vat_treatment = models.CharField(max_length=16, choices=VAT_TREATMENT_CHOICES, default=VatTreatment.EXCLUSIVE)
-    vat_rate_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("12.00"))
-    discount_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    # quantity and the price snapshot come from PricedLine.
     created_at = models.DateTimeField(auto_now_add=True)
 
     history = HistoricalRecords(get_user=get_history_user)
@@ -131,21 +120,7 @@ class InvoiceLine(models.Model):
     def __str__(self):
         return f"InvoiceLine #{self.id}: {self.description}"
 
-    @property
-    def line_amount(self) -> Decimal:
-        return money(self.unit_amount * self.quantity * (Decimal(1) - self.discount_pct / Decimal(100)))
 
-    @property
-    def net_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[0]
-
-    @property
-    def vat_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[1]
-
-    @property
-    def gross_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[2]
 
 
 class Payment(models.Model):

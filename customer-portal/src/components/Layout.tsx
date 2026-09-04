@@ -39,6 +39,7 @@ export function Layout() {
                 <NavLink to="/" end>
                   Orders
                 </NavLink>
+                <NavLink to="/quotations">Quotations</NavLink>
                 <NavLink to="/samples">Samples</NavLink>
                 <NavLink to="/reports">Reports</NavLink>
               </>
@@ -46,8 +47,13 @@ export function Layout() {
             <NavLink to="/training">Training</NavLink>
             {user && (
               <>
-                <NavLink to="/my-enrollments">My Enrollments</NavLink>
-                <NavLink to="/my-credit-notes">Credit Notes</NavLink>
+                {/* "My Enrollments" and "Credit Notes" shortened when
+                    Quotations became the eighth entry: the row scrolls
+                    rather than wraps, and Invoices was falling off the
+                    right-hand edge at an ordinary desktop width. Every
+                    link here is already under "my" by definition. */}
+                <NavLink to="/my-enrollments">Enrollments</NavLink>
+                <NavLink to="/my-credit-notes">Credits</NavLink>
                 <NavLink to="/my-invoices">Invoices</NavLink>
               </>
             )}
@@ -59,11 +65,19 @@ export function Layout() {
             <ThemeToggle />
             {!isLoading && user && (
               <>
-                <Link to="/account" className="account-chip" title={user.email}>
+                {/*
+                  The avatar alone, with the address as its accessible name.
+                  The header row is capped by the same 1140px container as
+                  the page, so it does not grow with the window -- and once
+                  Quotations made eight nav entries, an address beside them
+                  pushed Invoices off the end at *every* width. A label
+                  that is also the first line of the Account page this
+                  links to is the right thing to lose.
+                */}
+                <Link to="/account" className="account-chip" title={user.email} aria-label={`Account: ${user.email}`}>
                   <span className="avatar" aria-hidden="true">
                     {initials(user.email)}
                   </span>
-                  <span className="truncate">{user.email}</span>
                 </Link>
                 <button type="button" className="icon-btn" onClick={handleLogout} aria-label="Log out" title="Log out">
                   <Icon name="logout" />

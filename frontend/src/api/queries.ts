@@ -15,6 +15,9 @@ import type {
   InvoiceDetail,
   OrderDetail,
   OrderItem,
+  Quotation,
+  QuotationDetail,
+  QuotationItem,
   Investigation,
   Paginated,
   Payment,
@@ -725,5 +728,66 @@ export function useInvoiceOrder(orderId: number) {
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
+  });
+}
+
+
+// --- Quotations -----------------------------------------------------------
+
+export function useQuotations(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
+  return useQuery({
+    queryKey: ["quotations", params],
+    queryFn: () => apiGet<Paginated<Quotation>>(`/quotations/${qs}`),
+  });
+}
+
+export function useQuotation(id: number) {
+  return useQuery({
+    queryKey: ["quotations", id],
+    queryFn: () => apiGet<QuotationDetail>(`/quotations/${id}/`),
+  });
+}
+
+export function useCreateQuotation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { customer: number; service_line: string; valid_until: string; notes?: string }) =>
+      apiPost<Quotation>("/quotations/", data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
+  });
+}
+
+/** Offering, quantity, discount — never a price. The rate card prices the line. */
+export function useAddQuotationItem(quotationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { offering: number; quantity?: number; discount_pct?: string }) =>
+      apiPost<QuotationItem>(`/quotations/${quotationId}/items/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations", quotationId] }),
+  });
+}
+
+/**
+ * send / accept / decline, which are FSM transitions rather than field
+ * writes — the server owns the state, and a PATCH could never reach it.
+ */
+export function useQuotationAction(quotationId: number, action: "send" | "accept" | "decline") {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<QuotationDetail>(`/quotations/${quotationId}/${action}/`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
+  });
+}
+
+export function useReviseQuotation(quotationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<QuotationDetail>(`/quotations/${quotationId}/revise/`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
   });
 }

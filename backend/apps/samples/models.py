@@ -16,16 +16,7 @@ from django_fsm import FSMField, FSMModelMixin, transition
 from simple_history.models import HistoricalRecords
 
 from apps.accounts.history import get_history_user
-from apps.catalogue.money import VatTreatment, money, split
-
-# The two ways a figure can be quoted, as model choices. Declared here as
-# well as on catalogue.OfferingPrice because a line's snapshot has to stand
-# on its own -- it is what the customer was billed, whatever the catalogue
-# says now.
-VAT_TREATMENT_CHOICES = [
-    (VatTreatment.EXCLUSIVE, "VAT-exclusive (net)"),
-    (VatTreatment.INCLUSIVE, "VAT-inclusive (gross)"),
-]
+from apps.catalogue.lines import VAT_TREATMENT_CHOICES, PricedLine  # noqa: F401  (re-exported for apps.billing)
 
 
 class ServiceLine(models.TextChoices):
@@ -64,7 +55,7 @@ class Order(models.Model):
         return f"Order #{self.id} ({self.get_service_line_display()})"
 
 
-class OrderItem(models.Model):
+class OrderItem(PricedLine):
     """
     One line of what a customer ordered: an offering, a quantity, and the
     price it was sold at.
@@ -91,20 +82,9 @@ class OrderItem(models.Model):
         "catalogue.ServiceOffering", on_delete=models.PROTECT, related_name="order_items",
         help_text="PROTECTed: an offering that has been sold cannot be deleted out from under the orders that reference it.",
     )
-    quantity = models.PositiveIntegerField(default=1)
-
-    # --- the price snapshot ----------------------------------------------
-    unit_amount = models.DecimalField(
-        max_digits=10, decimal_places=2,
-        help_text="The offering's published figure at the moment this line was created. Whether it includes VAT is stated by vat_treatment.",
-    )
-    currency = models.CharField(max_length=3, default="PHP")
-    vat_treatment = models.CharField(max_length=16, choices=VAT_TREATMENT_CHOICES, default=VatTreatment.EXCLUSIVE)
-    vat_rate_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("12.00"))
-    discount_pct = models.DecimalField(
-        max_digits=5, decimal_places=2, default=Decimal("0.00"),
-        help_text="Applied to the line before VAT is split out, so a discounted VAT-inclusive rate still reconciles.",
-    )
+    # quantity and the price snapshot come from PricedLine
+    # (apps/catalogue/lines.py), shared with the invoice and quotation
+    # lines that carry the same shape for the same reason.
     source_price = models.ForeignKey(
         "catalogue.OfferingPrice", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
         help_text="Which published rate this line copied. Provenance only -- the snapshot above is what the line is billed at.",
@@ -128,24 +108,6 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"OrderItem #{self.id}: {self.quantity} x {self.offering_id}"
-
-    @property
-    def line_amount(self) -> Decimal:
-        """The line as quoted: unit x quantity, less the discount, before the VAT split."""
-        gross_of_discount = self.unit_amount * self.quantity
-        return money(gross_of_discount * (Decimal(1) - self.discount_pct / Decimal(100)))
-
-    @property
-    def net_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[0]
-
-    @property
-    def vat_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[1]
-
-    @property
-    def gross_amount(self) -> Decimal:
-        return split(self.line_amount, self.vat_treatment, self.vat_rate_pct)[2]
 
 
 class Sample(FSMModelMixin, models.Model):

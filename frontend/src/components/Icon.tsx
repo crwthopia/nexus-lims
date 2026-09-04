@@ -22,6 +22,7 @@ export type IconName =
   | "reports"
   | "billing"
   | "catalogue"
+  | "quotation"
   | "system"
   | "testing"
   | "review"
@@ -46,6 +47,8 @@ const PATHS: Record<IconName, string[]> = {
   reports: ["M5 20V10", "M12 20V4", "M19 20v-7", "M3 20h18"],
   // Price tag: the rate card.
   catalogue: ["M12.6 3H20a1 1 0 0 1 1 1v7.4a2 2 0 0 1-.6 1.4l-7.6 7.6a2 2 0 0 1-2.8 0l-6-6a2 2 0 0 1 0-2.8l7.6-7.6a2 2 0 0 1 1.4-.6z", "M16.5 7.5h.01"],
+  // A document with a figure on it: the offer.
+  quotation: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h3", "M12 9.5h.01"],
   billing: ["M3 6h18v12H3z", "M3 10h18", "M7 15h4"],
   system: ["M12 3l8 3.5V12c0 4.6-3.2 7.7-8 9-4.8-1.3-8-4.4-8-9V6.5z", "M12 8.5v4", "M12 15.5h.01"],
   testing: ["M4 6h2l1 1 2-2", "M4 12h2l1 1 2-2", "M4 18h2l1 1 2-2", "M13 6h7", "M13 12h7", "M13 18h7"],

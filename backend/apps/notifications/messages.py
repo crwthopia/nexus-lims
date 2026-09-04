@@ -213,6 +213,22 @@ def _report_ready(record):
     )
 
 
+def _quotation_sent(record):
+    from apps.quotations.models import Quotation
+
+    quotation = _entity(record, Quotation)
+    _, _, gross = quotation.totals()
+    return (
+        f"Quotation {quotation.reference} is ready for you.\n\n"
+        f"Total: {gross} {quotation.items.first().currency if quotation.items.exists() else 'PHP'}, "
+        f"valid until {quotation.valid_until}.\n\n"
+        f"Sign in to the NexusLIMS Customer Portal to read the full breakdown and accept or decline it:\n\n"
+        f"{_portal_url('/quotations')}\n\n"
+        f"The quotation itself is not attached to this email -- the figures that matter are the ones in "
+        f"your account, where they cannot be altered in transit.\n"
+    )
+
+
 def _training_session_rescheduled(record):
     from apps.training.models import CreditNote, Enrollment
 
@@ -266,6 +282,7 @@ BODY_BUILDERS = {
     Kind.SAMPLE_PROGRESS: _sample_progress,
     Kind.SAMPLE_PROGRESS_DIGEST: _sample_progress_digest,
     Kind.REPORT_READY: _report_ready,
+    Kind.QUOTATION_SENT: _quotation_sent,
     Kind.TRAINING_SESSION_RESCHEDULED: _training_session_rescheduled,
     Kind.CUSTOMER_EMAIL_VERIFICATION: _customer_email_verification,
     Kind.CUSTOMER_DUPLICATE_REGISTRATION: _customer_duplicate_registration,
