@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useCreateDocument, useDocuments } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_WRITE_ROLES } from "../api/types";
 import type { DocumentType } from "../api/types";
 
@@ -33,12 +34,7 @@ export function DocumentsList() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Documents</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          SOPs, manuals, forms, and other controlled documents (FR-D1-02).
-        </p>
-      </div>
+      <PageHeader title="Documents" description="SOPs, manuals, forms, and other controlled documents (FR-D1-02)." />
 
       {canWrite && (
         <form
@@ -48,11 +44,11 @@ export function DocumentsList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1 }}>
             New document title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} required style={inputStyle} />
+            <input value={title} onChange={(e) => setTitle(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Type
-            <select value={type} onChange={(e) => setType(e.target.value as DocumentType)} style={inputStyle}>
+            <select value={type} onChange={(e) => setType(e.target.value as DocumentType)}>
               {DOCUMENT_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {DOCUMENT_TYPE_LABELS[t]}
@@ -69,11 +65,11 @@ export function DocumentsList() {
         </form>
       )}
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load documents.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load documents.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No documents yet.</div>
+          <div className="card-state">No documents yet.</div>
         )}
         {data && data.results.length > 0 && (
           <table>
@@ -100,10 +96,3 @@ export function DocumentsList() {
   );
 }
 
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useInvoice, useRecordPayment } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
@@ -10,6 +10,8 @@ import {
   PAYMENT_STATUS_LABELS,
 } from "../api/types";
 import type { PaymentMethod, PaymentStatus } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
+import { formatMoney } from "../money";
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const PAYMENT_STATUSES = Object.keys(PAYMENT_STATUS_LABELS) as PaymentStatus[];
@@ -40,30 +42,79 @@ export function InvoiceDetail() {
 
   return (
     <div>
-      <Link to="/billing" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to billing
-      </Link>
+      <PageHeader
+        back={{ to: "/billing", label: "billing" }}
+        title={`Invoice #${invoice.id}${invoice.customer_email ? ` — ${invoice.customer_email}` : ""}`}
+        meta={<span className="badge badge-neutral">{INVOICE_STATUS_LABELS[invoice.status]}</span>}
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>
-          Invoice #{invoice.id}
-          {invoice.customer_email && ` — ${invoice.customer_email}`}
-        </h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {INVOICE_STATUS_LABELS[invoice.status]}
-        </span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Details</h2>
-            <dl style={fieldGridStyle}>
-              <Field label="Amount" value={`${invoice.currency} ${invoice.amount}`} />
+            <dl className="field-grid">
+              {/* Net and VAT come from the lines and are absent on an
+                  invoice billed as one typed figure — there is no split to
+                  report there, and inventing one would be a claim the
+                  record doesn't support. */}
+              {invoice.net_total !== null && (
+                <Field label="Net" value={formatMoney(invoice.net_total, invoice.currency)} />
+              )}
+              {invoice.vat_total !== null && (
+                <Field label="VAT" value={formatMoney(invoice.vat_total, invoice.currency)} />
+              )}
+              <Field label={invoice.net_total === null ? "Amount" : "Total"} value={formatMoney(invoice.amount, invoice.currency)} />
               <Field label="Order" value={invoice.order ? `#${invoice.order}` : "—"} />
               <Field label="Enrollment" value={invoice.enrollment ? `#${invoice.enrollment}` : "—"} />
               <Field label="Created" value={new Date(invoice.created_at).toLocaleString()} />
             </dl>
+          </div>
+
+          <div className="card table-card">
+            <div className="card-head">
+              <div>
+                <h2>What is being billed</h2>
+                <p>
+                  Snapshotted when the invoice was raised — renaming an offering or repricing the rate card never
+                  rewrites an invoice that was sent.
+                </p>
+              </div>
+            </div>
+            {invoice.lines.length === 0 ? (
+              <div className="card-state">
+                Billed as a single amount, with no line breakdown — a walk-in job or a training enrollment.
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Net</th>
+                    <th>VAT</th>
+                    <th>Gross</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.lines.map((line) => (
+                    <tr key={line.id} style={{ cursor: "default" }}>
+                      <td>{line.description}</td>
+                      <td>{line.quantity}</td>
+                      <td>
+                        {formatMoney(line.unit_amount, line.currency)}{" "}
+                        <span style={{ color: "var(--color-text-muted)" }}>
+                          {line.vat_treatment === "inclusive" ? "incl." : "excl."}
+                        </span>
+                      </td>
+                      <td>{formatMoney(line.net_amount, line.currency)}</td>
+                      <td>{formatMoney(line.vat_amount, line.currency)}</td>
+                      <td>{formatMoney(line.gross_amount, line.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="card" style={{ padding: 20 }}>
@@ -103,7 +154,7 @@ export function InvoiceDetail() {
             <form onSubmit={submitPayment} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={labelStyle}>
                 Method
-                <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} style={inputStyle}>
+                <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
                   {PAYMENT_METHODS.map((m) => (
                     <option key={m} value={m}>
                       {PAYMENT_METHOD_LABELS[m]}
@@ -113,11 +164,11 @@ export function InvoiceDetail() {
               </label>
               <label style={labelStyle}>
                 Reference number
-                <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} style={inputStyle} />
+                <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
               </label>
               <label style={labelStyle}>
                 Status
-                <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)} style={inputStyle}>
+                <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)}>
                   {PAYMENT_STATUSES.map((s) => (
                     <option key={s} value={s}>
                       {PAYMENT_STATUS_LABELS[s]}
@@ -127,7 +178,7 @@ export function InvoiceDetail() {
               </label>
               <label style={labelStyle}>
                 Notes
-                <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+                <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
               </label>
               <button type="submit" className="btn btn-primary" disabled={recordPayment.isPending} style={{ alignSelf: "start" }}>
                 Record payment
@@ -152,12 +203,4 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" } as const;
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

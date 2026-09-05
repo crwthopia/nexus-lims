@@ -485,9 +485,14 @@ export interface Invoice {
   order: number | null;
   enrollment: number | null;
   customer_email: string | null;
+  /** What is owed: the gross. Derived from the lines when there are any. */
   amount: string;
   currency: string;
   status: InvoiceStatus;
+  /** Null on an invoice with no lines — a typed figure has no VAT split to report. */
+  net_total: string | null;
+  vat_total: string | null;
+  line_count: number;
   created_at: string;
 }
 
@@ -509,6 +514,7 @@ export interface Payment {
 
 export interface InvoiceDetail extends Invoice {
   payments: Payment[];
+  lines: InvoiceLine[];
 }
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
@@ -646,3 +652,263 @@ export const SYSTEM_FAILURE_SEVERITY_LABELS: Record<SystemFailureSeverity, strin
 
 /** FAILURE_WRITE_ROLES (backend/apps/audit/views.py) -- keep in sync by hand. */
 export const SYSTEM_FAILURE_WRITE_ROLES: RoleName[] = ["qa_officer", "lab_supervisor"];
+
+// --- Service catalogue (backend/apps/catalogue) ---------------------------
+
+export type VatTreatment = "exclusive" | "inclusive";
+
+export const SERVICE_LINE_LABELS: Record<ServiceLine, string> = {
+  failure_analysis: "Failure Analysis",
+  water_environmental: "Water / Environmental",
+  training: "Training",
+};
+
+export const VAT_TREATMENT_LABELS: Record<VatTreatment, string> = {
+  exclusive: "VAT-exclusive (net)",
+  inclusive: "VAT-inclusive (gross)",
+};
+
+/**
+ * A price as published, plus the three figures derived from it. The server
+ * computes net/VAT/gross precisely so no screen has to know which way this
+ * particular rate was quoted -- see backend/apps/catalogue/models.py.
+ */
+export interface OfferingPrice {
+  id: number;
+  offering: number;
+  amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  effective_from: string;
+  effective_to: string | null;
+  note: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  is_current: boolean;
+  created_at: string;
+  created_by: number | null;
+  created_by_display_name: string | null;
+}
+
+export interface ServiceOffering {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  service_line: ServiceLine;
+  test_methods: number[];
+  test_method_names: string[];
+  turnaround_days: number | null;
+  is_accredited: boolean;
+  is_active: boolean;
+  /** Null for an offering that has never been priced, or is priced from a future date. */
+  current_price: OfferingPrice | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceOfferingDetail extends ServiceOffering {
+  prices: OfferingPrice[];
+}
+
+/** CATALOGUE_WRITE_ROLES (backend/apps/catalogue/views.py) -- keep in sync by hand. */
+export const CATALOGUE_WRITE_ROLES: RoleName[] = ["lab_supervisor", "system_administrator"];
+
+/**
+ * Training is priced by its own course catalogue, so it is not offered
+ * here -- the server refuses it with a check constraint as well as a
+ * validator (backend/apps/catalogue/models.py).
+ */
+export const CATALOGUE_SERVICE_LINES: ServiceLine[] = ["failure_analysis", "water_environmental"];
+
+// --- Order and invoice lines ---------------------------------------------
+
+/**
+ * A line of what was ordered. Every price field is a **snapshot** taken
+ * when the line was created, not a live read of the rate card — repricing
+ * the catalogue must never reprice a sold line. The server owns them; a
+ * client can send only the offering, quantity and discount.
+ */
+export interface OrderItem {
+  id: number;
+  order: number;
+  offering: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  source_price: number | null;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  is_invoiced: boolean;
+  created_at: string;
+}
+
+/** The order's own lines — see the existing `Order` above for the record itself. */
+export interface OrderDetail extends Order {
+  item_count: number;
+  items: OrderItem[];
+}
+
+/** A billed line, snapshotted again away from the order line it came from. */
+export interface InvoiceLine {
+  id: number;
+  invoice: number;
+  order_item: number | null;
+  description: string;
+  quantity: number;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  discount_pct: string;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  created_at: string;
+}
+
+/** ORDER_ITEM_WRITE_ROLES (backend/apps/samples/views.py) — keep in sync by hand. */
+export const ORDER_ITEM_WRITE_ROLES: RoleName[] = ["sample_receiver", "lab_supervisor", "system_administrator"];
+
+// --- Quotations -----------------------------------------------------------
+
+export type QuotationStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
+
+export const QUOTATION_STATUS_LABELS: Record<QuotationStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  declined: "Declined",
+  expired: "Expired",
+};
+
+export interface QuotationItem {
+  id: number;
+  quotation: number;
+  offering: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  source_price: number | null;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+}
+
+export interface Quotation {
+  id: number;
+  reference: string;
+  customer: number;
+  customer_email: string;
+  service_line: ServiceLine;
+  order: number | null;
+  supersedes: number | null;
+  status: QuotationStatus;
+  valid_until: string;
+  notes: string;
+  item_count: number;
+  /** Summed server-side; `currency` is null on a quotation priced in more than one. */
+  totals: { net: string; vat: string; gross: string; currency: string | null };
+  /**
+   * Past its date, whatever the status says. The nightly sweep moves `sent`
+   * rows to `expired`, but a quotation that lapsed at midnight is lapsed at
+   * 00:01 — so the screen trusts this, not the status.
+   */
+  is_expired: boolean;
+  sent_at: string | null;
+  decided_at: string | null;
+  prepared_by: number | null;
+  prepared_by_display_name: string | null;
+  created_at: string;
+}
+
+export interface QuotationDetail extends Quotation {
+  items: QuotationItem[];
+}
+
+/** QUOTATION_WRITE_ROLES (backend/apps/quotations/views.py) — keep in sync by hand. */
+export const QUOTATION_WRITE_ROLES: RoleName[] = [
+  "sample_receiver",
+  "training_coordinator",
+  "lab_supervisor",
+  "system_administrator",
+];
+
+// --- Dashboard analytics (backend/apps/analytics) -------------------------
+
+export interface LeadingAnalysis {
+  offering_id: number;
+  code: string;
+  name: string;
+  service_line: ServiceLine;
+  request_count: number;
+  list_value_net: string;
+  /** What invoice lines naming this offering actually billed, net of VAT. Exact, where the two figures above are inferred. */
+  billed_net: string;
+}
+
+/**
+ * Requests that could not be credited to one line of the rate card. Reported
+ * rather than dropped or spread: the count is the honest measure of how much
+ * catalogue mapping is still outstanding.
+ */
+export interface UnattributedRequests {
+  /** The method belongs to no active offering. */
+  no_offering: number;
+  /** It belongs to several — sold standalone and inside a panel, say. */
+  ambiguous: number;
+  /** Attributable, but the offering had no price on the day of the request. */
+  unpriced: number;
+}
+
+export interface TurnaroundSummary {
+  sample_count: number;
+  median_days: number | null;
+  p90_days: number | null;
+}
+
+export interface DashboardData {
+  /** Which measure ordered `leading_analyses` — and therefore which one the fold into "other" was computed against. */
+  rank: "volume" | "value";
+  window: { from: string; to: string; days: number; previous_from: string; previous_to: string };
+  totals: {
+    samples_received: number;
+    test_requests: number;
+    list_value_net: string;
+    billed_net: string;
+    invoice_lines: number;
+    currency: string;
+  };
+  previous_totals: { samples_received: number; test_requests: number; list_value_net: string; billed_net: string };
+  leading_analyses: LeadingAnalysis[];
+  leading_analyses_other: { offering_count: number; request_count: number; list_value_net: string; billed_net: string };
+  unattributed_requests: UnattributedRequests;
+  service_line_mix: { service_line: ServiceLine; label: string; sample_count: number }[];
+  monthly: { month: string; request_count: number; list_value_net: string }[];
+  turnaround: TurnaroundSummary & { by_service_line: (TurnaroundSummary & { service_line: ServiceLine })[] };
+  quality: {
+    results_entered: number;
+    out_of_spec: number;
+    out_of_spec_pct: number | null;
+    open_investigations: number;
+    samples_awaiting_review: number;
+    instruments_out_of_calibration: number;
+    open_system_failures: number;
+  };
+}

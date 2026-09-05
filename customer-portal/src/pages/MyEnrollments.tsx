@@ -1,5 +1,6 @@
 import { useMyEnrollments, useTrainingSessions } from "../api/queries";
 import { ENROLLMENT_STATUS_LABELS } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 /**
  * CustomerEnrollmentSerializer returns `session` as a bare id (no nested
@@ -17,16 +18,13 @@ export function MyEnrollments() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>My Enrollments</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>Trainings you've registered for.</p>
-      </div>
+      <PageHeader title="My Enrollments" description="Trainings you've registered for." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load your enrollments.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load your enrollments.</div>}
         {enrollments && enrollments.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No enrollments yet.</div>
+          <div className="card-state">No enrollments yet.</div>
         )}
         {enrollments && enrollments.results.length > 0 && (
           <table>

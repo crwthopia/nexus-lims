@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApplyMyCreditNote, useMyCreditNotes } from "../api/queries";
 import { describeApiError } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
 
 export function MyCreditNotes() {
   const { data, isLoading, isError } = useMyCreditNotes();
@@ -15,18 +16,13 @@ export function MyCreditNotes() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Credit Notes</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          Redeem a credit against a future training enrollment.
-        </p>
-      </div>
+      <PageHeader title="Credit Notes" description="Redeem a credit against a future training enrollment." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load your credit notes.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load your credit notes.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No credit notes on your account.</div>
+          <div className="card-state">No credit notes on your account.</div>
         )}
         {data && data.results.length > 0 && (
           <table>
@@ -52,7 +48,7 @@ export function MyCreditNotes() {
                           placeholder="Enrollment ID"
                           value={targets[cn.id] ?? ""}
                           onChange={(e) => setTargets((prev) => ({ ...prev, [cn.id]: e.target.value }))}
-                          style={{ width: 110, padding: "6px 8px", borderRadius: "var(--radius)", border: "1px solid var(--color-border)" }}
+                          style={{ width: 110 }}
                         />
                         <button className="btn" disabled={applyCreditNote.isPending} onClick={() => submitApply(cn.id)}>
                           Apply

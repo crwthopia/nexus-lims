@@ -33,8 +33,10 @@ was invented outside that grounding.
   per-customer data isolation at the database level.
 - **Celery worker + beat**, running the two automations the Blueprint
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
-  capacity check), with a real S3-compatible object storage client
-  (`boto3` against OSS's S3-compatible API — see Object storage below).
+  capacity check) plus three the system grew of its own — audit partition
+  creation, the open-failure digest, and quotation expiry — with a real
+  S3-compatible object storage client (`boto3` against OSS's S3-compatible
+  API — see Object storage below).
 - **System failure register** (ISO/IEC 17025:2017 7.11.3(e)): the failures
   the system already detected are recorded durably instead of only logged,
   with what it did about them automatically, and a corrective action a
@@ -45,7 +47,7 @@ was invented outside that grounding.
   investigations, out-of-spec results, report-ready notices — deduplicated so
   a nightly sweep cannot chase the same instrument every night, and carrying
   no result or document into a mailbox — see Notifications below.
-- **456-test automated regression suite** (`backend/tests/`, pytest +
+- **623-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -55,8 +57,8 @@ was invented outside that grounding.
   suite against live Postgres/Redis/MinIO service containers, plus lint,
   tests, typecheck, and production build for both frontends — see
   Continuous integration below.
-- **224-test frontend suite** (Vitest + React Testing Library): 168 in the
-  Staff Console and 56 in the Customer Portal — every screen on either side
+- **302-test frontend suite** (Vitest + React Testing Library): 230 in the
+  Staff Console and 72 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
   guards, the Sample and TrainingSession FSM action sets, payment
   reconciliation, FR-E3-02 calibration, FR-D1-03 version approval,
@@ -494,11 +496,15 @@ inherited colour, which means unreadable text in precisely one theme.
 
 Both frontends run a dark theme matched to the **NexusCRM Enterprise**
 console, so the two products read as one suite. It lives entirely in the
-`:root` custom properties at the top of each app's `src/index.css` — the two
-blocks are identical, and are the only place colour is defined. There are no
-hardcoded colours left in any component. That last point is what made adding
-a second theme cheap: a light palette is a second block of the same tokens,
-not a sweep through the components.
+`:root` custom properties at the top of each app's `src/index.css` — the
+colour tokens are identical across the two apps, value for value, and are
+the only place colour is defined. (The non-colour tokens differ by one
+line: the console declares the widths of a nav rail the portal doesn't
+have.) There are no hardcoded colours left in any component. That last
+point is what made adding a second theme cheap: a light palette is a second
+block of the same tokens, not a sweep through the components — and the same
+is what made the shell cheap, since `--color-sidebar`, `--color-accent-soft`
+and `--color-overlay` were three more measured pairs rather than a redesign.
 
 **A light theme ships alongside it, opt-in.** Dark stays the default,
 because the palette was matched to a sibling product on purpose and
@@ -555,6 +561,553 @@ statuses that mean the same thing to a reviewer share a colour, so a
 worklist reads as four groups (waiting / in progress / accepted / rejected)
 rather than eleven unrelated hues, and `disposed` is muted rather than red
 because it is terminal bookkeeping, not a failure.
+
+## Service catalogue and pricing
+
+**Nothing in the schema priced analytical work before this.** A
+`TrainingCourse` carries a price, because a course is sold as a course. A
+Sample arrives against a `TestMethod` — and a TestMethod is a *method*, an
+SOP reference and its specification limits, not a line on a rate card.
+`Invoice.amount` was a single figure typed in by staff with nothing
+recording what it was for. So "which analyses earn the most" could not be
+answered from this database at all, however the question was asked, and
+that is why the catalogue is the foundation the dashboard is built on
+rather than a feature beside it.
+
+`apps/catalogue/` adds two entities, deliberately kept apart:
+
+- **`ServiceOffering`** is what a customer buys: a code (`WQ-BOD5` — the
+  thing quoted on a purchase order, so the natural key here), a name, one
+  service line, and the `TestMethod`s that fulfil it. The mapping is
+  many-to-many because a good part of any water lab's revenue is panels:
+  "Potability" is one price and one turnaround to the customer and six
+  methods to the lab. Modelling it as a set is what will let one order line
+  raise the six TestRequests that fulfil it, and what lets those six be
+  attributed back to the one thing that was actually sold.
+- **`OfferingPrice`** is what it cost over a stated period. Prices are
+  **versioned, never edited**: an invoice raised in March has to keep
+  quoting March's rate however many times the card changes afterwards, and
+  "what did we charge last year" is a question a lab gets asked by its own
+  auditors.
+
+Training is *not* in it. Training's catalogue is `training.TrainingCourse`
+and always was — CPD units, an early-bird and a student discount, sessions
+with capacity. A second price for the same thing is a second price to get
+wrong, so the catalogue covers the analytical service lines only, and a
+check constraint enforces that rather than a comment asking politely.
+
+### VAT is a property of the price
+
+NASAT quotes **both ways**: some rates are published VAT-exclusive (net,
+VAT added at invoicing) and some VAT-inclusive (what the customer pays).
+Storing which kind a figure is, next to the figure, is the only way a total
+can be computed without someone remembering — and a screen that lists a net
+rate beside a gross one invites a comparison that is wrong by 12%.
+
+So every price carries `vat_treatment` and `vat_rate_pct` (12.00 by
+default; a zero-rated service is a *value*, not a special case in code),
+and the API always returns all three figures:
+
+| Quoted | `amount` | net | VAT | gross |
+|---|---|---|---|---|
+| VAT-exclusive | ₱1,000.00 | ₱1,000.00 | ₱120.00 | ₱1,120.00 |
+| VAT-inclusive | ₱1,120.00 | ₱1,000.00 | ₱120.00 | ₱1,120.00 |
+
+Two details in that arithmetic are load-bearing, and both are tested:
+
+- **VAT is the difference of the two rounded figures**, not a third
+  independently-rounded number. Round all three separately and net + VAT
+  fails to equal gross by a centavo often enough to reach an invoice.
+- **Rounding is half-up, as an invoice does.** Decimal's default is
+  banker's rounding, which turns ₱0.125 into ₱0.12 — defensible
+  statistically, and not what a customer reading a receipt expects.
+
+### Superseding, not editing
+
+`services.set_price()` is the only way a price is written, by the API and
+the CSV importer alike, and it closes the outgoing price the day before the
+incoming one starts, in one transaction. Two cases it handles so no caller
+has to:
+
+- **Correcting a rate entered this morning** is not a new period in the
+  history, it is a fix to the one you just made — a same-day write updates
+  that row, which is also what the `(offering, effective_from)` unique
+  constraint says.
+- **Back-dating** closes any price whose window contains the new start
+  date, and inherits the *following* price's start as its own end, so
+  windows can't overlap even when prices arrive out of order.
+
+The price-history endpoint is read-only for the same reason: a row that
+could be edited or deleted directly would be a hole in exactly the record
+an auditor asks to see.
+
+### Loading a rate card
+
+A price list arrives as a spreadsheet, from someone who is not going to
+type two hundred rows into a web form:
+
+```bash
+cd backend
+python manage.py import_price_list rates.csv --dry-run          # parse, validate, report, write nothing
+python manage.py import_price_list rates.csv --effective-from 2026-01-01
+```
+
+Required columns are `code`, `name`, `service_line`, `price` and
+`vat_treatment`; `vat_rate_pct`, `description`, `turnaround_days`,
+`accredited`, `active`, `test_methods` (`;`-separated method references)
+and `note` are optional. Headers are matched case- and space-insensitively,
+`₱1,250.00` parses, and blank spacer rows are skipped — the file people
+actually have, in other words.
+
+What it refuses is as deliberate as what it accepts. **A bad row rolls back
+the whole file**: a rate card is one document, and half of one loaded is
+worse than none, because nothing on screen afterwards says which half. **A
+method reference that matches nothing is an error**, not a silent omission
+— an offering mapped to five of its six methods looks complete and quietly
+under-reports the sixth everywhere it is counted. Re-importing the same
+`code` updates that offering and supersedes its price rather than creating
+a duplicate, so the same file can be re-run after a correction.
+
+### Who can change a price
+
+Read is open to any authenticated staff member: an analyst booking a sample
+in needs to see what was ordered and what it costs, and hiding the rate card
+from the people doing the work has never made a lab quieter. Write is held
+to **Lab Supervisor** and **System Administrator** — a price change is a
+commercial decision with an audit trail (`simple_history` on both models),
+not a correction anyone passing can make.
+
+**Customers cannot reach the catalogue at all yet.** Publishing a rate card
+to the portal is a business decision NASAT has not made, and the safe
+default for a price list is that it goes out when someone decides it
+should, not because an endpoint happened to exist.
+
+## Quotations
+
+The priced offer that goes out **before** any work starts — and the one
+step of the commercial path that was still happening outside the system: a
+spreadsheet, an email, and a PO number typed into an order afterwards. The
+consequence was that the price a customer was quoted and the price they
+were billed had no connection anybody could check, which is the same gap
+versioned prices and snapshotted lines exist to close everywhere else.
+
+Two rules give a quotation its meaning, and both are enforced rather than
+described.
+
+### A sent quotation is immutable
+
+It is a document a customer is reading. Editing it afterwards would make
+"what did we quote them" unanswerable. So `PATCH` on anything but a draft
+is a 400, the console takes the line form away the moment it is sent
+(rather than leaving it there to fail on save, which teaches the rule one
+click at a time), and the supported way to change an offer is
+`POST /quotations/{id}/revise/` — a fresh draft carrying the same lines,
+pointing back at what it `supersedes`. The revision copies the lines **at
+their quoted figures**, so changing one line does not silently reprice the
+rest.
+
+### A quote honoured is a quote honoured
+
+Accepting copies the quoted figures onto the order at the rate quoted,
+however the rate card has moved since. Without that a quotation is a
+non-binding guess the customer discovers at invoice time, and
+`test_a_quote_honoured_is_a_quote_honoured` is the test that says so: a
+nine-fold price rise between sending and accepting leaves the order line at
+the quoted ₱1,000.
+
+Accepting attaches to the order it was quoted against, or opens one if
+there wasn't one. Either way the lines land as ordinary `OrderItem`s, so
+everything downstream — invoicing, the dashboard's billed revenue,
+the customer's own view of the order — works with no further wiring.
+
+### The lifecycle
+
+`draft → sent → accepted | declined | expired`, as a django-fsm `FSMField`
+with `protected=True`, so `status` moves through a transition or not at
+all — the rule Sample and TrainingSession already live by. The guards sit
+in `services.py` rather than on the transitions, because each one is a
+check *plus* a state change *plus* a side effect and `@transition` is only
+the middle of the three:
+
+- **send** refuses an empty quotation (it offers nothing) and one whose
+  validity has already passed (it would be expired on arrival), stamps
+  `sent_at`, and emails the customer a notice through the one notification
+  path the rest of the system uses. The notice carries the reference, the
+  total and the date; the breakdown stays in their account, where it
+  cannot be altered in transit or forwarded to somebody it was not priced
+  for — the same rule as report PDFs.
+- **accept** refuses an expired offer, writes the order lines, and records
+  **who** answered. A customer accepting in the portal and a coordinator
+  recording a purchase order that arrived by email are both real, and
+  `accepted_by_customer` vs `decided_by_staff` tells them apart. Declining
+  deliberately writes neither of those as an acceptance: reusing that
+  column for a no would make an acceptance audit say something false.
+
+### Expiry is a date, not a status
+
+`valid_until` is on the row, so `is_expired` is always true the moment it
+lapses, and acceptance checks *that* rather than the stored status — a
+quotation that lapsed at midnight is lapsed at 00:01, not at 03:30 when
+the nightly sweep runs. What the sweep
+(`apps.quotations.tasks.expire_quotations`, in the beat schedule beside
+the other three) adds is the state: without it a lapsed offer sits in
+`sent` forever and every count of what is outstanding is wrong. Both
+screens show "lapsed" from the date rather than the status, so neither
+invites a click that the server will refuse.
+
+### References
+
+`Q-2026-00042`, assigned on first save and derived from the id rather than
+a counter: two quotations created at once cannot collide over one, because
+the database has already decided which is which. Gaps are fine — a
+quotation is not a tax-sequential document, and a deleted draft leaving a
+hole in the numbering is better than a lock on every insert.
+
+### Who sees what
+
+Staff build and issue (`/quotations/`, gated to Sample Receiver, Training
+Coordinator, Lab Supervisor, System Administrator); the customer being
+quoted reads and answers their own (`/my/quotations/`). Two viewsets over
+one table rather than one with a branch, as with every other
+customer-facing resource here — a single viewset that decides what to show
+by inspecting `request.user` is one refactor away from showing the wrong
+person the wrong offer.
+
+**Drafts are excluded from the customer's list**, and that is correctness
+rather than tidiness: a draft is an offer the lab has not made, and
+showing someone a price nobody has decided on is worse than showing them
+nothing. RLS policies on `quotation` and `quotation_item` scope both
+tables to the customer they belong to — the most disclosure-sensitive rows
+in the commercial chain, since what one customer was quoted is exactly
+what another must not see.
+
+### One shared definition of a priced line
+
+Quotation lines made three copies of the same shape (order, invoice,
+quotation), so the snapshot fields and the VAT arithmetic moved into an
+abstract `PricedLine` (`apps/catalogue/lines.py`). Abstract rather than a
+table: these lines share nothing at the database level and should not
+share a primary key space or a delete cascade. What they share is a
+definition — and the first thing that would have drifted between three
+copies is the VAT split, which is the part nobody notices is wrong.
+
+
+## Order lines and invoice lines
+
+The catalogue says what things cost; these say what was sold and what was
+billed. Two models, and the same idea in both: **a price is copied, never
+joined.**
+
+- **`OrderItem`** — an offering, a quantity, a discount, and a snapshot of
+  the rate in force when the line was created: `unit_amount`,
+  `vat_treatment`, `vat_rate_pct`, `currency`. `source_price` records
+  *which* published rate was copied, for anyone who later asks why a line
+  says what it says; it is provenance, and none of the numbers are read
+  from it.
+- **`InvoiceLine`** — the same fields again, snapshotted a second time when
+  the invoice is raised, plus the description. An invoice is a document
+  that was sent to someone: renaming an offering, repricing the rate card,
+  or editing the order afterwards must not rewrite what a customer was told
+  they owed.
+
+Joining the rate card at display time instead would silently reprice every
+historical order the next time the card changed — undoing the versioned
+prices the catalogue exists to provide. The API enforces the same thing
+from the other end: a client sends an offering, a quantity and a discount,
+and never a price. A `unit_amount` a caller could set is a price a caller
+could invent, and the rate card would be decoration.
+
+### The totals
+
+`Invoice.amount` stays what it always was — what is owed, gross — and stays
+writable, because a walk-in job or a training enrollment is still billed as
+one typed figure. What changes is that an invoice raised *from an order*
+now has lines, and `amount` is maintained from them rather than typed, so
+the total and the breakdown cannot disagree. `net_total` and `vat_total`
+are derived per request and are **null** on an invoice with no lines:
+there is no split to report on a typed figure, and inventing one would be a
+claim the record does not support.
+
+Discounts apply to the line *before* VAT is split out, so a discounted
+VAT-inclusive rate still reconciles. The arithmetic itself moved into
+`apps/catalogue/money.py` when the third caller appeared — three copies of
+a VAT split would eventually have been two.
+
+### One line, one billing
+
+`InvoiceLine.order_item` carries a unique constraint, which is what makes a
+double-clicked Raise Invoice button fail at the database instead of
+charging a customer twice. Raising an invoice bills the *unbilled*
+remainder, so an order part-billed in March and finished in July gets a
+second invoice for the July work rather than a duplicate of March's.
+
+**Voiding an invoice does not free its lines to be billed again**, and that
+limit is worth stating plainly because the friendlier behaviour is the
+obvious thing to want. Excepting void invoices from the constraint cannot
+be expressed in an index — a Postgres index predicate cannot reach into
+`invoice` to read a status — so it would have to be either a copy of that
+status kept on the line, which is drift in the money path, or nothing but a
+check in application code that a future caller can bypass by not calling
+it. The escape hatch is the honest one: an invoice raised in error is
+voided *and* the order corrected. Re-adding the line records that the first
+sale was cancelled and a new one made, which is what happened.
+
+### Who does what
+
+Ordering is intake work, so adding a line takes **Sample Receiver**, Lab
+Supervisor or System Administrator — whoever books a sample in is who says
+what was ordered. Billing it is a different job with a different list
+(`BILLING_WRITE_ROLES`). Both tables carry RLS policies joining through
+`order` and `invoice` respectively, written *before* the portal reads them:
+`apps/training/migrations/0002` exists because two tables were reachable
+from the portal with nothing behind a viewset's own `.filter()`, and a
+policy written before the endpoint cannot be forgotten when the endpoint
+arrives.
+
+### What the customer sees
+
+A customer opens one of their own orders and gets the lines: what was
+tested, how much of it, at what rate, what discount was applied, and what
+each line comes to. The rate is shown deliberately — it is their money, and
+a line that hid what it cost, or quietly folded a discount into the total,
+would be worse than one that said nothing.
+
+The serializer is narrower than the console's, and the omissions are the
+point. `source_price` is a catalogue row id: provenance for whoever has to
+explain a figure internally, and a handle on a rate card the customer
+cannot open. The offering's own id is the same. What is left is what
+somebody checking an order against their own records actually needs.
+
+Three details the page gets right rather than conveniently:
+
+- **Every line says how its rate was quoted** (`+ VAT` or `incl. VAT`).
+  NASAT publishes both ways, and a column of figures where that differs
+  silently invites exactly the wrong comparison.
+- **The totals are summed server-side.** A net line added to a gross one
+  is out by 12%, and this is the page a customer is most likely to check
+  against an invoice. An order priced in two currencies reports no single
+  total at all — a sum of two currencies is money in neither.
+- **"Not yet invoiced" is shown, not hidden.** Someone looking at an order
+  wants to know what is still coming, and the invoices raised against it
+  are listed underneath so "what was I billed for this" is one click.
+
+The RLS policy on `order_item` was already there, written a change earlier
+precisely so that it could not be forgotten when this endpoint arrived. A
+test drives it straight at the database, and another checks that one
+customer asking for another's order gets a 404.
+
+### What this changes on the dashboard
+
+**Billed revenue is now a real figure, and it sits beside list price rather
+than replacing it.** They answer different questions: list price is what
+the bench is worth and is knowable immediately; billed is money and lags by
+however long invoicing takes. Collapsing them into one number called
+"revenue" would misstate whichever one the reader assumed.
+
+Billed money is also attributed *exactly*, which is the deeper payoff: the
+volume figures still reach the rate card through a method's many-to-many
+and can be ambiguous, but an invoice line names its offering, so a peso
+knows what it was for even when the test request that earned it does not.
+
+
+## Dashboard
+
+The console opens on `/dashboard`: what the lab is doing, which analyses
+are carrying it, how fast it is turning work around, and what is stuck.
+One endpoint (`GET /api/v1/analytics/dashboard/`) computes all of it —
+the browser is never handed a worklist to reduce for itself.
+
+**Two money figures, side by side, and neither is called "revenue".**
+*List price* is work performed × the rate in force *on the day it was
+requested*: what the bench is worth, knowable the moment the catalogue
+exists. *Billed* is what invoice lines actually say: real money, but only
+for work already invoiced, which lags the bench by however long billing
+takes. Collapsing them into one figure would misstate whichever one the
+reader assumed, so a test asserts the word "revenue" appears on neither.
+
+Pricing per *day* rather than at today's rate is what the catalogue's
+versioned prices bought: a July increase must not retroactively revalue
+April's work, and `test_work_is_valued_at_the_rate_in_force_when_it_was_requested`
+is the test that says so.
+
+### Attribution, and what it can't do yet
+
+A TestMethod reaches an offering through a many-to-many, so a request can
+be credited to a rate-card line only when its method belongs to **exactly
+one** active offering. Three cases can't be, and all three are counted and
+shown under the ranking rather than dropped or spread evenly:
+
+| Case | Why it can't be attributed |
+|---|---|
+| `no_offering` | The method belongs to no active offering — the catalogue mapping is incomplete |
+| `ambiguous` | It belongs to several: BOD sold standalone *and* inside a potability panel. Without order lines, nothing says which was sold |
+| `unpriced` | Attributable, but the offering had no price on the day of the request |
+
+Dropping them would understate the bench; spreading them evenly would
+invent the split. The count on screen is the honest measure of how much
+catalogue work is left, and it links to the Catalogue to do it.
+
+This applies to the *volume* figures only. **Billed money is attributed
+exactly**, because an invoice line names its offering — so a peso knows
+what it was for even when the test request that earned it does not.
+
+### Which analyses are "leading" has two answers
+
+The panel run three hundred times is what fills the bench; the
+characterisation run forty times at ten times the price is what pays for
+it. So the ranking is a parameter (`?rank=volume|value`), and it is
+resolved **server-side** — ranking by value changes which offerings make
+the top eight at all, so the ordering and the fold into "other" have to
+move together. Re-sorting the same eight rows in the browser would
+quietly drop a low-volume, high-value offering off the card.
+
+### The charts
+
+Four forms, each picked for the data's job rather than for variety, and
+the palette was **validated rather than eyeballed** — the two chart hues
+were run through a data-viz validator against each theme's own card
+surface for lightness band, chroma floor, colour-vision-deficiency
+separation (worst all-pairs ΔE 26.8 protan against a target of 8) and
+≥3:1 contrast. The values live in `--color-chart-1/2`, one pair per theme;
+adding a third means re-running it.
+
+| What | Form | Why not something else |
+|---|---|---|
+| Leading analyses | Ranked bars with the value beside each | The labels are rate-card names too long to hang off an axis. Every bar is the *same* hue: length already encodes magnitude, so shading each bar darker where it is bigger would spend the one free channel restating it |
+| Tests per month | Columns, one series | One series means one hue and **no legend** — the card's title already says what is plotted. Only the last column is labelled; a number on every cap is the fastest way to make a small chart unreadable |
+| Service-line mix | One horizontal stacked bar | Not a donut. Two segments in a ring is the shape a pie is worst at — the reader compares arcs instead of lengths — and every segment is direct-labelled with its own swatch, so identity never rests on colour alone |
+| KPIs and turnaround | Stat tiles | When the data is a single value the number *is* the visualisation; a one-bar bar chart adds ink that carries nothing |
+
+Three details that came out of rendering it and looking at it, which is
+the step no amount of care in the code replaces:
+
+- **The hover handler sits on the column group, not on the hit rectangle
+  beneath the bar.** The bar is painted over that rectangle, so pointing
+  at the obvious place — the middle of the column — landed on the bar and
+  hit nothing. It looked fine and did nothing.
+- **The column chart measures its container instead of using a fixed
+  viewBox.** A 720-unit box scaled into a 360px phone halves every font
+  size with it, and 11px axis labels arrived at 5px.
+- **Axis maxima round up to a clean number** (421 → 500). Otherwise the
+  ticks read 0 / 211 / 421, which are three numbers nobody asked for.
+
+Marks follow one set of specs throughout: bars capped at 24px with a
+4px-rounded data-end and a **square foot on the baseline** (rounded at
+both ends, a bar appears to float clear of the axis it grows from),
+hairline solid gridlines, and text in the theme's ink tokens — never in a
+series colour, which is legible as a mark and not as 12px type.
+
+### What it reports, and as of when
+
+Rates are for the reporting period; **queue depths are current state**, and
+the card says which is which. "Open investigations over the last 90 days"
+would mean nothing — an investigation opened last year is still open
+today, and that is the point. Turnaround is measured on samples *approved*
+in the window rather than samples that arrived in it: bucketing by arrival
+would silently exclude everything still in progress and flatter the
+number. The comparison in each stat tile is the immediately preceding
+period of equal length, and it is omitted entirely when that period had
+nothing in it — a "+100%" against zero is arithmetic, not information.
+
+
+## Console shell
+
+The Staff Console is a **fixed nav rail, a sticky header, and the routed
+screen between them** — the arrangement the NexusCRM Enterprise console
+uses, so someone who works in both products doesn't relearn where things
+are. It replaced a single row of top-level links, which had simply run out
+of room: ten destinations across one line left no space for a section
+label, so Documents, Investigations and System failures sat beside Billing
+with nothing saying they were different kinds of work.
+
+**The navigation is data, not JSX** (`components/navigation.ts`), and three
+things read it: the rail, the command palette, and the header's title. That
+is the whole reason it exists as a list — the first time the rail and the
+palette were written separately, they disagreed, and the failure mode is a
+destination the palette offers to a user whose roles can't open it. Role
+gating is applied once, on the way out of `navSections()`.
+
+Sections mirror how a lab divides the work rather than the URL space:
+**Worklist** (Samples, the two queues, Reports) is where an analyst lives,
+**Quality** is what a QA officer opens, **Laboratory** is equipment and
+training, **Commercial** is billing. Empty sections are dropped, so a
+`sample_receiver` never sees a "Worklist" heading over a lone link.
+
+Three states are remembered or derived rather than assumed:
+
+- **Collapsed**, persisted per browser (`src/sidebar.ts`), for people who
+  want the full width on a wide worklist. Every `localStorage` access is
+  wrapped for the same reason the theme's is — private browsing throws on
+  *access*, and a rail preference must never be why the console won't load.
+  Collapsed hides labels from the accessibility tree along with the pixels,
+  and each item keeps a `title`.
+- **Narrow** (below 900px), where the rail leaves the flow entirely and
+  becomes a drawer over the content with a dismissing scrim, because 248px
+  out of a phone's width is most of the screen. The collapsed icon rail is
+  deliberately *not* reused there: 72px still costs a fifth of a small
+  screen and leaves labels nowhere. The drawer closes on every route
+  change, which is the classic mobile-nav bug.
+- **The header's title**, derived from the path. A detail route names the
+  section it belongs to (`/samples/8` → "Samples"), including the three
+  whose collection isn't itself in the rail — `/test-requests/…`,
+  `/training-sessions/…`, `/invoices/…`. The record's own identity is the
+  page's `<h1>`, not the header's.
+
+**Ctrl-K / Cmd-K opens a command palette**, and it searches the console's
+own destinations and nothing else. That limit is deliberate rather than a
+first step: the API has no cross-resource search endpoint, and a palette
+that quietly returned only sections while looking like it searched records
+would be worse than one that never claimed to. The list is a listbox owned
+by the input (`aria-activedescendant`), not a set of focusable buttons —
+focus has to stay in the field so typing keeps filtering while the arrows
+move the selection — and the highlight follows the pointer as well as the
+keyboard, so the mouse and Enter can never disagree about which row opens.
+
+**The Customer Portal keeps a header, not a rail, on purpose.** The console
+is somewhere staff spend a shift; the portal is six links a customer visits
+to collect a report, on a page a signed-out visitor can land on cold, since
+the Training catalogue is browsable with no account (Blueprint Section
+4.3). A rail on that page reads as an application someone has been dropped
+into the middle of. Everything below the header — cards, tables, buttons,
+badges, forms, the whole token set — is the same CSS in both apps, so they
+still read as one product.
+
+### Shared component styles
+
+The palette was never the problem; the *shapes* were. Alongside the colour
+tokens, `index.css` now carries a radius scale (`--radius-sm`/`--radius`/
+`--radius-lg`/`--radius-pill`), a per-theme shadow scale (a black shadow is
+invisible on a near-black canvas, so dark leans on its borders and light on
+a genuine soft drop), and the shell metrics the rail and header share.
+
+Five patterns that had been copy-pasted into every screen are now classes,
+which is what makes a breakpoint able to reach them at all:
+
+| Class | Was |
+|---|---|
+| `.page-header` (+ `PageHeader.tsx`) | An inline title/description/actions block written out again in each of the seventeen routed screens (every one but the login card), drifted to three bottom margins and two title sizes |
+| `.card-state` | `style={{ padding: 24 }}` — and two colour variants of it — on every loading, empty and error line |
+| `.table-card` | `style={{ overflow: "hidden" }}`, which clipped the table's corners but let a wide worklist push the whole page sideways on a phone; it now scrolls inside the card |
+| `.detail-grid` / `.stack` | The `2fr 1fr` detail layout, inline in six pages and therefore unreachable from a media query — it now stacks below 900px instead of squeezing the Actions panel into a third of a phone |
+| `.field-grid` | The same `fieldGridStyle` const, copied into six pages; one column below 560px |
+
+The nine copies of `inputStyle` are gone the same way, and fixing a real
+bug on the way out: each one re-bordered its control with the hairline
+`--color-border` (1.22:1), which this README's own Theme section says is
+wrong for a form control — the global rule uses `--color-border-strong`
+(3.27:1), which is what WCAG 1.4.11 asks of the only thing marking a
+control's extent.
+
+Two accessibility rules hold throughout the chrome. **An active state
+carries a tint *and* a colour change, never a tint alone** — a background
+difference is the first thing a high-contrast setting takes away (WCAG
+1.4.1) — which is why the rail's current item, the portal's current link
+and the palette's selected row all change both. And **every icon is
+decorative**: `components/Icon.tsx` renders one table of path data with
+`aria-hidden` on each glyph, so the control around it carries the name. The
+icon-only header buttons (theme, log out, rail toggle) are named by
+`aria-label`; the theme toggle's name is still "Light"/"Dark", naming what
+happens rather than what is true now, exactly as the text button did.
 
 ## Staff Console (React frontend)
 
@@ -855,10 +1408,9 @@ stops once nothing is in flight — generation is a background job, so a row
 becomes `ready` with no user action, but an idle screen shouldn't be
 issuing requests.
 
-Adding this eighth nav item pushed the header past the 1100px content
-container, so the header bar is now full-width while `<main>` stays
-constrained — a two-row header or a clipped nav link being the alternative.
-Below about 1100px the nav scrolls horizontally rather than wrapping.
+Reports was the eighth entry in what was then a single row of links across
+the top, which is what eventually made that row untenable and produced the
+nav rail described under Console shell above.
 
 ## Customer Portal (React frontend)
 
@@ -2030,8 +2582,8 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 212 tests: 156 in
-`frontend/`, 56 in `customer-portal/`.
+frontend (`npm run test:watch` while developing). 302 tests: 230 in
+`frontend/`, 72 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React
 Query hooks, not `api/client.ts` — so every test drives the real API client
@@ -2048,6 +2600,21 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `frontend/src/components/ProtectedRoute.test.tsx` | The three-state guard: renders for an authenticated user, redirects on 401/403, and shows a loading state *instead of redirecting* while `staff-me` is still in flight |
 | `frontend/src/pages/SampleDetail.test.tsx` | Which FSM edges are offered per status; per-action role gating with the required role named in the tooltip; the `water_environmental` segregation-of-duties block and its `failure_analysis` bypass; a disabled action firing no request; review comments in the body; a server rejection reaching the user |
 | `frontend/src/pages/ReportsList.test.tsx` | Download offered only for a `ready` report and disabled with a reason otherwise; the presigned URL fetched at click time rather than written into an href at render time (it expires); a failed report's reason reaching the screen; the status filter reaching the query string |
+| `backend/tests/test_catalogue.py` | The VAT arithmetic both ways, including that a net-quoted and a gross-quoted rate for the same money produce identical figures, that net + VAT equals gross at awkward amounts, half-up rounding, and a zero-rated service; price windows staying contiguous when prices arrive in order, back-dated, or corrected the same day; role gating on write and openness on read; the training refusal at both the serializer and the check constraint; code normalisation; price history being read-only over the API |
+| `backend/tests/test_price_list_import.py` | The importer against the file people actually have: peso signs, thousands separators and blank spacer rows accepted; a missing column, an unparseable price or an unmatched method reference refused with the line number; a bad row rolling back the whole file; a dry run writing nothing; re-import updating the offering and superseding its price |
+| `frontend/src/pages/InvoiceDetail.test.tsx` (lines) | The billed breakdown with its own net/VAT/gross per line; an invoice with no lines saying it was billed as one amount rather than showing an empty table; no VAT split reported where the record has none |
+| `frontend/src/pages/CatalogueList.test.tsx` | That the list shows the server's net and gross rather than the published amount, so two rows quoted differently can be compared; an unpriced offering saying so instead of showing zero; a withdrawn one marked rather than hidden; the add form gated on `CATALOGUE_WRITE_ROLES`; Training absent from the service-line choices; the filter reaching the query string |
+| `frontend/src/pages/OfferingDetail.test.tsx` | Repricing posting a *new* price rather than patching the current one (patching is what would erase the history the versioning exists for); the effective date omitted when blank rather than sent as `""`; a back-dated price sent when one is given; the superseded window shown in the history; the required role named rather than the panel hidden |
+| `backend/tests/test_analytics_dashboard.py` | Work valued at the rate in force on the day it was requested (a later rise must not revalue earlier work), and net of VAT however the rate was quoted; the three unattributable cases counted rather than dropped or spread; a withdrawn offering no longer attracting work; the tail folded against whichever measure is ranking; the comparison window being the preceding period of equal length; a quiet month rendered as a zero rather than a gap; turnaround measured arrival→approval; rates being for the period while queue depths are current state; a malformed date as a 400 and a misspelled rank as the default view |
+| `frontend/src/pages/Dashboard.test.tsx` | That the money is called list price and never "revenue"; the comparison omitted when the previous period was empty; the unattributed count and its reasons on screen (and silent when there are none); the ranking re-asking the server rather than re-sorting locally; the mix legend carrying labels and values rather than relying on colour; "nothing approved" instead of a zero turnaround |
+| `backend/tests/test_quotations.py` | The two invariants: a sent quotation refusing new lines and refusing a PATCH, and a quote honoured after a nine-fold price rise; an empty or already-lapsed quotation refused at send; the notice carrying no figures a customer could not check in their account; acceptance writing the order lines, attaching to an existing order where there is one, and refusing when expired, declined or still a draft; who answered recorded, and declining never claiming a customer accepted; revision copying lines at their quoted figures; the sweep moving lapsed offers out of `sent` and leaving answered ones alone; expiry true from the date rather than the sweep; the customer seeing sent quotations but not drafts, accepting their own and not another's, and the RLS policies straight at the database |
+| `backend/tests/test_order_lines.py` | The snapshot holding when the catalogue is repriced; an unpriced offering refused rather than sold for nothing; a discount applied before the VAT split; net + VAT equalling gross on every line; an invoice copying its lines and totalling them; the description surviving a rename of the offering; editing an order line not changing an issued invoice; one billing per order line, at the service *and* at the database; only the unbilled remainder invoiced; the void limit and its escape hatch; a mixed-currency order refused rather than summed; role gating on both jobs; a client-sent `unit_amount` ignored; the RLS policies on both new tables, straight at the database |
+| `customer-portal/src/pages/OrderDetail.test.tsx` | The customer's own order: each line with its rate and total; the VAT treatment stated per line; the server's totals used rather than the column summed locally; a two-currency order saying so instead of totalling; what is still to be invoiced; the invoices raised against the order |
+| `frontend/src/pages/QuotationDetail.test.tsx` | That a draft is a form and a sent quotation is a document — the line form disappears rather than failing on save; an empty quotation not sendable; both answers offered on a sent one, and acceptance disabled once lapsed; the transition posted rather than a status patched; the order an accepted quotation became; the required role named rather than the panel hidden |
+| `customer-portal/src/pages/QuotationDetail.test.tsx` | The terms beside the button — total including VAT and the lapse date; how each rate was quoted; accept posted as an action rather than a status; no answer offered on a lapsed offer (decided from the date, not the stored status); what was decided shown once answered; the server's refusal surfaced rather than swallowed |
+| `frontend/src/pages/OrderDetail.test.tsx` | That the form posts an offering and quantity and never a price; the invoice button naming how many lines it will bill and disabling once there are none; billed lines marked; the two role gates; the order's net/VAT/gross totals |
+| `frontend/src/components/Layout.test.tsx` | The console shell: destinations grouped under labelled sections; the queues hidden from roles that cannot open them (the same gate the command palette reads, so one regression fails both); the collapsed rail remembered, and still collapsing when `localStorage` throws; the header naming the section a detail route belongs to; Ctrl-K opening the palette, filtering, navigating on Enter, closing on Escape, and saying so rather than showing an empty list |
+| `frontend/src/components/navigation.test.ts` | `titleForPath` for list routes, detail routes, and the three detail routes whose collection isn't in the rail (`/test-requests/…`, `/training-sessions/…`, `/invoices/…`), plus its fallback; role filtering dropping items and never leaving an empty section |
 | `frontend/src/api/client.test.ts` | CSRF header on unsafe methods only and url-decoded; `credentials: include`; 204 → `undefined`; `ApiError` status/body; `describeApiError` unwrapping `detail`, field-error arrays, plain strings, and non-`ApiError` values |
 | `frontend/src/pages/BillingList.test.tsx` | `BILLING_WRITE_ROLES` gating the invoice form (a hand-maintained mirror of the server's list); billing an order vs an enrollment sending exactly one of the two; the status filter reaching the API |
 | `frontend/src/pages/EquipmentList.test.tsx` | `EQUIPMENT_WRITE_ROLES` gating both write forms; filtering for `out_of_calibration`, the status FR-E3-02 sets automatically; a reagent's CRM reference and expiry being sent, since FR-C3-02 depends on both |
@@ -2061,6 +2628,7 @@ returning a plausible empty result) and `renderWithProviders()`.
 | `customer-portal/src/components/ProtectedRoute.test.tsx` | Same three-state guard on the customer side, where the screens behind it are RLS-scoped |
 | `customer-portal/src/pages/Account.test.tsx` | The three states of TOTP enrollment: no secret revealed before one is requested, `mfa_enabled` **not** claimed between issuing the secret and confirming a code, the account re-read after confirming rather than set locally, and the code field surviving a wrong code so the customer isn't sent back to a secret they already stored |
 | `customer-portal/src/pages/MyCreditNotes.test.tsx` | Redemption posting the entered enrollment; no control offered on an already-applied note; a click with nothing entered posting nothing rather than `NaN`; per-row entry state, so typing against one note cannot redeem another |
+| `customer-portal/src/components/Layout.test.tsx` | One header serving both audiences: a signed-out visitor offered the public Training catalogue and a way in, with none of the links that would 403; a customer offered their own screens, their account, and a way out |
 | `customer-portal/src/pages/MyReports.test.tsx` | That no presigned URL is requested until the customer clicks (they expire, so minting on load hands out links that silently fail), navigation to the returned URL, and a download failure reported against the row instead of navigating |
 
 Two things worth knowing before adding more:

@@ -5,6 +5,7 @@ import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { EQUIPMENT_WRITE_ROLES, INSTRUMENT_MODEL_LABELS, INSTRUMENT_STATUS_LABELS } from "../api/types";
 import type { InstrumentModel, InstrumentStatus } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 const INSTRUMENT_MODELS = Object.keys(INSTRUMENT_MODEL_LABELS) as InstrumentModel[];
 const INSTRUMENT_STATUSES = Object.keys(INSTRUMENT_STATUS_LABELS) as InstrumentStatus[];
@@ -54,12 +55,10 @@ export function EquipmentList() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Equipment</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          Instruments and standard reagents/reference materials (Blueprint 3.3).
-        </p>
-      </div>
+      <PageHeader
+        title="Equipment"
+        description="Instruments and standard reagents/reference materials (Blueprint 3.3)."
+      />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
         <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Instruments</h2>
@@ -81,11 +80,11 @@ export function EquipmentList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1 }}>
             New instrument name
-            <input value={instrumentName} onChange={(e) => setInstrumentName(e.target.value)} required style={inputStyle} />
+            <input value={instrumentName} onChange={(e) => setInstrumentName(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Model
-            <select value={instrumentModel} onChange={(e) => setInstrumentModel(e.target.value as InstrumentModel)} style={inputStyle}>
+            <select value={instrumentModel} onChange={(e) => setInstrumentModel(e.target.value as InstrumentModel)}>
               {INSTRUMENT_MODELS.map((m) => (
                 <option key={m} value={m}>
                   {INSTRUMENT_MODEL_LABELS[m]}
@@ -102,10 +101,10 @@ export function EquipmentList() {
         </form>
       )}
 
-      <div className="card" style={{ overflow: "hidden", marginBottom: 32 }}>
-        {instrumentsLoading && <div style={{ padding: 24 }}>Loading…</div>}
+      <div className="card table-card" style={{ marginBottom: 32 }}>
+        {instrumentsLoading && <div className="card-state">Loading…</div>}
         {instruments && instruments.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No instruments match this filter.</div>
+          <div className="card-state">No instruments match this filter.</div>
         )}
         {instruments && instruments.results.length > 0 && (
           <table>
@@ -143,19 +142,19 @@ export function EquipmentList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1, minWidth: 140 }}>
             Name
-            <input value={reagentName} onChange={(e) => setReagentName(e.target.value)} required style={inputStyle} />
+            <input value={reagentName} onChange={(e) => setReagentName(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Lot number
-            <input value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} required style={inputStyle} />
+            <input value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             CRM traceability reference
-            <input value={crmReference} onChange={(e) => setCrmReference(e.target.value)} required style={inputStyle} />
+            <input value={crmReference} onChange={(e) => setCrmReference(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Expiry date
-            <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} required style={inputStyle} />
+            <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} required />
           </label>
           <button type="submit" className="btn btn-primary" disabled={createReagent.isPending}>
             Add
@@ -166,10 +165,10 @@ export function EquipmentList() {
         </form>
       )}
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {reagentsLoading && <div style={{ padding: 24 }}>Loading…</div>}
+      <div className="card table-card">
+        {reagentsLoading && <div className="card-state">Loading…</div>}
         {reagents && reagents.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No standard reagents yet.</div>
+          <div className="card-state">No standard reagents yet.</div>
         )}
         {reagents && reagents.results.length > 0 && (
           <table>
@@ -200,10 +199,3 @@ export function EquipmentList() {
   );
 }
 
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

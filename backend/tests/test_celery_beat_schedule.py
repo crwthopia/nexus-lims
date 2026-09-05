@@ -53,6 +53,10 @@ def test_the_schedule_covers_both_blueprint_automations(registered_tasks):
 
     assert "apps.audit.tasks.run_retention_sweep" in scheduled
     assert "apps.training.tasks.check_session_capacity" in scheduled
+    # Added with quotations: nothing depends on it having run (acceptance
+    # checks the date directly), but without it lapsed offers sit in `sent`
+    # and every count of what is outstanding is wrong.
+    assert "apps.quotations.tasks.expire_quotations" in scheduled
 
 
 def test_both_entries_run_daily_at_the_documented_hours():

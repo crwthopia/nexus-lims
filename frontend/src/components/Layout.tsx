@@ -1,13 +1,81 @@
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
 import { ThemeToggle } from "./ThemeToggle";
 import { Logo } from "./Logo";
+import { Icon } from "./Icon";
+import { CommandPalette } from "./CommandPalette";
+import { navSections, titleForPath } from "./navigation";
+import { isNarrowViewport, readSidebarCollapsed, writeSidebarCollapsed } from "../sidebar";
 
+/**
+ * The console shell: a fixed nav rail, a sticky header, and the routed
+ * screen between them -- the same arrangement as the NexusCRM Enterprise
+ * console this product's theme is matched to, so someone who works in both
+ * doesn't have to relearn where things are.
+ *
+ * It replaced a single row of top-level links, which had run out of room:
+ * ten destinations across one line left no space for a section label, so
+ * Documents, Investigations and System failures sat beside Billing with
+ * nothing saying they were different kinds of work. The rail groups them
+ * (see navigation.ts) and has room to keep growing.
+ *
+ * Two states are remembered or derived rather than assumed:
+ * - collapsed, persisted per browser (sidebar.ts), for people who want the
+ *   full width for a wide worklist;
+ * - narrow, where the rail leaves the flow and becomes a drawer, because a
+ *   248px rail on a phone is most of the screen.
+ */
 export function Layout() {
   const { user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
-  const canReview = hasRole("reviewer", "approver", "qa_officer", "lab_supervisor");
-  const canTest = hasRole("analyst", "reviewer", "qa_officer", "lab_supervisor");
+  const { pathname } = useLocation();
+
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+  const [narrow, setNarrow] = useState(isNarrowViewport);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const sections = navSections(hasRole);
+
+  // Keeps `narrow` honest when the window is resized or a tablet is rotated,
+  // so the toggle button doesn't keep collapsing a rail that is currently a
+  // drawer.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(max-width: 900px)");
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // A drawer left open over the screen you just navigated to is the classic
+  // mobile-nav bug; closing on every path change fixes it for good.
+  useEffect(() => setDrawerOpen(false), [pathname]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if (e.key === "Escape") {
+        setDrawerOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const toggleRail = useCallback(() => {
+    if (narrow) {
+      setDrawerOpen((open) => !open);
+      return;
+    }
+    setCollapsed((was) => {
+      writeSidebarCollapsed(!was);
+      return !was;
+    });
+  }, [narrow]);
 
   async function handleLogout() {
     await logout();
@@ -20,106 +88,123 @@ export function Layout() {
   }
 
   return (
-    <div>
-      <header
-        style={{
-          borderBottom: "1px solid var(--color-border)",
-          background: "var(--color-surface)",
-        }}
-      >
-        {/*
-          Full-width bar, unlike <main>, which stays in the 1100px reading
-          container. The nav outgrew 1100px once Reports was added, and a
-          constrained header would either wrap to two rows or clip a link.
-          A full-width top bar over constrained content is also what the
-          NexusCRM console this theme matches does.
-        */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 20,
-            height: 60,
-            padding: "0 24px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 20, minWidth: 0 }}>
-            <Link to="/" style={{ textDecoration: "none", whiteSpace: "nowrap" }} aria-label="NexusLIMS home">
-              <Logo />
-            </Link>
-            <nav style={{ display: "flex", gap: 14, overflowX: "auto", minWidth: 0 }}>
-              <NavLink to="/samples" style={navStyle}>
-                Samples
-              </NavLink>
-              <NavLink to="/documents" style={navStyle}>
-                Documents
-              </NavLink>
-              <NavLink to="/investigations" style={navStyle}>
-                Investigations
-              </NavLink>
-              <NavLink to="/equipment" style={navStyle}>
-                Equipment
-              </NavLink>
-              <NavLink to="/training" style={navStyle}>
-                Training
-              </NavLink>
-              <NavLink to="/reports" style={navStyle}>
-                Reports
-              </NavLink>
-              <NavLink to="/billing" style={navStyle}>
-                Billing
-              </NavLink>
-              <NavLink to="/system-failures" style={navStyle}>
-                System
-              </NavLink>
-              {canTest && (
-                <NavLink to="/testing-queue" style={navStyle}>
-                  Testing Queue
-                </NavLink>
-              )}
-              {canReview && (
-                <NavLink to="/review-queue" style={navStyle}>
-                  Review Queue
-                </NavLink>
-              )}
-            </nav>
-          </div>
-          {user && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ textAlign: "right", lineHeight: 1.3 }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>{user.display_name}</div>
-                <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                  {user.roles.map((r) => r.name).join(", ") || "no roles assigned"}
-                </div>
+    <div className="app-shell" data-collapsed={collapsed} data-mobile-open={drawerOpen}>
+      <nav className="sidebar" aria-label="Sections">
+        <Link to="/" className="sidebar-brand" aria-label="NexusLIMS home">
+          <Logo compact={collapsed && !narrow} wordmark={!collapsed || narrow} />
+          {(!collapsed || narrow) && (
+            <span className="brand-text" style={{ fontSize: "0.7rem", color: "var(--color-text-muted)" }}>
+              Staff
+            </span>
+          )}
+        </Link>
+
+        <div className="sidebar-nav">
+          {sections.map((section) => (
+            <div className="nav-section" key={section.label}>
+              <div className="nav-label" aria-hidden="true">
+                {section.label}
               </div>
-              <ThemeToggle />
-              <button className="btn" onClick={handleLogout}>
-                Log out
-              </button>
+              {/* The group is labelled for assistive tech too, since the
+                  visible label above is hidden from it when collapsed. */}
+              <ul aria-label={section.label}>
+                {section.items.map((item) => (
+                  <li key={item.to}>
+                    <NavLink to={item.to} className="nav-item" title={item.label}>
+                      <Icon name={item.icon} />
+                      <span className="nav-text">{item.label}</span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
             </div>
+          ))}
+        </div>
+
+        {user && (
+          <div className="sidebar-foot">
+            <div className="user-chip" title={user.display_name}>
+              <span className="avatar" aria-hidden="true">
+                {initials(user.display_name)}
+              </span>
+              <span className="user-meta truncate" style={{ minWidth: 0 }}>
+                <span className="truncate" style={{ display: "block", fontSize: "0.85rem", fontWeight: 600 }}>
+                  {user.display_name}
+                </span>
+                <span
+                  className="truncate"
+                  style={{ display: "block", fontSize: "0.75rem", color: "var(--color-text-muted)" }}
+                >
+                  {roleSummary(user.roles.map((r) => r.name))}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+      </nav>
+
+      {/* Only rendered on a narrow viewport, where the rail floats over the
+          content: a click anywhere outside it should dismiss it. */}
+      {narrow && drawerOpen && (
+        <button type="button" className="scrim" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} />
+      )}
+
+      <header className="topbar">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={toggleRail}
+          aria-label={narrow ? (drawerOpen ? "Close navigation" : "Open navigation") : collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={narrow ? drawerOpen : !collapsed}
+        >
+          <Icon name="sidebar" />
+        </button>
+        <h2 className="topbar-title">{titleForPath(pathname)}</h2>
+
+        <div className="topbar-right">
+          <button type="button" className="searchbtn" onClick={() => setPaletteOpen(true)}>
+            <Icon name="search" size={16} />
+            <span>Go to…</span>
+            <span className="kbd" aria-hidden="true">
+              ⌘K
+            </span>
+          </button>
+          <ThemeToggle />
+          {user && (
+            <button type="button" className="icon-btn" onClick={handleLogout} aria-label="Log out" title="Log out">
+              <Icon name="logout" />
+            </button>
           )}
         </div>
       </header>
-      <main className="container" style={{ paddingTop: 28, paddingBottom: 48 }}>
-        <Outlet />
+
+      <main className="app-main">
+        <div className="page">
+          <Outlet />
+        </div>
       </main>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} hasRole={hasRole} />
     </div>
   );
 }
 
-function navStyle({ isActive }: { isActive: boolean }) {
-  return {
-    // --color-accent, not --color-primary: the primary blue is the button
-    // *fill* colour and only reaches 4.38:1 as text on the header surface.
-    // The accent is the text-on-dark variant (6.75:1). See the README's
-    // Theme section.
-    color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
-    fontWeight: 600,
-    fontSize: "0.9rem",
-    textDecoration: "none",
-    // The nav is one line; without this, adding a link makes the labels
-    // themselves wrap and the header grows to two rows.
-    whiteSpace: "nowrap" as const,
-  };
+/** "Maria Dela Cruz" -> "MC". Two letters at most: three stop fitting the circle. */
+function initials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const letters = parts.length === 1 ? parts[0].slice(0, 2) : `${parts[0][0]}${parts[parts.length - 1][0]}`;
+  return letters.toUpperCase();
+}
+
+/**
+ * Roles under the name in the rail. The old header printed every role
+ * comma-separated, which for a lab supervisor holding five of them wrapped
+ * the header onto a second line; here there is one line's worth of space, so
+ * beyond two it counts the rest.
+ */
+function roleSummary(roles: string[]): string {
+  if (roles.length === 0) return "No roles assigned";
+  const named = roles.slice(0, 2).map((r) => r.replace(/_/g, " "));
+  return roles.length > 2 ? `${named.join(", ")} +${roles.length - 2}` : named.join(", ");
 }

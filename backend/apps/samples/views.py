@@ -10,10 +10,12 @@ one write path that can move a Sample through review/approval, so the guard
 can't be bypassed by posting a ReviewAction/ApprovalAction directly.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from django_fsm import TransitionNotAllowed
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -21,20 +23,32 @@ from apps.accounts.authentication import CustomerSessionAuthentication
 from apps.accounts.models import ESignature, Role
 from apps.accounts.permissions import IsCustomerAuthenticated, roles_required
 from apps.accounts.services import capture_esignature
+from apps.billing import services as billing_services
+from apps.billing.serializers import InvoiceDetailSerializer
+from apps.billing.views import BILLING_WRITE_ROLES
+from apps.catalogue.models import ServiceOffering
 from apps.common.params import body_dict, int_param, str_param
 from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
 from apps.review.services import SegregationOfDutiesError, check_can_approve
 from apps.notifications.tasks import notify_sample_progress
+from apps.samples import order_services
 from apps.samples.models import ChainOfCustodyEvent, Order, Sample
 from apps.samples.serializers import (
     ChainOfCustodyEventSerializer,
+    CustomerOrderDetailSerializer,
+    OrderDetailSerializer,
+    OrderItemSerializer,
     OrderSerializer,
     SampleDetailSerializer,
     SampleSerializer,
 )
 
 RoleName = Role.RoleName
+# Ordering is intake work, so it takes the intake roles -- who books a
+# sample in is who says what was ordered. Billing it is a different job
+# with a different list (BILLING_WRITE_ROLES, apps/billing/views.py).
+ORDER_ITEM_WRITE_ROLES = (RoleName.SAMPLE_RECEIVER, RoleName.LAB_SUPERVISOR, RoleName.SYSTEM_ADMINISTRATOR)
 
 
 def _run_transition(sample, method_name):
@@ -54,9 +68,81 @@ def _run_transition(sample, method_name):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.select_related("customer")
+    queryset = Order.objects.select_related("customer").prefetch_related("items__offering")
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        return OrderDetailSerializer if self.action == "retrieve" else OrderSerializer
+
+    @action(detail=True, methods=["get", "post"], url_path="items")
+    def items(self, request, pk=None):
+        """
+        GET/POST /orders/{id}/items/ -- what was ordered, and adding to it.
+
+        POST takes an offering, a quantity and an optional discount, and
+        nothing else: the price is snapshotted server-side from the rate in
+        force (apps/samples/order_services.py). A client that could send a
+        `unit_amount` could sell at any price it liked.
+        """
+        order = self.get_object()
+
+        if request.method == "GET":
+            return Response(OrderItemSerializer(order.items.select_related("offering"), many=True).data)
+
+        if not (request.user.is_superuser or request.user.roles.filter(name__in=ORDER_ITEM_WRITE_ROLES).exists()):
+            raise PermissionDenied(
+                "Adding a line to an order requires the Sample Receiver, Lab Supervisor, "
+                "or System Administrator role."
+            )
+
+        offering_id = int_param(body_dict(request).get("offering"), "offering")
+        if not offering_id:
+            raise ValidationError({"offering": "Required: the catalogue offering being ordered."})
+        try:
+            offering = ServiceOffering.objects.get(pk=offering_id, is_active=True)
+        except ServiceOffering.DoesNotExist as exc:
+            raise ValidationError({"offering": "No such active offering."}) from exc
+
+        quantity = int_param(body_dict(request).get("quantity"), "quantity") or 1
+        if quantity < 1:
+            raise ValidationError({"quantity": "Must be at least 1."})
+        discount = body_dict(request).get("discount_pct") or 0
+
+        try:
+            item = order_services.add_item(order, offering, quantity=quantity, discount_pct=Decimal(str(discount)))
+        except order_services.Unpriced as exc:
+            # A 400 rather than a 500: the request is answerable, the
+            # catalogue just isn't ready for it, and the message says so.
+            raise ValidationError({"offering": str(exc)}) from exc
+        except InvalidOperation as exc:
+            raise ValidationError({"discount_pct": "Expected a number."}) from exc
+
+        return Response(OrderItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="invoice")
+    def invoice(self, request, pk=None):
+        """
+        POST /orders/{id}/invoice/ -- raise an invoice for everything on
+        this order that has not been billed yet.
+
+        Billing is a different job from ordering, so it takes the billing
+        roles rather than the ordering ones.
+        """
+        order = self.get_object()
+
+        if not (request.user.is_superuser or request.user.roles.filter(name__in=BILLING_WRITE_ROLES).exists()):
+            raise PermissionDenied(
+                "Raising an invoice requires the Training Coordinator, Lab Supervisor, "
+                "or System Administrator role."
+            )
+
+        try:
+            invoice = billing_services.invoice_order(order)
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+
+        return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 
 class CustomerOrderViewSet(viewsets.ReadOnlyModelViewSet):
@@ -75,8 +161,14 @@ class CustomerOrderViewSet(viewsets.ReadOnlyModelViewSet):
     authentication_classes = [CustomerSessionAuthentication]
     permission_classes = [IsCustomerAuthenticated]
 
+    def get_serializer_class(self):
+        return CustomerOrderDetailSerializer if self.action == "retrieve" else OrderSerializer
+
     def get_queryset(self):
-        return Order.objects.filter(customer=self.request.user)
+        return (
+            Order.objects.filter(customer=self.request.user)
+            .prefetch_related("items__offering", "items__invoice_lines__invoice", "invoices")
+        )
 
 
 class CustomerSampleViewSet(viewsets.ReadOnlyModelViewSet):

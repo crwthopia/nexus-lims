@@ -1,6 +1,8 @@
 /*
  * Dark theme, matched to the NexusCRM Enterprise console so the two products
- * read as one suite. Every value below was checked for WCAG contrast rather
+ * read as one suite. Identical to the Staff Console's block, token for token
+ * and value for value -- the two apps are one product to a customer who sees
+ * a report link in an email and lands here. Every value below was checked for WCAG contrast rather
  * than eyeballed -- the numbers in the comments are measured ratios against
  * the surface the colour is actually used on. Nothing here is below AA.
  *
@@ -18,6 +20,9 @@
                                      rather than sinking towards the canvas,
                                      which is what the light theme's use of
                                      --color-bg for hover would do here */
+  --color-sidebar: #0c1119;       /* the header bar -- named for the Staff
+                                     Console's nav rail, kept here so the two
+                                     token sets stay identical */
   --color-border: #1e2836;        /* hairline separators between surfaces */
   --color-border-strong: #56698a; /* 3.27:1 on surface -- for form controls,
                                      whose border is the only thing marking
@@ -31,7 +36,11 @@
   --color-primary: #3b6ae8;       /* white label on it: 4.76:1 */
   --color-primary-dark: #3560e0;  /* fill hover; deepens rather than lightens
                                      so the white label keeps 5.38:1 */
-  --color-accent: #6f9bff;        /* links, active nav: 6.75:1 on surface */
+  --color-accent: #6f9bff;        /* links, active nav: 6.75:1 on surface,
+                                     7.04:1 on the rail */
+  --color-accent-soft: #16233c;   /* tint behind the active nav link;
+                                     accent on it: 5.83:1 */
+  --color-overlay: rgba(4, 7, 12, 0.66); /* behind the mobile nav sheet */
 
   /* Brand cyan (NexusLIMS wordmark, brand/). Two values across the themes,
      for the same reason --color-primary and --color-accent are two tokens:
@@ -62,7 +71,26 @@
   --color-status-review: #ab8dfb;     /* 6.10:1 on its bg */
   --color-status-review-bg: #231b3f;
 
-  --radius: 8px;
+  /*
+   * Shape and elevation. Radii are a scale rather than one value so a 999px
+   * pill, a 10px control and a 14px card can't drift apart; the console's
+   * chrome uses --radius-lg for anything card-sized.
+   *
+   * Shadows are per-theme, not shared. On a near-black canvas a black shadow
+   * is invisible, so depth here comes from a darker-than-black spread plus a
+   * hairline highlight; the light theme uses a genuine soft drop shadow.
+   */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6);
+
+  /* Header height, shared with the sticky offset the nav needs. */
+  --topbar-height: 64px;
+
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   /* Makes the UA style native form controls, scrollbars and the like dark. */
   color-scheme: dark;
@@ -93,6 +121,10 @@
   --color-surface-hover: #eef2f7; /* row/button hover -- sinks towards the
                                      canvas, which is the light-theme
                                      equivalent of the dark theme's lift */
+  --color-sidebar: #ffffff;       /* the header bar. Light inverts the dark
+                                     theme's relationship, as the surfaces
+                                     above do: the bar is white and the canvas
+                                     behind <main> is the darker of the two */
   --color-border: #d7dfea;
   --color-border-strong: #7c8ba1; /* 3.46:1 on surface (WCAG 1.4.11) */
 
@@ -104,6 +136,9 @@
   --color-primary: #2a5fd8;       /* white label on it: 5.63:1 */
   --color-primary-dark: #2450bb;  /* fill hover; deepens, white label 7.14:1 */
   --color-accent: #1f52c9;        /* links, active nav: 6.76:1 on surface */
+  --color-accent-soft: #e8effc;   /* tint behind the active nav link;
+                                     accent on it: 5.85:1 */
+  --color-overlay: rgba(14, 22, 32, 0.42);
 
   /* Brand cyan, deepened for this ground -- see the dark theme's note. */
   --color-brand: #0E7490;         /* 5.36:1 on surface, 4.77:1 on canvas */
@@ -136,9 +171,21 @@
   --color-status-review: #5b3fb8;     /* 6.21:1 on its bg */
   --color-status-review-bg: #eee9fc;
 
+  /* Real drop shadows: on a light canvas these do the work the dark theme
+     gets from its border. Kept low-alpha -- a heavy shadow on white reads as
+     a modal, not a card. */
+  --shadow-sm: 0 1px 2px rgba(15, 27, 45, 0.06);
+  --shadow-md: 0 8px 24px rgba(15, 27, 45, 0.08);
+  --shadow-lg: 0 24px 60px rgba(15, 27, 45, 0.16);
+
   /* Makes the UA style native controls, scrollbars and the like light. */
   color-scheme: light;
 }
+
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
 
 * {
   box-sizing: border-box;
@@ -148,6 +195,12 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.5;
+  /* The console is dense: without smoothing, 13px labels on a near-black
+     ground pick up a fringe on sub-pixel-rendering platforms. */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
@@ -162,23 +215,258 @@ a {
   color: var(--color-accent);
 }
 
+h1,
+h2,
+h3 {
+  letter-spacing: -0.011em;
+}
+
+/* Themed to the palette; the UA's own scrollbar is the one piece of chrome
+   colour-scheme alone gets visibly wrong against these surfaces. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-pill);
+}
+
+/* ==========================================================================
+   Header and navigation
+   ========================================================================== */
+
+/*
+ * A customer-facing header, not the Staff Console's nav rail -- deliberately.
+ * The console is a place staff live in all day, where a rail of grouped
+ * sections earns its width; the portal is a handful of destinations someone
+ * visits to collect a report, and the Training catalogue is browsable with no
+ * account at all. A rail on a page a visitor lands on cold reads as an
+ * application they have been dropped into the middle of.
+ *
+ * Everything below the header -- cards, tables, buttons, badges, forms -- is
+ * the same code as the console, so the two still read as one product.
+ */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--color-sidebar);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--topbar-height);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  /* The row scrolls rather than wraps on a narrow screen; a scrollbar under
+     the links would sit on the header's bottom border. */
+  scrollbar-width: none;
+}
+
+.topnav::-webkit-scrollbar {
+  display: none;
+}
+
+.topnav a {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topnav a:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+/* Tint and colour together, never tint alone -- see the note in the console's
+   rail: a background difference is the first thing a high-contrast setting
+   takes away (WCAG 1.4.1). */
+.topnav a[aria-current="page"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.icon-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.account-chip:hover {
+  background: var(--color-surface-hover);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.container {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* The panel the login, register and verification screens sit in. */
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 8vh auto 0;
+  padding: 32px;
+}
+/* ==========================================================================
+   Page header
+   ========================================================================== */
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.page-header p {
+  margin: 4px 0 0;
+  max-width: 68ch;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.backlink:hover {
+  color: var(--color-text);
+}
+
+/* ==========================================================================
+   Controls
+   ========================================================================== */
+
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.4em;
-  padding: 0.5em 1em;
+  justify-content: center;
+  gap: 0.45em;
+  height: 34px;
+  padding: 0 12px;
   border-radius: var(--radius);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 0.85rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  white-space: nowrap;
+  /* Several buttons are <Link>s (Register, Go to login); without this they
+     keep the UA's underline and read as links wearing a button. */
+  text-decoration: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .btn:hover:not(:disabled) {
   background: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
 }
 
 /*
@@ -201,10 +489,12 @@ a {
   background: var(--color-primary);
   border-color: var(--color-primary);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
 }
 
 .btn-danger {
@@ -215,40 +505,112 @@ a {
 
 .btn-danger:hover:not(:disabled) {
   background: var(--color-danger-fill-hover);
+  border-color: var(--color-danger-fill-hover);
 }
+
+.btn-sm {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 0.78rem;
+}
+
+/* ==========================================================================
+   Surfaces
+   ========================================================================== */
 
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
-.container {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 24px;
+/*
+ * A card's own header. Padded to line up with .card-body and with the first
+ * column of a table in the same card, so a titled card and a titled table
+ * don't sit on two different left edges.
+ */
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
 }
+
+.card-head h2,
+.card-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.card-head p {
+  margin: 3px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.card-body {
+  padding: 20px;
+}
+
+/* Loading, empty and error states inside a card, so every screen states them
+   the same way instead of each inventing its own padding. */
+.card-state {
+  padding: 28px 20px;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.card-state-error {
+  color: var(--color-danger);
+}
+
+/* ==========================================================================
+   Tables
+   ========================================================================== */
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 th {
   text-align: left;
-  padding: 10px 16px;
+  padding: 10px 20px;
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  font-weight: 600;
-  font-size: 0.8rem;
+  font-weight: 700;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 td {
-  padding: 12px 16px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--color-border);
+}
+
+/*
+ * A card whose whole body is a table. It clips the table's square corners to
+ * the card's rounded ones, and -- the part that matters on a phone -- lets a
+ * worklist too wide for the screen scroll inside the card instead of pushing
+ * the page itself sideways.
+ */
+.table-card {
+  overflow: hidden;
+  overflow-x: auto;
+}
+
+/* The card rounds its corners; without this the last row's own border cuts a
+   straight line across them. */
+tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 tbody tr:hover {
@@ -256,43 +618,91 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+/*
+ * The detail screens' two-column layout: the record on the left, the actions
+ * panel on the right. A class rather than the inline grid each of the six
+ * detail pages had, so one media query can stack them -- an inline style is
+ * unreachable from a breakpoint, and at 420px the actions panel was being
+ * squeezed to about a third of a phone's width.
+ */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+/*
+ * The label/value pairs inside a detail card. Two columns on a desktop, one
+ * on a phone -- the same const had been copied into all six detail pages,
+ * where the breakpoint could not reach it.
+ */
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The vertical stack of cards inside a detail column. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .badge {
   display: inline-block;
   padding: 0.2em 0.7em;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
+/* The status pill for the enumerations that have no semantic colour of their
+   own -- a document type, an instrument's operational state. StatusBadge
+   owns the ones that do. */
+.badge-neutral {
+  background: var(--color-status-neutral-bg);
+  color: var(--color-status-neutral);
 }
 
-.field input,
-.field select,
-.field textarea {
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: inherit;
-  font-size: 0.9rem;
-}
+/* ==========================================================================
+   Forms
+   ========================================================================== */
 
+/*
+ * Form controls, styled globally rather than per-screen: several inputs
+ * (SampleDetail's review textarea, for one) set only a border inline and
+ * would otherwise inherit the UA's own colours. color-scheme: dark already
+ * makes those dark, but not the same dark as the surrounding card, so state
+ * them explicitly.
+ */
 input,
 select,
 textarea {
+  padding: 7px 10px;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius);
+  /* Textareas default to a monospace UA font, which stood out badly next to
+     the rest of the card. */
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 input::placeholder,
@@ -300,13 +710,71 @@ textarea::placeholder {
   color: var(--color-text-muted);
 }
 
+/* A <select> given .btn is a filter control, not a button: it keeps the
+   button's height and shape but the field's affordance. */
+select.btn {
+  padding: 0 8px 0 12px;
+  cursor: pointer;
+}
+
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
 a:focus-visible {
-  /* See the Staff Console's index.css: the UA default ring is too faint on a
-     near-black surface. --color-accent is 6.75:1 there. */
+  /* A visible ring matters more on dark, where the UA default is faint.
+     --color-accent is 6.75:1 on surface, well past the 3:1 that WCAG 1.4.11
+     asks of a focus indicator. */
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 720px) {
+  .container {
+    padding: 0 16px;
+  }
+
+  .topbar-inner {
+    gap: 12px;
+  }
+
+  /* The wordmark goes; the mark alone still identifies the page, and the nav
+     needs every pixel of the row it is scrolling in. */
+  .brand-text {
+    display: none;
+  }
+
+  .account-chip span:not(.avatar) {
+    display: none;
+  }
+
+  th,
+  td {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

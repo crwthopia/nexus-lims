@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { confirmMfa, enableMfa } from "../api/auth";
 import { describeApiError } from "../api/client";
 import { useAuth } from "../auth/context";
+import { PageHeader } from "../components/PageHeader";
 
 export function Account() {
   const { user, refetchUser } = useAuth();
@@ -27,11 +28,11 @@ export function Account() {
 
   return (
     <div style={{ maxWidth: 480 }}>
-      <h1 style={{ fontSize: "1.4rem", margin: "0 0 20px" }}>Account</h1>
+      <PageHeader title="Account" description="Your sign-in details and multi-factor authentication." />
 
       <div className="card" style={{ padding: 20, marginBottom: 20 }}>
         <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Profile</h2>
-        <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 }}>
+        <dl className="field-grid">
           <dt style={fieldLabel}>Email</dt>
           <dd style={fieldValue}>{user.email}</dd>
           <dt style={fieldLabel}>Email verified</dt>

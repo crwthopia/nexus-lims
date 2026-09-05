@@ -2,12 +2,20 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
 import { ThemeToggle } from "./ThemeToggle";
 import { Logo } from "./Logo";
+import { Icon } from "./Icon";
 
 /**
  * One Layout for every page, public and private alike -- Training is
  * browsable without an account (Blueprint Section 4.3), so there's no
  * clean "public shell" vs. "private shell" split; the nav just adapts to
  * whether `user` is set.
+ *
+ * A header rather than the Staff Console's nav rail, on purpose: the console
+ * is somewhere staff spend a shift, with a dozen grouped destinations worth a
+ * permanent 248px; this is six links a customer visits to collect a report,
+ * on a page a signed-out visitor can land on cold. Everything under the
+ * header -- cards, tables, buttons, badges, forms -- is the console's own CSS,
+ * so the two still read as one product.
  */
 export function Layout() {
   const { user, isLoading, logout } = useAuth();
@@ -20,56 +28,59 @@ export function Layout() {
 
   return (
     <div>
-      <header style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
-        <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-            <Link to="/" style={{ textDecoration: "none" }} aria-label="NexusLIMS home">
-              <Logo />
-            </Link>
-            <nav style={{ display: "flex", gap: 18 }}>
-              {user && (
-                <>
-                  <NavLink to="/" end style={navStyle}>
-                    Orders
-                  </NavLink>
-                  <NavLink to="/samples" style={navStyle}>
-                    Samples
-                  </NavLink>
-                  <NavLink to="/reports" style={navStyle}>
-                    Reports
-                  </NavLink>
-                </>
-              )}
-              <NavLink to="/training" style={navStyle}>
-                Training
-              </NavLink>
-              {user && (
-                <>
-                  <NavLink to="/my-enrollments" style={navStyle}>
-                    My Enrollments
-                  </NavLink>
-                  <NavLink to="/my-credit-notes" style={navStyle}>
-                    Credit Notes
-                  </NavLink>
-                  <NavLink to="/my-invoices" style={navStyle}>
-                    Invoices
-                  </NavLink>
-                </>
-              )}
-            </nav>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <header className="topbar">
+        <div className="container topbar-inner">
+          <Link to="/" className="brand" aria-label="NexusLIMS home">
+            <Logo />
+          </Link>
+          <nav className="topnav" aria-label="Main">
+            {user && (
+              <>
+                <NavLink to="/" end>
+                  Orders
+                </NavLink>
+                <NavLink to="/quotations">Quotations</NavLink>
+                <NavLink to="/samples">Samples</NavLink>
+                <NavLink to="/reports">Reports</NavLink>
+              </>
+            )}
+            <NavLink to="/training">Training</NavLink>
+            {user && (
+              <>
+                {/* "My Enrollments" and "Credit Notes" shortened when
+                    Quotations became the eighth entry: the row scrolls
+                    rather than wraps, and Invoices was falling off the
+                    right-hand edge at an ordinary desktop width. Every
+                    link here is already under "my" by definition. */}
+                <NavLink to="/my-enrollments">Enrollments</NavLink>
+                <NavLink to="/my-credit-notes">Credits</NavLink>
+                <NavLink to="/my-invoices">Invoices</NavLink>
+              </>
+            )}
+          </nav>
+          <div className="topbar-right">
             {/* Outside the auth branches: a visitor reading the public course
                 catalogue can choose a theme too, and it persists into the
                 session they may go on to create. */}
             <ThemeToggle />
             {!isLoading && user && (
               <>
-                <Link to="/account" style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", textDecoration: "none" }}>
-                  {user.email}
+                {/*
+                  The avatar alone, with the address as its accessible name.
+                  The header row is capped by the same 1140px container as
+                  the page, so it does not grow with the window -- and once
+                  Quotations made eight nav entries, an address beside them
+                  pushed Invoices off the end at *every* width. A label
+                  that is also the first line of the Account page this
+                  links to is the right thing to lose.
+                */}
+                <Link to="/account" className="account-chip" title={user.email} aria-label={`Account: ${user.email}`}>
+                  <span className="avatar" aria-hidden="true">
+                    {initials(user.email)}
+                  </span>
                 </Link>
-                <button className="btn" onClick={handleLogout}>
-                  Log out
+                <button type="button" className="icon-btn" onClick={handleLogout} aria-label="Log out" title="Log out">
+                  <Icon name="logout" />
                 </button>
               </>
             )}
@@ -86,21 +97,23 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main className="container" style={{ paddingTop: 28, paddingBottom: 48 }}>
+      <main className="container" style={{ paddingTop: 28, paddingBottom: 56 }}>
         <Outlet />
       </main>
     </div>
   );
 }
 
-function navStyle({ isActive }: { isActive: boolean }) {
-  return {
-    // --color-accent, not --color-primary: the primary blue is the button
-    // fill colour and only reaches 4.38:1 as text on this surface. Same fix
-    // as the Staff Console's Layout -- see the README's Theme section.
-    color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
-    fontWeight: 600,
-    fontSize: "0.9rem",
-    textDecoration: "none",
-  };
+/**
+ * Two letters from an email address, for the account chip: "jam.cosico@" ->
+ * "JC". A customer has no display name here -- the portal only ever knows the
+ * address they signed up with -- so the local part is what there is to work
+ * with, and anything past the first two initials would not fit the circle.
+ */
+function initials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._+-]+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const letters = parts.length === 1 ? parts[0].slice(0, 2) : `${parts[0][0]}${parts[1][0]}`;
+  return letters.toUpperCase();
 }

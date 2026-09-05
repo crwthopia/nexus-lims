@@ -29,6 +29,100 @@ export interface Order {
   created_at: string;
 }
 
+/** Written out for people, rather than `service_line.replace("_", " ")` per screen. */
+export const SERVICE_LINE_LABELS: Record<ServiceLine, string> = {
+  failure_analysis: "Failure Analysis",
+  water_environmental: "Water / Environmental",
+  training: "Training",
+};
+
+export type VatTreatment = "exclusive" | "inclusive";
+
+export type QuotationStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
+
+export const QUOTATION_STATUS_LABELS: Record<QuotationStatus, string> = {
+  draft: "Draft",
+  sent: "Awaiting your answer",
+  accepted: "Accepted",
+  declined: "Declined",
+  expired: "Expired",
+};
+
+/** A quoted line, as the customer being quoted sees it. */
+export interface MyQuotationItem {
+  id: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+}
+
+export interface MyQuotation {
+  id: number;
+  reference: string;
+  service_line: ServiceLine;
+  status: QuotationStatus;
+  valid_until: string;
+  notes: string;
+  item_count: number;
+  totals: { net: string; vat: string; gross: string; currency: string | null };
+  /**
+   * Past its date, whatever the status says — the lab's nightly sweep
+   * lags a lapse by up to a day, so the button trusts this rather than
+   * the status.
+   */
+  is_expired: boolean;
+  sent_at: string | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
+export interface MyQuotationDetail extends MyQuotation {
+  items: MyQuotationItem[];
+  order: number | null;
+}
+
+/**
+ * A line of your own order, as the server sends it to the portal.
+ *
+ * Narrower than the console's view of the same row, deliberately: the
+ * catalogue price id behind the figure is provenance for the lab, not
+ * something a customer can act on. The rate itself *is* here, discount
+ * included — it is their money, and a line that hid what it cost would be
+ * worse than one that said nothing.
+ */
+export interface MyOrderItem {
+  id: number;
+  offering_code: string;
+  offering_name: string;
+  quantity: number;
+  discount_pct: string;
+  unit_amount: string;
+  currency: string;
+  vat_treatment: VatTreatment;
+  vat_rate_pct: string;
+  line_amount: string;
+  net_amount: string;
+  vat_amount: string;
+  gross_amount: string;
+  is_invoiced: boolean;
+}
+
+export interface MyOrderDetail extends Order {
+  items: MyOrderItem[];
+  /** Summed server-side: a net line added to a gross one is wrong by 12%. `currency` is null on a mixed order. */
+  totals: { net: string; vat: string; gross: string; currency: string | null };
+  invoices: { id: number; amount: string; currency: string; status: InvoiceStatus; created_at: string }[];
+}
+
 export type SampleStatus =
   | "pre_registered"
   | "registered"

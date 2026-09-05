@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useCreateInvoice, useInvoices } from "../api/queries";
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
 import { BILLING_WRITE_ROLES, INVOICE_STATUS_LABELS } from "../api/types";
 import type { InvoiceStatus } from "../api/types";
 
@@ -31,22 +32,25 @@ export function BillingList() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Billing</h1>
-          <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-            Invoices and manual payment reconciliation (Blueprint 3.7).
-          </p>
-        </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="btn" style={{ cursor: "pointer" }}>
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {INVOICE_STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Billing"
+        description="Invoices and manual payment reconciliation (Blueprint 3.7)."
+        actions={
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="btn"
+            aria-label="Filter by status"
+          >
+            <option value="">All statuses</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {INVOICE_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        }
+      />
 
       {canWrite && (
         <form
@@ -56,7 +60,7 @@ export function BillingList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Bill against
-            <select value={target} onChange={(e) => setTarget(e.target.value as "order" | "enrollment")} style={inputStyle}>
+            <select value={target} onChange={(e) => setTarget(e.target.value as "order" | "enrollment")}>
               <option value="order">Order</option>
               <option value="enrollment">Enrollment</option>
             </select>
@@ -68,12 +72,12 @@ export function BillingList() {
               value={targetId}
               onChange={(e) => setTargetId(e.target.value)}
               required
-              style={{ ...inputStyle, width: 120 }}
+              style={{ width: 120 }}
             />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Amount (PHP)
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} required style={{ ...inputStyle, width: 120 }} />
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} required style={{ width: 120 }} />
           </label>
           <button type="submit" className="btn btn-primary" disabled={createInvoice.isPending}>
             Create invoice
@@ -84,11 +88,11 @@ export function BillingList() {
         </form>
       )}
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load invoices.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load invoices.</div>}
         {invoices && invoices.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No invoices match this filter.</div>
+          <div className="card-state">No invoices match this filter.</div>
         )}
         {invoices && invoices.results.length > 0 && (
           <table>
@@ -119,10 +123,3 @@ export function BillingList() {
   );
 }
 
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useSamples } from "../api/queries";
+import { PageHeader } from "../components/PageHeader";
 
 /**
  * Samples sitting in under_review, for Reviewer/Approver/QA Officer/Lab
@@ -16,18 +17,13 @@ export function ReviewQueue() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Review Queue</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          Samples awaiting review or approval.
-        </p>
-      </div>
+      <PageHeader title="Review Queue" description="Samples awaiting review or approval." />
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        {isLoading && <div style={{ padding: 24 }}>Loading…</div>}
-        {isError && <div style={{ padding: 24, color: "var(--color-danger)" }}>Couldn't load the queue.</div>}
+      <div className="card table-card">
+        {isLoading && <div className="card-state">Loading…</div>}
+        {isError && <div className="card-state card-state-error">Couldn't load the queue.</div>}
         {data && data.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>
+          <div className="card-state">
             Nothing waiting on review right now.
           </div>
         )}

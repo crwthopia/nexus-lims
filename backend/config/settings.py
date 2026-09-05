@@ -71,6 +71,9 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.training",
     "apps.billing",
+    "apps.catalogue",
+    "apps.quotations",
+    "apps.analytics",
     "apps.audit",
 ]
 
@@ -175,6 +178,14 @@ CELERY_BEAT_SCHEDULE = {
     "retention-sweep-daily": {
         "task": "apps.audit.tasks.run_retention_sweep",
         "schedule": crontab(hour=2, minute=0),
+    },
+    # Before the digest and after the sweeps, at the quiet end of the night:
+    # nothing depends on this having run (acceptance checks the date
+    # directly), it only stops lapsed offers sitting in `sent` and
+    # over-counting what is outstanding.
+    "quotation-expiry-daily": {
+        "task": "apps.quotations.tasks.expire_quotations",
+        "schedule": crontab(hour=3, minute=30),
     },
     "training-capacity-check-daily": {
         "task": "apps.training.tasks.check_session_capacity",

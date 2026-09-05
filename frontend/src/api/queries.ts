@@ -4,6 +4,7 @@ import type {
   ApprovalAction,
   CalibrationRecord,
   CreditNote,
+  DashboardData,
   Document,
   DocumentDetail,
   DocumentVersion,
@@ -12,6 +13,11 @@ import type {
   InstrumentDetail,
   Invoice,
   InvoiceDetail,
+  OrderDetail,
+  OrderItem,
+  Quotation,
+  QuotationDetail,
+  QuotationItem,
   Investigation,
   Paginated,
   Payment,
@@ -21,6 +27,8 @@ import type {
   ReviewAction,
   Sample,
   SampleDetail,
+  ServiceOffering,
+  ServiceOfferingDetail,
   StandardReagent,
   TestMethod,
   TestRequest,
@@ -592,5 +600,194 @@ export function useCloseSystemFailure(id: number) {
     mutationFn: (corrective_action: string) =>
       apiPost<SystemFailure>(`/system-failures/${id}/close/`, { corrective_action }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-failures"] }),
+  });
+}
+
+// --- Service catalogue ----------------------------------------------------
+
+export function useServiceOfferings(params: { service_line?: string; active?: string; q?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.service_line) query.set("service_line", params.service_line);
+  if (params.active) query.set("active", params.active);
+  if (params.q) query.set("q", params.q);
+  const qs = query.toString();
+
+  return useQuery({
+    queryKey: ["service-offerings", params],
+    queryFn: () => apiGet<Paginated<ServiceOffering>>(`/service-offerings/${qs ? `?${qs}` : ""}`),
+  });
+}
+
+export function useServiceOffering(id: number) {
+  return useQuery({
+    queryKey: ["service-offerings", id],
+    queryFn: () => apiGet<ServiceOfferingDetail>(`/service-offerings/${id}/`),
+  });
+}
+
+export function useCreateServiceOffering() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      code: string;
+      name: string;
+      service_line: string;
+      description?: string;
+      turnaround_days?: number | null;
+      is_accredited?: boolean;
+    }) => apiPost<ServiceOffering>("/service-offerings/", data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+export function useUpdateServiceOffering(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Partial<Pick<ServiceOffering, "name" | "description" | "turnaround_days" | "is_accredited" | "is_active">>) =>
+      apiPatch<ServiceOffering>(`/service-offerings/${id}/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+/**
+ * Prices are superseded, never edited: this posts a new one and the server
+ * closes the outgoing price the day before it starts. The response is the
+ * whole offering, history included, so the screen re-renders from one
+ * round trip rather than refetching.
+ */
+export function useSetOfferingPrice(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      amount: string;
+      vat_treatment: string;
+      vat_rate_pct?: string;
+      effective_from?: string;
+      note?: string;
+    }) => apiPost<ServiceOfferingDetail>(`/service-offerings/${id}/set-price/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-offerings"] }),
+  });
+}
+
+/**
+ * The dashboard is one request: the server aggregates, so the browser is
+ * never handed a worklist to reduce for itself.
+ */
+export function useDashboard(params: { from?: string; to?: string; rank?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+  // Sent to the server rather than sorted here: ranking by value changes
+  // which offerings make the top eight, so the fold into "other" has to be
+  // computed against the same measure.
+  if (params.rank) query.set("rank", params.rank);
+  const qs = query.toString();
+
+  return useQuery({
+    queryKey: ["analytics-dashboard", params],
+    queryFn: () => apiGet<DashboardData>(`/analytics/dashboard/${qs ? `?${qs}` : ""}`),
+  });
+}
+
+
+// --- Orders and their lines -----------------------------------------------
+
+export function useOrder(id: number) {
+  return useQuery({
+    queryKey: ["orders", id],
+    queryFn: () => apiGet<OrderDetail>(`/orders/${id}/`),
+  });
+}
+
+/**
+ * The body carries an offering, a quantity and a discount — never a price.
+ * The server snapshots the rate in force (backend/apps/samples/
+ * order_services.py); a client that could send `unit_amount` could sell at
+ * any price it liked.
+ */
+export function useAddOrderItem(orderId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { offering: number; quantity?: number; discount_pct?: string }) =>
+      apiPost<OrderItem>(`/orders/${orderId}/items/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["orders", orderId] }),
+  });
+}
+
+/** Bills everything on the order that hasn't been billed yet. */
+export function useInvoiceOrder(orderId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<InvoiceDetail>(`/orders/${orderId}/invoice/`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+}
+
+
+// --- Quotations -----------------------------------------------------------
+
+export function useQuotations(params: { status?: string } = {}) {
+  const qs = params.status ? `?status=${params.status}` : "";
+  return useQuery({
+    queryKey: ["quotations", params],
+    queryFn: () => apiGet<Paginated<Quotation>>(`/quotations/${qs}`),
+  });
+}
+
+export function useQuotation(id: number) {
+  return useQuery({
+    queryKey: ["quotations", id],
+    queryFn: () => apiGet<QuotationDetail>(`/quotations/${id}/`),
+  });
+}
+
+export function useCreateQuotation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { customer: number; service_line: string; valid_until: string; notes?: string }) =>
+      apiPost<Quotation>("/quotations/", data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
+  });
+}
+
+/** Offering, quantity, discount — never a price. The rate card prices the line. */
+export function useAddQuotationItem(quotationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { offering: number; quantity?: number; discount_pct?: string }) =>
+      apiPost<QuotationItem>(`/quotations/${quotationId}/items/`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations", quotationId] }),
+  });
+}
+
+/**
+ * send / accept / decline, which are FSM transitions rather than field
+ * writes — the server owns the state, and a PATCH could never reach it.
+ */
+export function useQuotationAction(quotationId: number, action: "send" | "accept" | "decline") {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<QuotationDetail>(`/quotations/${quotationId}/${action}/`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
+  });
+}
+
+export function useReviseQuotation(quotationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiPost<QuotationDetail>(`/quotations/${quotationId}/revise/`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quotations"] }),
   });
 }

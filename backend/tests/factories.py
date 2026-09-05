@@ -16,10 +16,12 @@ from django.utils import timezone
 
 from apps.accounts.models import CustomerUser, Role, StaffUser
 from apps.billing.models import Invoice, Payment
+from apps.catalogue.models import OfferingPrice, ServiceOffering
 from apps.documents.models import Document, DocumentVersion
 from apps.equipment.models import CalibrationRecord, Instrument, StandardReagent
 from apps.investigations.models import Investigation
-from apps.samples.models import Order, Sample, ServiceLine
+from apps.quotations.models import Quotation, QuotationItem
+from apps.samples.models import Order, OrderItem, Sample, ServiceLine
 from apps.testing.models import TestMethod, TestRequest, TestResult
 from apps.training.models import CreditNote, Enrollment, TrainingCourse, TrainingSession
 
@@ -228,3 +230,63 @@ class PaymentFactory(factory.django.DjangoModelFactory):
     method = Payment.Method.BANK_TRANSFER
     recorded_by = factory.SubFactory(StaffUserFactory)
     status = Payment.Status.PENDING_CONFIRMATION
+
+
+class ServiceOfferingFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ServiceOffering
+
+    code = factory.Sequence(lambda n: f"WQ-{n:04d}")
+    name = factory.Sequence(lambda n: f"Offering {n}")
+    service_line = ServiceLine.WATER_ENVIRONMENTAL
+    turnaround_days = 5
+
+
+class OfferingPriceFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = OfferingPrice
+
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE
+    effective_from = factory.LazyFunction(lambda: timezone.localdate())
+
+
+class OrderItemFactory(factory.django.DjangoModelFactory):
+    """
+    Note the price fields: a real line snapshots them from the catalogue
+    (apps/samples/order_services.add_item). The factory sets them directly
+    so a test can state the money it means without building a rate card
+    first -- tests that care about the snapshot itself call add_item.
+    """
+
+    class Meta:
+        model = OrderItem
+
+    order = factory.SubFactory(OrderFactory)
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    quantity = 1
+    unit_amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE
+
+
+class QuotationFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Quotation
+
+    customer = factory.SubFactory(CustomerUserFactory)
+    service_line = ServiceLine.WATER_ENVIRONMENTAL
+    valid_until = factory.LazyFunction(lambda: timezone.localdate() + datetime.timedelta(days=30))
+
+
+class QuotationItemFactory(factory.django.DjangoModelFactory):
+    """Sets the price fields directly; a real line snapshots them (quotations.services.add_item)."""
+
+    class Meta:
+        model = QuotationItem
+
+    quotation = factory.SubFactory(QuotationFactory)
+    offering = factory.SubFactory(ServiceOfferingFactory)
+    quantity = 1
+    unit_amount = "1000.00"
+    vat_treatment = OfferingPrice.VatTreatment.EXCLUSIVE

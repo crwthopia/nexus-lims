@@ -18,6 +18,12 @@ import { TrainingList } from "./pages/TrainingList";
 import { TrainingSessionDetail } from "./pages/TrainingSessionDetail";
 import { ReportsList } from "./pages/ReportsList";
 import { BillingList } from "./pages/BillingList";
+import { Dashboard } from "./pages/Dashboard";
+import { OrderDetail } from "./pages/OrderDetail";
+import { QuotationsList } from "./pages/QuotationsList";
+import { QuotationDetail } from "./pages/QuotationDetail";
+import { CatalogueList } from "./pages/CatalogueList";
+import { OfferingDetail } from "./pages/OfferingDetail";
 import { InvoiceDetail } from "./pages/InvoiceDetail";
 
 function App() {
@@ -31,7 +37,10 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/samples" replace />} />
+        {/* The console opens on the dashboard now: it answers "how is the
+            lab doing" before anyone has to pick a worklist. */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/samples" element={<SamplesList />} />
         <Route path="/samples/:id" element={<SampleDetail />} />
         <Route path="/review-queue" element={<ReviewQueue />} />
@@ -46,8 +55,13 @@ function App() {
         <Route path="/training" element={<TrainingList />} />
         <Route path="/training-sessions/:id" element={<TrainingSessionDetail />} />
         <Route path="/reports" element={<ReportsList />} />
+        <Route path="/quotations" element={<QuotationsList />} />
+        <Route path="/quotations/:id" element={<QuotationDetail />} />
+        <Route path="/catalogue" element={<CatalogueList />} />
+        <Route path="/catalogue/:id" element={<OfferingDetail />} />
         <Route path="/billing" element={<BillingList />} />
         <Route path="/system-failures" element={<SystemFailuresList />} />
+        <Route path="/orders/:id" element={<OrderDetail />} />
         <Route path="/invoices/:id" element={<InvoiceDetail />} />
       </Route>
     </Routes>

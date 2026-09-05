@@ -11,6 +11,7 @@ import {
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { TRAINING_SESSION_STATUS_LABELS, TRAINING_WRITE_ROLES } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 export function TrainingList() {
   const { hasRole } = useAuth();
@@ -75,12 +76,7 @@ export function TrainingList() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: "1.4rem", margin: "0 0 4px" }}>Training</h1>
-        <p style={{ color: "var(--color-text-muted)", margin: 0, fontSize: "0.9rem" }}>
-          Course catalog, sessions, and credit notes (Blueprint 3.6).
-        </p>
-      </div>
+      <PageHeader title="Training" description="Course catalog, sessions, and credit notes (Blueprint 3.6)." />
 
       <h2 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>Courses</h2>
       {canWrite && (
@@ -91,15 +87,15 @@ export function TrainingList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1, minWidth: 160 }}>
             New course title
-            <input value={courseTitle} onChange={(e) => setCourseTitle(e.target.value)} required style={inputStyle} />
+            <input value={courseTitle} onChange={(e) => setCourseTitle(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             CPD units
-            <input value={cpdUnits} onChange={(e) => setCpdUnits(e.target.value)} required style={{ ...inputStyle, width: 80 }} />
+            <input value={cpdUnits} onChange={(e) => setCpdUnits(e.target.value)} required style={{ width: 80 }} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Price (PHP)
-            <input value={price} onChange={(e) => setPrice(e.target.value)} required style={{ ...inputStyle, width: 100 }} />
+            <input value={price} onChange={(e) => setPrice(e.target.value)} required style={{ width: 100 }} />
           </label>
           <button type="submit" className="btn btn-primary" disabled={createCourse.isPending}>
             Add
@@ -109,10 +105,10 @@ export function TrainingList() {
           )}
         </form>
       )}
-      <div className="card" style={{ overflow: "hidden", marginBottom: 32 }}>
-        {coursesLoading && <div style={{ padding: 24 }}>Loading…</div>}
+      <div className="card table-card" style={{ marginBottom: 32 }}>
+        {coursesLoading && <div className="card-state">Loading…</div>}
         {courses && courses.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No courses yet.</div>
+          <div className="card-state">No courses yet.</div>
         )}
         {courses && courses.results.length > 0 && (
           <table>
@@ -147,7 +143,7 @@ export function TrainingList() {
         >
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1, minWidth: 160 }}>
             Course
-            <select value={sessionCourseId} onChange={(e) => setSessionCourseId(e.target.value)} required style={inputStyle}>
+            <select value={sessionCourseId} onChange={(e) => setSessionCourseId(e.target.value)} required>
               <option value="">Select a course…</option>
               {courses?.results.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -158,11 +154,11 @@ export function TrainingList() {
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Start
-            <input type="datetime-local" value={startDate} onChange={(e) => setStartDate(e.target.value)} required style={inputStyle} />
+            <input type="datetime-local" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             End
-            <input type="datetime-local" value={endDate} onChange={(e) => setEndDate(e.target.value)} required style={inputStyle} />
+            <input type="datetime-local" value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
             Capacity
@@ -172,7 +168,7 @@ export function TrainingList() {
               value={capacity}
               onChange={(e) => setCapacity(Number(e.target.value))}
               required
-              style={{ ...inputStyle, width: 70 }}
+              style={{ width: 70 }}
             />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
@@ -183,7 +179,7 @@ export function TrainingList() {
               value={minCapacity}
               onChange={(e) => setMinCapacity(Number(e.target.value))}
               required
-              style={{ ...inputStyle, width: 70 }}
+              style={{ width: 70 }}
             />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
@@ -194,7 +190,7 @@ export function TrainingList() {
               value={cancellationThresholdDays}
               onChange={(e) => setCancellationThresholdDays(Number(e.target.value))}
               required
-              style={{ ...inputStyle, width: 70 }}
+              style={{ width: 70 }}
             />
           </label>
           <button type="submit" className="btn btn-primary" disabled={createSession.isPending}>
@@ -205,10 +201,10 @@ export function TrainingList() {
           )}
         </form>
       )}
-      <div className="card" style={{ overflow: "hidden", marginBottom: 32 }}>
-        {sessionsLoading && <div style={{ padding: 24 }}>Loading…</div>}
+      <div className="card table-card" style={{ marginBottom: 32 }}>
+        {sessionsLoading && <div className="card-state">Loading…</div>}
         {sessions && sessions.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No sessions yet.</div>
+          <div className="card-state">No sessions yet.</div>
         )}
         {sessions && sessions.results.length > 0 && (
           <table>
@@ -237,9 +233,9 @@ export function TrainingList() {
       </div>
 
       <h2 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>Credit notes</h2>
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div className="card table-card">
         {creditNotes && creditNotes.results.length === 0 && (
-          <div style={{ padding: 24, color: "var(--color-text-muted)" }}>No credit notes issued yet.</div>
+          <div className="card-state">No credit notes issued yet.</div>
         )}
         {creditNotes && creditNotes.results.length > 0 && (
           <table>
@@ -266,7 +262,7 @@ export function TrainingList() {
                             placeholder="Enrollment ID"
                             value={applyTargets[cn.id] ?? ""}
                             onChange={(e) => setApplyTargets((prev) => ({ ...prev, [cn.id]: e.target.value }))}
-                            style={{ ...inputStyle, width: 100 }}
+                            style={{ width: 100 }}
                           />
                           <button className="btn" disabled={applyCreditNote.isPending} onClick={() => submitApply(cn.id)}>
                             Apply
@@ -290,10 +286,3 @@ export function TrainingList() {
   );
 }
 
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;

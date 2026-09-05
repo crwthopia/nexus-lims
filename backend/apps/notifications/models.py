@@ -40,6 +40,7 @@ class NotificationRecord(models.Model):
         SAMPLE_PROGRESS = "sample_progress", "Sample reached a milestone"
         SAMPLE_PROGRESS_DIGEST = "sample_progress_digest", "Daily sample-progress digest"
         REPORT_READY = "report_ready", "Report ready to download"
+        QUOTATION_SENT = "quotation_sent", "Quotation issued"
         TRAINING_SESSION_RESCHEDULED = "training_session_rescheduled", "Training session rescheduled"
         CUSTOMER_EMAIL_VERIFICATION = "customer_email_verification", "Customer email verification"
         CUSTOMER_DUPLICATE_REGISTRATION = "customer_duplicate_registration", "Duplicate registration attempt"

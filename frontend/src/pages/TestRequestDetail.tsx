@@ -21,6 +21,7 @@ import {
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
 import type { TestResult, TestResultDataType } from "../api/types";
+import { PageHeader } from "../components/PageHeader";
 
 const ACTION_LABELS: Record<string, string> = {
   start: "Start Testing",
@@ -95,22 +96,21 @@ export function TestRequestDetail() {
 
   return (
     <div>
-      <Link to={`/samples/${testRequest.sample}`} style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-        ← Back to {testRequest.sample_code}
-      </Link>
+      <PageHeader
+        back={{ to: `/samples/${testRequest.sample}`, label: testRequest.sample_code }}
+        title={testRequest.test_method_name}
+        meta={
+          <span className="badge badge-neutral">
+            {TEST_REQUEST_STATUS_LABELS[testRequest.status]}
+          </span>
+        }
+      />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 24px" }}>
-        <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{testRequest.test_method_name}</h1>
-        <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-          {TEST_REQUEST_STATUS_LABELS[testRequest.status]}
-        </span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="detail-grid">
+        <div className="stack">
           <div className="card" style={{ padding: 20 }}>
             <h2 style={{ fontSize: "1rem", margin: "0 0 12px" }}>Test method</h2>
-            <dl style={fieldGridStyle}>
+            <dl className="field-grid">
               <Field label="Method reference" value={testMethod?.method_reference || "—"} />
               <Field
                 label="Specification limits"
@@ -167,7 +167,6 @@ export function TestRequestDetail() {
                     <select
                       value={dataType}
                       onChange={(e) => setDataType(e.target.value as TestResultDataType)}
-                      style={inputStyle}
                     >
                       {DATA_TYPES.map((dt) => (
                         <option key={dt} value={dt}>
@@ -182,22 +181,21 @@ export function TestRequestDetail() {
                       value={analyte}
                       onChange={(e) => setAnalyte(e.target.value)}
                       placeholder="e.g. Lead — leave blank if the method reports one value"
-                      style={inputStyle}
                     />
                   </label>
                   <label style={labelStyle}>
                     Value
-                    <input value={value} onChange={(e) => setValue(e.target.value)} required style={inputStyle} />
+                    <input value={value} onChange={(e) => setValue(e.target.value)} required />
                   </label>
                   <label style={labelStyle}>
                     Unit
-                    <input value={unit} onChange={(e) => setUnit(e.target.value)} style={inputStyle} />
+                    <input value={unit} onChange={(e) => setUnit(e.target.value)} />
                   </label>
                 </div>
 
                 <label style={labelStyle}>
                   Instrument (optional)
-                  <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)} style={inputStyle}>
+                  <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
                     <option value="">—</option>
                     {instruments?.results.map((i) => (
                       <option key={i.id} value={i.id}>
@@ -333,12 +331,4 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-const fieldGridStyle = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16, margin: 0 } as const;
 const labelStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem", flex: 1 } as const;
-const inputStyle = {
-  padding: "6px 8px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--color-border)",
-  fontFamily: "inherit",
-  fontSize: "0.9rem",
-} as const;
