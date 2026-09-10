@@ -151,6 +151,8 @@ export interface Sample {
   retention_period: string;
   holding_time: string | null;
   status: SampleStatus;
+  /** Commercial turnaround priority, as booked. */
+  priority: "routine" | "rush" | "emergency";
   safety_flags: string[];
   /** When the lab took custody. Null until the item arrives. */
   received_at: string | null;

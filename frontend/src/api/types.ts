@@ -62,10 +62,20 @@ export type SampleStatus =
   | "retest_pending"
   | "disposed";
 
+export type SamplePriority = "routine" | "rush" | "emergency";
+
+export const SAMPLE_PRIORITY_LABELS: Record<SamplePriority, string> = {
+  routine: "Routine",
+  rush: "Rush",
+  emergency: "Emergency",
+};
+
 export interface Sample {
   id: number;
   order: number | null;
   service_line: ServiceLine;
+  /** Commercial turnaround priority. Not a holding time -- see TestRequest.due_at. */
+  priority: SamplePriority;
   unique_sample_code: string;
   client_reference: string;
   sampling_point: string;
@@ -269,13 +279,32 @@ export type TestRequestStatus =
   | "retest_pending"
   | "completed";
 
+/** What TestRequest.due_at was counted from. Receipt is the fallback, and an optimistic one. */
+export type DueBasis = "collection" | "receipt" | "";
+
+export const DUE_BASIS_LABELS: Record<Exclude<DueBasis, "">, string> = {
+  collection: "from collection",
+  receipt: "from receipt",
+};
+
 export interface TestRequest {
   id: number;
   sample: number;
   sample_code: string;
+  sample_priority: SamplePriority;
   test_method: number;
   test_method_name: string;
   status: TestRequestStatus;
+  /** Holding-time deadline. Null when the method has no holding time, or the sample has no anchor yet. */
+  due_at: string | null;
+  due_at_basis: DueBasis;
+  /**
+   * Past its deadline with work still outstanding. Computed server-side --
+   * it depends on the current time *and* on which statuses still count as
+   * outstanding, and a client deriving the second half would show a
+   * completed test as overdue forever.
+   */
+  is_overdue: boolean;
   assigned_analyst: number | null;
   assigned_analyst_display_name: string | null;
   assigned_instrument: number | null;

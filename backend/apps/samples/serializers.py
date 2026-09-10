@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.billing.models import Invoice
 from apps.samples.models import ChainOfCustodyEvent, Order, OrderItem, Sample, SampleReceipt
+from apps.testing import holding_times
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -179,17 +180,41 @@ class SampleSerializer(serializers.ModelSerializer):
     from the receipt record backing it.
     """
 
+    HOLDING_TIME_INPUTS = frozenset({"collection_datetime", "holding_time"})
+
     class Meta:
         model = Sample
         fields = [
             "id", "order", "service_line", "unique_sample_code", "client_reference",
             "sampling_point", "collection_datetime", "container_type", "container_count",
-            "preservation_method", "retention_period", "holding_time", "status",
+            "preservation_method", "retention_period", "holding_time", "status", "priority",
             "safety_flags", "received_at", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "unique_sample_code", "status", "received_at", "created_at", "updated_at",
         ]
+
+    def update(self, instance, validated_data):
+        """
+        Correcting a collection time or a sample holding time moves every
+        deadline computed from it, so recompute them here.
+
+        The third of the three call sites in apps/testing/holding_times --
+        and the one that is easiest to forget, because nothing about a
+        PATCH to a sample looks like it touches the testing queue. Without
+        it, a collection time corrected the morning after receipt would
+        leave every analysis on that sample carrying a deadline counted
+        from the wrong instant, with nothing to show it was stale.
+
+        Guarded on the two fields that actually feed the calculation:
+        recomputing on every unrelated PATCH would write a history row per
+        test request each time somebody fixed a typo in a sampling point.
+        """
+        touches_deadlines = self.HOLDING_TIME_INPUTS & validated_data.keys()
+        sample = super().update(instance, validated_data)
+        if touches_deadlines:
+            holding_times.apply_to_sample(sample)
+        return sample
 
 
 class SampleReceiptSerializer(serializers.ModelSerializer):

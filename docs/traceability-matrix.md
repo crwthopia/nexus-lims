@@ -15,22 +15,21 @@ Requirement IDs are read from the source itself, so they cannot drift out of syn
 | | Count |
 |---|---:|
 | Requirements referenced in source | 22 |
-| With at least one verifying test | 12 |
-| **With no verifying test** | **10** |
+| With at least one verifying test | 13 |
+| **With no verifying test** | **9** |
 | With no implementation reference | 0 |
-| Test references recorded | 227 |
+| Test references recorded | 256 |
 
 ### Requirements with no verifying test
 
 Each of these is either a requirement genuinely without a test, or a test that verifies it without citing the ID. Both are worth closing: an assessor cannot tell the two apart, and neither can the next person to change the code.
 
-- **FR-C3-01** — implemented at `backend/apps/samples/models.py:242`, `backend/apps/testing/serializers.py:73`
-- **FR-C3-03** — implemented at `backend/apps/testing/views.py:129`
-- **FR-C3-05** — implemented at `backend/apps/testing/models.py:80`
-- **FR-C3-06** — implemented at `backend/apps/testing/views.py:129`
-- **FR-C4-04** — implemented at `backend/apps/samples/models.py:246`, `backend/apps/samples/views.py:514`, `backend/apps/testing/models.py:84`
-- **FR-C4-05** — implemented at `backend/apps/testing/models.py:134`, `backend/apps/testing/migrations/0001_initial.py:108`
-- **FR-C5-01** — implemented at `backend/apps/samples/models.py:251`, `backend/apps/samples/views.py:544`
+- **FR-C3-01** — implemented at `backend/apps/samples/models.py:265`, `backend/apps/testing/serializers.py:106`
+- **FR-C3-03** — implemented at `backend/apps/testing/views.py:172`
+- **FR-C3-06** — implemented at `backend/apps/testing/views.py:172`
+- **FR-C4-04** — implemented at `backend/apps/samples/models.py:269`, `backend/apps/samples/views.py:521`, `backend/apps/testing/models.py:135`
+- **FR-C4-05** — implemented at `backend/apps/testing/models.py:185`, `backend/apps/testing/migrations/0001_initial.py:108`
+- **FR-C5-01** — implemented at `backend/apps/samples/models.py:274`, `backend/apps/samples/views.py:551`
 - **FR-C5-04** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:2`
 - **FR-D1-02** — implemented at `backend/apps/documents/views.py:4`, `frontend/src/pages/DocumentsList.tsx:37`
 - **FR-S1-01** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:3`
@@ -39,20 +38,20 @@ Each of these is either a requirement genuinely without a test, or a test that v
 
 | Requirement | Cited clauses | Implementation | Verifying tests |
 |---|---|---|---:|
-| **FR-C1-01** | — | `backend/apps/samples/models.py:207`<br>`backend/apps/samples/serializers.py:162`<br>`backend/apps/samples/views.py:258` | 32 |
-| **FR-C1-09** | — | `backend/apps/samples/models.py:211`<br>`backend/apps/samples/views.py:287` | 32 |
-| **FR-C1-13** | ISO/IEC 17025:2017 7.4.3 | `backend/apps/samples/models.py:238`<br>`backend/apps/samples/views.py:484` | 32 |
-| **FR-C3-01** | — | `backend/apps/samples/models.py:242`<br>`backend/apps/testing/serializers.py:73` | **none** |
-| **FR-C3-02** | Blueprint Section 7.1 | `backend/apps/accounts/models.py:90`<br>`backend/apps/accounts/permissions.py:2`<br>`backend/apps/testing/ingestion.py:39`<br>`backend/apps/testing/models.py:140`<br>_+4 more_ | 6 |
-| **FR-C3-03** | — | `backend/apps/testing/views.py:129` | **none** |
-| **FR-C3-05** | — | `backend/apps/testing/models.py:80` | **none** |
-| **FR-C3-06** | — | `backend/apps/testing/views.py:129` | **none** |
-| **FR-C3-08** | ISO/IEC 17025:2017 7.10 | `backend/apps/notifications/messages.py:147`<br>`backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:134`<br>`backend/apps/testing/serializers.py:19`<br>_+1 more_ | 9 |
-| **FR-C4-04** | — | `backend/apps/samples/models.py:246`<br>`backend/apps/samples/views.py:514`<br>`backend/apps/testing/models.py:84` | **none** |
-| **FR-C4-05** | — | `backend/apps/testing/models.py:134`<br>`backend/apps/testing/migrations/0001_initial.py:108` | **none** |
-| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:251`<br>`backend/apps/samples/views.py:544` | **none** |
+| **FR-C1-01** | — | `backend/apps/samples/models.py:230`<br>`backend/apps/samples/serializers.py:163`<br>`backend/apps/samples/views.py:259` | 32 |
+| **FR-C1-09** | — | `backend/apps/samples/models.py:234`<br>`backend/apps/samples/views.py:288` | 32 |
+| **FR-C1-13** | ISO/IEC 17025:2017 7.4.3 | `backend/apps/samples/models.py:261`<br>`backend/apps/samples/views.py:491` | 32 |
+| **FR-C3-01** | — | `backend/apps/samples/models.py:265`<br>`backend/apps/testing/serializers.py:106` | **none** |
+| **FR-C3-02** | Blueprint Section 7.1 | `backend/apps/accounts/models.py:90`<br>`backend/apps/accounts/permissions.py:2`<br>`backend/apps/testing/ingestion.py:39`<br>`backend/apps/testing/models.py:191`<br>_+4 more_ | 6 |
+| **FR-C3-03** | — | `backend/apps/testing/views.py:172` | **none** |
+| **FR-C3-05** | — | `backend/apps/testing/models.py:131` | 29 |
+| **FR-C3-06** | — | `backend/apps/testing/views.py:172` | **none** |
+| **FR-C3-08** | ISO/IEC 17025:2017 7.10 | `backend/apps/notifications/messages.py:176`<br>`backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:185`<br>`backend/apps/testing/serializers.py:20`<br>_+1 more_ | 9 |
+| **FR-C4-04** | — | `backend/apps/samples/models.py:269`<br>`backend/apps/samples/views.py:521`<br>`backend/apps/testing/models.py:135` | **none** |
+| **FR-C4-05** | — | `backend/apps/testing/models.py:185`<br>`backend/apps/testing/migrations/0001_initial.py:108` | **none** |
+| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:274`<br>`backend/apps/samples/views.py:551` | **none** |
 | **FR-C5-04** | Blueprint Section 3.1 | `backend/apps/accounts/models.py:190`<br>`backend/apps/accounts/services.py:2` | **none** |
-| **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:346` | 21 |
+| **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:350` | 21 |
 | **FR-D1-02** | Blueprint Section 5.1<br>Blueprint Section 6 | `backend/apps/documents/views.py:4`<br>`frontend/src/pages/DocumentsList.tsx:37` | **none** |
 | **FR-D1-03** | — | `backend/apps/documents/serializers.py:16`<br>`backend/apps/documents/views.py:61` | 14 |
 | **FR-E3-02** | — | `backend/apps/equipment/serializers.py:54`<br>`backend/apps/equipment/views.py:69` | 32 |
@@ -192,7 +191,35 @@ Cited clauses: Blueprint Section 7.1
 
 ### FR-C3-05
 
-**No verifying test cites this requirement.**
+- `backend/tests/test_holding_times.py::test_a_breach_also_reaches_qa`
+- `backend/tests/test_holding_times.py::test_a_breach_is_a_new_message_after_a_warning`
+- `backend/tests/test_holding_times.py::test_a_completed_test_is_never_overdue`
+- `backend/tests/test_holding_times.py::test_a_method_with_no_holding_time_has_no_deadline`
+- `backend/tests/test_holding_times.py::test_a_request_booked_after_receipt_dates_itself`
+- `backend/tests/test_holding_times.py::test_a_retest_does_not_restart_the_clock`
+- `backend/tests/test_holding_times.py::test_a_sample_with_no_clock_yet_has_no_deadline`
+- `backend/tests/test_holding_times.py::test_a_test_with_no_deadline_is_never_overdue`
+- `backend/tests/test_holding_times.py::test_an_unassigned_analysis_falls_back_to_the_analyst_roles`
+- `backend/tests/test_holding_times.py::test_an_unrelated_patch_leaves_the_deadline_alone`
+- `backend/tests/test_holding_times.py::test_completed_work_is_not_swept`
+- `backend/tests/test_holding_times.py::test_correcting_the_collection_time_moves_the_deadline`
+- `backend/tests/test_holding_times.py::test_either_duration_alone_is_enough`
+- `backend/tests/test_holding_times.py::test_outstanding_work_past_its_deadline_is_overdue`
+- `backend/tests/test_holding_times.py::test_priority_outranks_the_deadline`
+- `backend/tests/test_holding_times.py::test_priority_ranks_by_urgency_not_alphabetically`
+- `backend/tests/test_holding_times.py::test_receipt_is_the_fallback_and_says_so`
+- `backend/tests/test_holding_times.py::test_receiving_a_sample_dates_the_requests_already_booked_against_it`
+- `backend/tests/test_holding_times.py::test_recomputing_an_unchanged_deadline_reports_no_change`
+- `backend/tests/test_holding_times.py::test_the_clock_starts_at_collection_not_receipt`
+- `backend/tests/test_holding_times.py::test_the_overdue_filter_returns_only_live_breaches`
+- `backend/tests/test_holding_times.py::test_the_queue_leads_with_the_soonest_deadline`
+- `backend/tests/test_holding_times.py::test_the_shorter_binds_in_the_other_direction_too`
+- `backend/tests/test_holding_times.py::test_the_shorter_of_the_two_holding_times_binds`
+- `backend/tests/test_holding_times.py::test_the_sweep_does_not_repeat_the_same_warning`
+- `backend/tests/test_holding_times.py::test_the_sweep_leaves_work_outside_the_horizon_alone`
+- `backend/tests/test_holding_times.py::test_the_sweep_message_names_the_sample_and_the_basis`
+- `backend/tests/test_holding_times.py::test_the_sweep_warns_before_the_deadline`
+- `backend/tests/test_holding_times.py::test_work_with_no_deadline_sorts_last`
 
 ### FR-C3-06
 

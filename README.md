@@ -33,8 +33,9 @@ was invented outside that grounding.
   per-customer data isolation at the database level.
 - **Celery worker + beat**, running the two automations the Blueprint
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
-  capacity check) plus three the system grew of its own — audit partition
-  creation, the open-failure digest, and quotation expiry — with a real
+  capacity check) plus four the system grew of its own — audit partition
+  creation, the open-failure digest, quotation expiry, and the hourly
+  holding-time sweep — with a real
   S3-compatible object storage client (`boto3` against OSS's S3-compatible
   API — see Object storage below).
 - **System failure register** (ISO/IEC 17025:2017 7.11.3(e)): the failures
@@ -44,10 +45,11 @@ was invented outside that grounding.
   register below.
 - **Email notifications** (`apps/notifications/`): one queue-then-send path
   for every message the lab sends — system failures, calibration due dates,
-  investigations, out-of-spec results, report-ready notices — deduplicated so
-  a nightly sweep cannot chase the same instrument every night, and carrying
-  no result or document into a mailbox — see Notifications below.
-- **623-test automated regression suite** (`backend/tests/`, pytest +
+  holding times about to expire, investigations, out-of-spec results,
+  report-ready notices — deduplicated so a nightly sweep cannot chase the
+  same instrument every night, and carrying no result or document into a
+  mailbox — see Notifications below.
+- **690-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -534,12 +536,132 @@ document an assessor most wants to see.
 
 ### What is not here yet
 
-`holding_time` is stored on both `Sample` and `TestMethod`, serialized, and
-still used by nothing: there is no `due_at` on `TestRequest`, no worksheet
-ordered by it, and no breach alarm. Now that `received_at` exists the
-computation is possible, which it was not before. Label and job-order
-printing sits on top of the same data and is likewise not built. Both are
-tracked as the next steps on this work.
+Label and job-order printing sits on top of this data and is not built.
+
+## Holding times (ISO/IEC 17025:2017 7.4.1)
+
+7.4.1 makes the laboratory responsible for protecting the integrity of an
+item while it holds one, and a holding time is the sharpest form that takes:
+past it, the item no longer supports the measurement, and a result produced
+anyway is nonconforming work (7.10) rather than a late result.
+
+`holding_time` had been stored on both `TestMethod` and `Sample` since the
+schema was written, serialized, and used by nothing — no deadline, no
+ordering, no alarm. It could not have been used, because until
+`Sample.received_at` existed there was no anchor to count from.
+`apps/testing/holding_times.py` is what turns those two durations into a
+control, and three of its decisions are worth stating because each could
+reasonably have gone the other way and the wrong one is silently
+non-compliant rather than broken.
+
+### The clock starts at collection, not receipt
+
+APHA/EPA holding times run from the time the sample was *taken*. A bottle
+that spent twenty hours in a courier's van has spent twenty hours of its
+holding time, and counting from arrival would hand every analysis a
+deadline later than the method actually allows — which is the direction
+that produces a reportable-looking result the method does not support.
+
+`collection_datetime` is nullable, so where it is absent the deadline is
+counted from `received_at` instead and `due_at_basis` records that it was.
+That fallback is optimistic by exactly the transit time, so it is labelled
+rather than hidden: the Testing Queue prints "from receipt" under the date,
+and an analyst can see which of the two they are looking at.
+
+### The most restrictive duration wins
+
+Where both a method holding time and a sample holding time are set they are
+not alternatives. The method's comes from the analytical procedure; the
+sample's from its container and preservation. The item has to satisfy both,
+so `min()` is the only answer that does not quietly permit exceeding one of
+them.
+
+Null stays null. Plenty of analyses — most of the Failure Analysis line —
+have no holding time at all, and a fabricated default would put every one of
+them on a countdown nobody asked for.
+
+### A retest does not restart the clock
+
+`due_at` is anchored to when the sample was taken, and re-queueing a test
+does not un-take it. Nothing recomputes on `requeue_for_retest` or
+`resume_testing`: a retest that can no longer be run inside the holding time
+is a fact the worksheet should show, not one to paper over by moving the
+deadline.
+
+### Three call sites, because the inputs arrive in three orders
+
+A test request can be booked against a sample that has not turned up yet,
+and a sample can be received before anybody has said what to run on it. So
+`apply_to` is called from all three moments that can move the answer:
+
+| When | Where |
+| --- | --- |
+| A test request is created | `TestRequestSerializer.create` |
+| A sample is received | `SampleViewSet.receive` |
+| A collection time or sample holding time is corrected | `SampleSerializer.update` |
+
+The third is the one that is easy to miss, because nothing about a PATCH to
+a sample looks like it touches the testing queue. Without it, a collection
+time corrected the morning after receipt leaves every analysis on that
+sample carrying a deadline counted from the wrong instant, with nothing to
+show it is stale. It is guarded on the two fields that actually feed the
+calculation, so fixing a typo in a sampling point does not write a history
+row per test request.
+
+Existing work was backfilled (`apps/testing/migrations/0004`). Without that
+the control would only ever have covered samples received after the deploy —
+the failure mode where a feature looks finished and protects nothing. The
+rule is deliberately duplicated in that migration rather than imported: a
+migration is a statement about what the schema did on the day it ran, and an
+imported helper is free to change underneath it.
+
+### The queue is an instruction, not a list
+
+`TestRequestViewSet` returns the queue in `_QUEUE_ORDER` — priority, then
+deadline soonest-first with nulls last, then creation order for stability —
+rather than the model's newest-first default. Sorted by creation date it is
+a list of what was booked in; sorted by deadline it is a statement of what
+to do next.
+
+`Sample.priority` (routine/rush/emergency) lives on the sample rather than
+the order, for the same reason `service_line` does: a walk-in has no order,
+and the bench still has to know what is ahead of the queue. It is ranked by
+a `Case` expression rather than by the column, because a `TextChoices` sorts
+alphabetically — emergency, routine, rush — which puts routine work ahead of
+a rush.
+
+Priority above deadline is deliberate, and not obvious. It is right only
+because a breach is not silent: the sweep below chases anything about to
+expire regardless of where it sits in the queue, so the queue does not have
+to be the only thing standing between an analysis and its holding time.
+
+### The sweep
+
+`sweep_holding_times` runs **hourly** — alone among the scheduled tasks here,
+which are otherwise daily. A calibration date or an open failure is still
+there tomorrow; a holding time expires. A daily sweep would find breaches up
+to 23 hours after the item stopped supporting the measurement, by which
+point the message is a post-mortem.
+
+Two messages at most per analysis, and they say different things: a
+**warning** while there is still time to act (`HOLDING_TIME_WARNING_HOURS`,
+default 6 — a working shift's notice), and a **breach** once there is not.
+The dedupe key carries which one it is plus the due date, so the breach
+still lands after the warning was already sent, and a deadline that moves —
+a corrected collection time — is a new notification rather than one
+suppressed by the old row.
+
+It goes to the assigned analyst, falling back to every Analyst and the Lab
+Supervisor where nothing is assigned; an unassigned analysis about to expire
+is more in need of a message, not less. A breach additionally goes to QA,
+because what it opens is a 7.10 evaluation and that is not the analyst's
+call.
+
+**It cannot serve holding times shorter than an hour, and is not meant to.**
+pH, dissolved oxygen and residual chlorine are specified in minutes and are
+field or bench determinations — run on arrival, not scheduled. What this
+covers is the 24-hour to 28-day range, where the failure mode is genuinely
+that something sat in a fridge and nobody looked.
 
 ## Authentication
 

@@ -24,6 +24,7 @@ erDiagram
         string service_line
         string unique_sample_code
         string status
+        string priority
         datetime received_at
         json safety_flags
     }
@@ -59,6 +60,8 @@ erDiagram
         bigint assigned_analyst_id FK
         bigint assigned_instrument_id FK
         string status
+        datetime due_at
+        string due_at_basis
     }
     TEST_RESULT {
         bigint id PK

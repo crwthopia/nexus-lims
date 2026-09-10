@@ -141,6 +141,7 @@ export function sampleDetail(overrides: Partial<SampleDetail> = {}): SampleDetai
     retention_period: "",
     holding_time: null,
     status: "under_review",
+    priority: "routine",
     safety_flags: [],
     received_at: null,
     receipt: null,

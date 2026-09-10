@@ -23,6 +23,7 @@ import {
   INVESTIGATION_WRITE_ROLES,
   SAMPLE_ACTIONS_BY_STATUS,
   SAMPLE_ACTION_ROLES,
+  SAMPLE_PRIORITY_LABELS,
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
 import type { ReportType, SampleReceipt } from "../api/types";
@@ -108,6 +109,9 @@ export function SampleDetail() {
                 label="Order"
                 value={sample.order ? <Link to={`/orders/${sample.order}`}>#{sample.order}</Link> : "—"}
               />
+              {/* Commercial urgency, not the holding-time deadline -- that
+                  is per-analysis and lives on the test request. */}
+              <Field label="Priority" value={SAMPLE_PRIORITY_LABELS[sample.priority]} />
               <Field label="Client reference" value={sample.client_reference || "—"} />
               <Field label="Sampling point" value={sample.sampling_point || "—"} />
               <Field label="Container" value={`${sample.container_count}× ${sample.container_type || "unspecified"}`} />

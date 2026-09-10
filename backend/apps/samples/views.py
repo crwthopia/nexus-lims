@@ -35,6 +35,7 @@ from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerial
 from apps.review.services import SegregationOfDutiesError, check_can_approve
 from apps.notifications.tasks import notify_sample_progress
 from apps.samples import order_services, receipt_services
+from apps.testing import holding_times
 from apps.samples.identity import UnknownServiceLine, allocate_sample_code
 from apps.samples.models import RECEIPT_CHECKS, ChainOfCustodyEvent, Order, Sample, SampleReceipt
 from apps.samples.serializers import (
@@ -346,6 +347,12 @@ class SampleViewSet(viewsets.ModelViewSet):
             # received_at is set on the instance by record_receipt; the
             # transition's own save() has already run by then, so persist it.
             sample.save(update_fields=["received_at", "updated_at"])
+            # The sample now has an anchor, so every test request already
+            # booked against it gets its holding-time deadline. Requests
+            # added *after* this point compute their own on create
+            # (apps/testing/serializers.py) -- between them the two cover
+            # both orders the inputs can arrive in.
+            holding_times.apply_to_sample(sample)
 
         return Response(SampleDetailSerializer(sample).data)
 

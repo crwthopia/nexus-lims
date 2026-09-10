@@ -151,12 +151,32 @@ class Sample(FSMModelMixin, models.Model):
         RETEST_PENDING = "retest_pending", "Retest Pending"
         DISPOSED = "disposed", "Disposed"
 
+    class Priority(models.TextChoices):
+        ROUTINE = "routine", "Routine"
+        RUSH = "rush", "Rush"
+        EMERGENCY = "emergency", "Emergency"
+
     id = models.BigAutoField(primary_key=True)
     order = models.ForeignKey(
         Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="samples",
         help_text="Nullable for walk-in/non-portal samples.",
     )
     service_line = models.CharField(max_length=32, choices=ServiceLine.choices)
+    # On Sample rather than on Order, for the same reason service_line is:
+    # a walk-in has no Order, and the bench still has to know whether the
+    # item in front of it is ahead of the queue.
+    #
+    # Commercial urgency, deliberately kept apart from the holding-time
+    # deadline on TestRequest, which is a scientific limit. Priority says
+    # what the customer paid for; due_at says what the method permits. The
+    # testing queue sorts by both (apps/testing/views.py) because they
+    # answer different questions and neither subsumes the other -- a rush
+    # sample with a week of holding time left is not more urgent than a
+    # routine one expiring in an hour.
+    priority = models.CharField(
+        max_length=16, choices=Priority.choices, default=Priority.ROUTINE,
+        help_text="Commercial turnaround priority. Not a holding time -- see TestRequest.due_at.",
+    )
     unique_sample_code = models.CharField(
         max_length=64, unique=True, db_index=True,
         help_text=(
@@ -194,7 +214,10 @@ class Sample(FSMModelMixin, models.Model):
 
     class Meta:
         db_table = "sample"
-        indexes = [models.Index(fields=["status", "service_line"])]
+        indexes = [
+            models.Index(fields=["status", "service_line"]),
+            models.Index(fields=["priority"]),
+        ]
         ordering = ["-created_at"]
 
     def __str__(self):
