@@ -25,7 +25,7 @@ import {
   SAMPLE_ACTION_ROLES,
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
-import type { ReportType } from "../api/types";
+import type { ReportType, SampleReceipt } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 
 const ACTION_LABELS: Record<string, string> = {
@@ -116,9 +116,20 @@ export function SampleDetail() {
                 label="Collection date"
                 value={sample.collection_datetime ? new Date(sample.collection_datetime).toLocaleString() : "—"}
               />
+              {/* ISO/IEC 17025:2017 7.8.2.1 l) puts the date of receipt on
+                  the report wherever it bears on the validity of the
+                  results, and every holding-time calculation counts from
+                  it -- so it sits with the other dates, not buried in the
+                  custody timeline it is derived from. */}
+              <Field
+                label="Received"
+                value={sample.received_at ? new Date(sample.received_at).toLocaleString() : "—"}
+              />
               <Field label="Created" value={new Date(sample.created_at).toLocaleString()} />
               <Field label="Last updated" value={new Date(sample.updated_at).toLocaleString()} />
             </dl>
+
+            {sample.receipt && <ReceiptPanel receipt={sample.receipt} />}
 
             <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Chain of custody</h2>
             {sample.chain_of_custody_events.length === 0 ? (
@@ -129,7 +140,10 @@ export function SampleDetail() {
                   <li key={event.id} style={{ padding: "8px 0", borderTop: "1px solid var(--color-border)" }}>
                     <strong style={{ textTransform: "capitalize" }}>{event.event_type}</strong>{" "}
                     <span style={{ color: "var(--color-text-muted)" }}>
-                      {new Date(event.timestamp).toLocaleString()}
+                      {/* occurred_at, not timestamp: the timeline is a claim
+                          about the physical item, and an event keyed in the
+                          morning after belongs where it happened. */}
+                      {new Date(event.occurred_at).toLocaleString()}
                       {event.to_location ? ` — ${event.to_location}` : ""}
                     </span>
                   </li>
@@ -418,6 +432,82 @@ function SampleReports({ sampleId }: { sampleId: number }) {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The arrival record (ISO/IEC 17025:2017 7.4.3), read-only.
+ *
+ * Conforming receipts get one line, not a checklist: eleven green ticks on
+ * every routine sample is noise that trains people to stop reading. The
+ * panel only expands where something actually deviated -- which is also
+ * the only case the standard has anything to say about.
+ *
+ * `is_conforming` and `deviation_reasons` come from the server rather than
+ * being re-derived here, so this panel and the start-prep gate can never
+ * disagree about whether an item is doubtful.
+ */
+function ReceiptPanel({ receipt }: { receipt: SampleReceipt }) {
+  const consultationOutstanding = !receipt.is_conforming && !receipt.consultation_recorded;
+
+  return (
+    <>
+      <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Condition on receipt</h2>
+
+      {receipt.is_conforming ? (
+        <p style={{ fontSize: "0.9rem", margin: 0 }}>
+          Received intact by {receipt.received_by_name} on{" "}
+          {new Date(receipt.received_at).toLocaleString()}.
+        </p>
+      ) : (
+        <div
+          style={{
+            border: "1px solid var(--color-danger)",
+            background: "var(--color-danger-bg)",
+            borderRadius: 6,
+            padding: 12,
+            fontSize: "0.9rem",
+          }}
+        >
+          <strong style={{ color: "var(--color-danger)" }}>Received with deviations</strong>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {receipt.deviation_reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          {receipt.deviations && (
+            <p style={{ margin: "10px 0 0", whiteSpace: "pre-wrap" }}>{receipt.deviations}</p>
+          )}
+        </div>
+      )}
+
+      {consultationOutstanding && (
+        <p style={{ color: "var(--color-warning)", fontSize: "0.85rem", marginTop: 10 }}>
+          Testing is on hold until the customer has been consulted and the outcome recorded
+          (ISO/IEC 17025:2017 7.4.3).
+        </p>
+      )}
+
+      {receipt.consultation_recorded && (
+        <dl className="field-grid" style={{ marginTop: 12 }}>
+          <Field
+            label="Customer consulted"
+            value={
+              receipt.customer_consulted_at
+                ? new Date(receipt.customer_consulted_at).toLocaleString()
+                : "—"
+            }
+          />
+          <Field label="Outcome" value={receipt.consultation_outcome} />
+        </dl>
+      )}
+
+      {receipt.report_disclaimer_required && (
+        <p style={{ fontSize: "0.85rem", marginTop: 10 }}>
+          <strong>Report disclaimer required:</strong> {receipt.disclaimer_text}
+        </p>
+      )}
+    </>
   );
 }
 

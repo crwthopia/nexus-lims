@@ -24,14 +24,28 @@ erDiagram
         string service_line
         string unique_sample_code
         string status
+        datetime received_at
         json safety_flags
+    }
+    SAMPLE_RECEIPT {
+        bigint id PK
+        bigint sample_id FK
+        bigint received_by_id FK
+        datetime received_at
+        string condition_on_receipt
+        decimal receipt_temperature_c
+        text deviations
+        datetime customer_consulted_at
+        bool report_disclaimer_required
     }
     CHAIN_OF_CUSTODY_EVENT {
         bigint id PK
         bigint sample_id FK
         bigint from_holder_id FK
         bigint to_holder_id FK
-        datetime transferred_at
+        string event_type
+        datetime occurred_at
+        datetime timestamp
     }
     TEST_METHOD {
         bigint id PK
@@ -84,6 +98,8 @@ erDiagram
 
     CUSTOMER_USER ||--o{ ORDER : places
     ORDER ||--o{ SAMPLE : contains
+    SAMPLE ||--o| SAMPLE_RECEIPT : "arrived as"
+    STAFF_USER ||--o{ SAMPLE_RECEIPT : "accepted by"
     SAMPLE ||--o{ CHAIN_OF_CUSTODY_EVENT : tracks
     STAFF_USER ||--o{ CHAIN_OF_CUSTODY_EVENT : "holds custody"
 

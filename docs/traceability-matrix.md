@@ -15,25 +15,22 @@ Requirement IDs are read from the source itself, so they cannot drift out of syn
 | | Count |
 |---|---:|
 | Requirements referenced in source | 22 |
-| With at least one verifying test | 9 |
-| **With no verifying test** | **13** |
+| With at least one verifying test | 12 |
+| **With no verifying test** | **10** |
 | With no implementation reference | 0 |
-| Test references recorded | 131 |
+| Test references recorded | 227 |
 
 ### Requirements with no verifying test
 
 Each of these is either a requirement genuinely without a test, or a test that verifies it without citing the ID. Both are worth closing: an assessor cannot tell the two apart, and neither can the next person to change the code.
 
-- **FR-C1-01** — implemented at `backend/apps/samples/models.py:180`, `backend/apps/samples/serializers.py:159`
-- **FR-C1-09** — implemented at `backend/apps/samples/models.py:184`, `backend/apps/samples/views.py:254`
-- **FR-C1-13** — implemented at `backend/apps/samples/models.py:188`
-- **FR-C3-01** — implemented at `backend/apps/samples/models.py:192`, `backend/apps/testing/serializers.py:73`
+- **FR-C3-01** — implemented at `backend/apps/samples/models.py:242`, `backend/apps/testing/serializers.py:73`
 - **FR-C3-03** — implemented at `backend/apps/testing/views.py:129`
 - **FR-C3-05** — implemented at `backend/apps/testing/models.py:80`
 - **FR-C3-06** — implemented at `backend/apps/testing/views.py:129`
-- **FR-C4-04** — implemented at `backend/apps/samples/models.py:196`, `backend/apps/samples/views.py:288`, `backend/apps/testing/models.py:84`
+- **FR-C4-04** — implemented at `backend/apps/samples/models.py:246`, `backend/apps/samples/views.py:514`, `backend/apps/testing/models.py:84`
 - **FR-C4-05** — implemented at `backend/apps/testing/models.py:134`, `backend/apps/testing/migrations/0001_initial.py:108`
-- **FR-C5-01** — implemented at `backend/apps/samples/models.py:201`, `backend/apps/samples/views.py:318`
+- **FR-C5-01** — implemented at `backend/apps/samples/models.py:251`, `backend/apps/samples/views.py:544`
 - **FR-C5-04** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:2`
 - **FR-D1-02** — implemented at `backend/apps/documents/views.py:4`, `frontend/src/pages/DocumentsList.tsx:37`
 - **FR-S1-01** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:3`
@@ -42,20 +39,20 @@ Each of these is either a requirement genuinely without a test, or a test that v
 
 | Requirement | Cited clauses | Implementation | Verifying tests |
 |---|---|---|---:|
-| **FR-C1-01** | — | `backend/apps/samples/models.py:180`<br>`backend/apps/samples/serializers.py:159` | **none** |
-| **FR-C1-09** | — | `backend/apps/samples/models.py:184`<br>`backend/apps/samples/views.py:254` | **none** |
-| **FR-C1-13** | — | `backend/apps/samples/models.py:188` | **none** |
-| **FR-C3-01** | — | `backend/apps/samples/models.py:192`<br>`backend/apps/testing/serializers.py:73` | **none** |
+| **FR-C1-01** | — | `backend/apps/samples/models.py:207`<br>`backend/apps/samples/serializers.py:162`<br>`backend/apps/samples/views.py:258` | 32 |
+| **FR-C1-09** | — | `backend/apps/samples/models.py:211`<br>`backend/apps/samples/views.py:287` | 32 |
+| **FR-C1-13** | ISO/IEC 17025:2017 7.4.3 | `backend/apps/samples/models.py:238`<br>`backend/apps/samples/views.py:484` | 32 |
+| **FR-C3-01** | — | `backend/apps/samples/models.py:242`<br>`backend/apps/testing/serializers.py:73` | **none** |
 | **FR-C3-02** | Blueprint Section 7.1 | `backend/apps/accounts/models.py:90`<br>`backend/apps/accounts/permissions.py:2`<br>`backend/apps/testing/ingestion.py:39`<br>`backend/apps/testing/models.py:140`<br>_+4 more_ | 6 |
 | **FR-C3-03** | — | `backend/apps/testing/views.py:129` | **none** |
 | **FR-C3-05** | — | `backend/apps/testing/models.py:80` | **none** |
 | **FR-C3-06** | — | `backend/apps/testing/views.py:129` | **none** |
 | **FR-C3-08** | ISO/IEC 17025:2017 7.10 | `backend/apps/notifications/messages.py:147`<br>`backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:134`<br>`backend/apps/testing/serializers.py:19`<br>_+1 more_ | 9 |
-| **FR-C4-04** | — | `backend/apps/samples/models.py:196`<br>`backend/apps/samples/views.py:288`<br>`backend/apps/testing/models.py:84` | **none** |
+| **FR-C4-04** | — | `backend/apps/samples/models.py:246`<br>`backend/apps/samples/views.py:514`<br>`backend/apps/testing/models.py:84` | **none** |
 | **FR-C4-05** | — | `backend/apps/testing/models.py:134`<br>`backend/apps/testing/migrations/0001_initial.py:108` | **none** |
-| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:201`<br>`backend/apps/samples/views.py:318` | **none** |
+| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:251`<br>`backend/apps/samples/views.py:544` | **none** |
 | **FR-C5-04** | Blueprint Section 3.1 | `backend/apps/accounts/models.py:190`<br>`backend/apps/accounts/services.py:2` | **none** |
-| **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:332` | 21 |
+| **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:346` | 21 |
 | **FR-D1-02** | Blueprint Section 5.1<br>Blueprint Section 6 | `backend/apps/documents/views.py:4`<br>`frontend/src/pages/DocumentsList.tsx:37` | **none** |
 | **FR-D1-03** | — | `backend/apps/documents/serializers.py:16`<br>`backend/apps/documents/views.py:61` | 14 |
 | **FR-E3-02** | — | `backend/apps/equipment/serializers.py:54`<br>`backend/apps/equipment/views.py:69` | 32 |
@@ -69,15 +66,110 @@ Each of these is either a requirement genuinely without a test, or a test that v
 
 ### FR-C1-01
 
-**No verifying test cites this requirement.**
+- `backend/tests/test_sample_receipt.py::test_a_bare_receive_records_a_conforming_receipt`
+- `backend/tests/test_sample_receipt.py::test_a_conforming_item_is_never_gated`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_is_refused_on_an_item_that_arrived_intact`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_needs_an_outcome_not_just_a_phone_call`
+- `backend/tests/test_sample_receipt.py::test_a_deviation_with_no_explanation_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_malformed_body_leaves_the_sample_where_it_was`
+- `backend/tests/test_sample_receipt.py::test_a_nonconforming_item_cannot_start_prep_until_the_customer_is_consulted`
+- `backend/tests/test_sample_receipt.py::test_a_patch_cannot_change_an_allocated_code`
+- `backend/tests/test_sample_receipt.py::test_a_receipt_in_the_future_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_recorded_deviation_is_accepted_and_summarised`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_can_be_disposed_of`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_cannot_be_prepped`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_does_not_land_in_the_nonconforming_work_queue`
+- `backend/tests/test_sample_receipt.py::test_a_sample_received_before_the_receipt_record_existed_is_not_stranded`
+- `backend/tests/test_sample_receipt.py::test_a_service_line_with_no_prefix_refuses_rather_than_inventing_one`
+- `backend/tests/test_sample_receipt.py::test_a_temperature_excursion_counts_as_a_deviation`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_after_it_has_been_booked_in`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_before_it_is_received`
+- `backend/tests/test_sample_receipt.py::test_an_unmeasured_temperature_is_not_recorded_as_conforming`
+- `backend/tests/test_sample_receipt.py::test_an_unrelated_update_still_works_with_the_trigger_in_place`
+- `backend/tests/test_sample_receipt.py::test_authorising_testing_despite_a_deviation_requires_a_disclaimer`
+- `backend/tests/test_sample_receipt.py::test_codes_increment_within_a_service_line_and_month`
+- `backend/tests/test_sample_receipt.py::test_each_service_line_and_month_counts_separately`
+- `backend/tests/test_sample_receipt.py::test_receipt_can_be_backdated_to_when_the_courier_actually_arrived`
+- `backend/tests/test_sample_receipt.py::test_recording_the_consultation_opens_the_gate`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_is_role_gated`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_requires_a_reason`
+- `backend/tests/test_sample_receipt.py::test_the_code_is_allocated_server_side_and_a_client_supplied_one_is_ignored`
+- `backend/tests/test_sample_receipt.py::test_the_database_refuses_a_code_change_even_from_raw_sql`
+- `backend/tests/test_sample_receipt.py::test_the_disclaimer_flag_follows_the_customers_instruction`
+- `backend/tests/test_sample_receipt.py::test_the_receive_response_carries_the_saved_receipt`
+- `backend/tests/test_sample_receipt.py::test_the_write_time_is_kept_separately_from_the_event_time`
 
 ### FR-C1-09
 
-**No verifying test cites this requirement.**
+- `backend/tests/test_sample_receipt.py::test_a_bare_receive_records_a_conforming_receipt`
+- `backend/tests/test_sample_receipt.py::test_a_conforming_item_is_never_gated`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_is_refused_on_an_item_that_arrived_intact`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_needs_an_outcome_not_just_a_phone_call`
+- `backend/tests/test_sample_receipt.py::test_a_deviation_with_no_explanation_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_malformed_body_leaves_the_sample_where_it_was`
+- `backend/tests/test_sample_receipt.py::test_a_nonconforming_item_cannot_start_prep_until_the_customer_is_consulted`
+- `backend/tests/test_sample_receipt.py::test_a_patch_cannot_change_an_allocated_code`
+- `backend/tests/test_sample_receipt.py::test_a_receipt_in_the_future_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_recorded_deviation_is_accepted_and_summarised`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_can_be_disposed_of`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_cannot_be_prepped`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_does_not_land_in_the_nonconforming_work_queue`
+- `backend/tests/test_sample_receipt.py::test_a_sample_received_before_the_receipt_record_existed_is_not_stranded`
+- `backend/tests/test_sample_receipt.py::test_a_service_line_with_no_prefix_refuses_rather_than_inventing_one`
+- `backend/tests/test_sample_receipt.py::test_a_temperature_excursion_counts_as_a_deviation`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_after_it_has_been_booked_in`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_before_it_is_received`
+- `backend/tests/test_sample_receipt.py::test_an_unmeasured_temperature_is_not_recorded_as_conforming`
+- `backend/tests/test_sample_receipt.py::test_an_unrelated_update_still_works_with_the_trigger_in_place`
+- `backend/tests/test_sample_receipt.py::test_authorising_testing_despite_a_deviation_requires_a_disclaimer`
+- `backend/tests/test_sample_receipt.py::test_codes_increment_within_a_service_line_and_month`
+- `backend/tests/test_sample_receipt.py::test_each_service_line_and_month_counts_separately`
+- `backend/tests/test_sample_receipt.py::test_receipt_can_be_backdated_to_when_the_courier_actually_arrived`
+- `backend/tests/test_sample_receipt.py::test_recording_the_consultation_opens_the_gate`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_is_role_gated`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_requires_a_reason`
+- `backend/tests/test_sample_receipt.py::test_the_code_is_allocated_server_side_and_a_client_supplied_one_is_ignored`
+- `backend/tests/test_sample_receipt.py::test_the_database_refuses_a_code_change_even_from_raw_sql`
+- `backend/tests/test_sample_receipt.py::test_the_disclaimer_flag_follows_the_customers_instruction`
+- `backend/tests/test_sample_receipt.py::test_the_receive_response_carries_the_saved_receipt`
+- `backend/tests/test_sample_receipt.py::test_the_write_time_is_kept_separately_from_the_event_time`
 
 ### FR-C1-13
 
-**No verifying test cites this requirement.**
+Cited clauses: ISO/IEC 17025:2017 7.4.3
+
+- `backend/tests/test_sample_receipt.py::test_a_bare_receive_records_a_conforming_receipt`
+- `backend/tests/test_sample_receipt.py::test_a_conforming_item_is_never_gated`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_is_refused_on_an_item_that_arrived_intact`
+- `backend/tests/test_sample_receipt.py::test_a_consultation_needs_an_outcome_not_just_a_phone_call`
+- `backend/tests/test_sample_receipt.py::test_a_deviation_with_no_explanation_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_malformed_body_leaves_the_sample_where_it_was`
+- `backend/tests/test_sample_receipt.py::test_a_nonconforming_item_cannot_start_prep_until_the_customer_is_consulted`
+- `backend/tests/test_sample_receipt.py::test_a_patch_cannot_change_an_allocated_code`
+- `backend/tests/test_sample_receipt.py::test_a_receipt_in_the_future_is_refused`
+- `backend/tests/test_sample_receipt.py::test_a_recorded_deviation_is_accepted_and_summarised`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_can_be_disposed_of`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_cannot_be_prepped`
+- `backend/tests/test_sample_receipt.py::test_a_refused_item_does_not_land_in_the_nonconforming_work_queue`
+- `backend/tests/test_sample_receipt.py::test_a_sample_received_before_the_receipt_record_existed_is_not_stranded`
+- `backend/tests/test_sample_receipt.py::test_a_service_line_with_no_prefix_refuses_rather_than_inventing_one`
+- `backend/tests/test_sample_receipt.py::test_a_temperature_excursion_counts_as_a_deviation`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_after_it_has_been_booked_in`
+- `backend/tests/test_sample_receipt.py::test_an_item_can_be_refused_before_it_is_received`
+- `backend/tests/test_sample_receipt.py::test_an_unmeasured_temperature_is_not_recorded_as_conforming`
+- `backend/tests/test_sample_receipt.py::test_an_unrelated_update_still_works_with_the_trigger_in_place`
+- `backend/tests/test_sample_receipt.py::test_authorising_testing_despite_a_deviation_requires_a_disclaimer`
+- `backend/tests/test_sample_receipt.py::test_codes_increment_within_a_service_line_and_month`
+- `backend/tests/test_sample_receipt.py::test_each_service_line_and_month_counts_separately`
+- `backend/tests/test_sample_receipt.py::test_receipt_can_be_backdated_to_when_the_courier_actually_arrived`
+- `backend/tests/test_sample_receipt.py::test_recording_the_consultation_opens_the_gate`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_is_role_gated`
+- `backend/tests/test_sample_receipt.py::test_refusing_an_item_requires_a_reason`
+- `backend/tests/test_sample_receipt.py::test_the_code_is_allocated_server_side_and_a_client_supplied_one_is_ignored`
+- `backend/tests/test_sample_receipt.py::test_the_database_refuses_a_code_change_even_from_raw_sql`
+- `backend/tests/test_sample_receipt.py::test_the_disclaimer_flag_follows_the_customers_instruction`
+- `backend/tests/test_sample_receipt.py::test_the_receive_response_carries_the_saved_receipt`
+- `backend/tests/test_sample_receipt.py::test_the_write_time_is_kept_separately_from_the_event_time`
 
 ### FR-C3-01
 

@@ -127,6 +127,7 @@ export type SampleStatus =
   | "pre_registered"
   | "registered"
   | "received"
+  | "receipt_rejected"
   | "in_prep"
   | "in_testing"
   | "under_review"
@@ -151,6 +152,8 @@ export interface Sample {
   holding_time: string | null;
   status: SampleStatus;
   safety_flags: string[];
+  /** When the lab took custody. Null until the item arrives. */
+  received_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -235,6 +238,9 @@ export const SAMPLE_STATUS_LABELS: Record<SampleStatus, string> = {
   pre_registered: "Pre-registered",
   registered: "Registered",
   received: "Received",
+  // A customer whose sample was refused at the door needs the plainer
+  // wording: "Rejected at Receipt" reads like a verdict on their water.
+  receipt_rejected: "Not Accepted",
   in_prep: "In Prep",
   in_testing: "In Testing",
   under_review: "Under Review",

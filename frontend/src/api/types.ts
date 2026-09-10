@@ -52,6 +52,7 @@ export type SampleStatus =
   | "pre_registered"
   | "registered"
   | "received"
+  | "receipt_rejected"
   | "in_prep"
   | "in_testing"
   | "under_review"
@@ -76,6 +77,8 @@ export interface Sample {
   holding_time: string | null;
   status: SampleStatus;
   safety_flags: string[];
+  /** When the lab physically took custody. Null until the item arrives; set by the receive action. */
+  received_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,12 +92,66 @@ export interface ChainOfCustodyEvent {
   to_holder: number | null;
   from_location: string;
   to_location: string;
+  /** When custody actually changed hands -- operator-supplied, and what the timeline is ordered by. */
+  occurred_at: string;
+  /** When the row was written. Differs from occurred_at whenever an event is recorded after the fact. */
   timestamp: string;
   event_type: ChainOfCustodyEventType;
 }
 
+export type ReceiptCondition =
+  | "intact"
+  | "damaged"
+  | "leaking"
+  | "seal_broken"
+  | "temperature_excursion"
+  | "insufficient_quantity"
+  | "other";
+
+/**
+ * The arrival record (ISO/IEC 17025:2017 7.4.3), read-only over the API --
+ * every field is written by the receive / receipt-consultation /
+ * reject-at-receipt actions rather than by a PATCH.
+ *
+ * `deviation_reasons` and `is_conforming` are computed server-side and sent
+ * down rather than re-derived here: the temperature check is tri-state (null
+ * means no requirement applied, which is not the same as conforming) and
+ * getting that subtly wrong in the UI would show a clean receipt for an item
+ * the workflow gate considers doubtful.
+ */
+export interface SampleReceipt {
+  id: number;
+  sample: number;
+  received_at: string;
+  received_by: number;
+  received_by_name: string;
+  received_from: string;
+  condition_on_receipt: ReceiptCondition;
+  receipt_temperature_c: string | null;
+  temperature_conforms: boolean | null;
+  seal_intact: boolean;
+  volume_sufficient: boolean;
+  container_conforms: boolean;
+  preservation_conforms: boolean;
+  labelling_legible: boolean;
+  storage_location: string;
+  deviations: string;
+  customer_consulted_at: string | null;
+  consultation_outcome: string;
+  customer_authorised_despite_deviation: boolean;
+  report_disclaimer_required: boolean;
+  disclaimer_text: string;
+  deviation_reasons: string[];
+  is_conforming: boolean;
+  consultation_recorded: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SampleDetail extends Sample {
   chain_of_custody_events: ChainOfCustodyEvent[];
+  /** Null for samples received before the arrival record existed, and for anything not yet received. */
+  receipt: SampleReceipt | null;
 }
 
 export type ReviewActionType = "reviewed" | "flagged" | "returned";
@@ -371,6 +428,10 @@ export const SAMPLE_ACTIONS_BY_STATUS: Record<SampleStatus, string[]> = {
   pre_registered: ["register"],
   registered: ["receive"],
   received: ["start-prep"],
+  // No reject-at-receipt here, deliberately: it requires a written reason,
+  // and these are the actions the detail screen fires as a bare POST. It
+  // belongs on the Receiving bench screen, with the checklist that feeds it.
+  receipt_rejected: ["dispose"],
   in_prep: ["start-testing"],
   in_testing: ["submit-for-review"],
   under_review: ["review", "approve", "reject"],
@@ -385,6 +446,7 @@ export const SAMPLE_STATUS_LABELS: Record<SampleStatus, string> = {
   pre_registered: "Pre-registered",
   registered: "Registered",
   received: "Received",
+  receipt_rejected: "Rejected at Receipt",
   in_prep: "In Prep",
   in_testing: "In Testing",
   under_review: "Under Review",

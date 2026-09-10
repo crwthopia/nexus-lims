@@ -142,6 +142,8 @@ export function sampleDetail(overrides: Partial<SampleDetail> = {}): SampleDetai
     holding_time: null,
     status: "under_review",
     safety_flags: [],
+    received_at: null,
+    receipt: null,
     created_at: "2026-07-01T00:00:00Z",
     updated_at: "2026-07-01T00:00:00Z",
     chain_of_custody_events: [],

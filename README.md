@@ -95,7 +95,7 @@ was invented outside that grounding.
 ```
 nexus-lims/
 ├── README.md                  <- this file
-├── nasat_erd_core.png         <- rendered ERD: core sample-to-report workflow (12 entities)
+├── nasat_erd_core.png         <- rendered ERD: core sample-to-report workflow (13 entities)
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
@@ -200,8 +200,9 @@ The full 26-entity schema was split into two diagrams for readability
 rather than one dense chart:
 
 - **`nasat_erd_core.png`** — the core sample-to-report workflow: accounts
-  (StaffUser/CustomerUser), samples, testing, review, reporting, and
-  investigations. This is the operational heart of the LIMS.
+  (StaffUser/CustomerUser), samples and their arrival records, testing,
+  review, reporting, and investigations. This is the operational heart of
+  the LIMS.
 - **`nasat_erd_support.png`** — the supporting subsystems: RBAC roles,
   e-signatures, documents, equipment/calibration, training/enrollment, and
   billing/audit.
@@ -396,6 +397,149 @@ this project deliberately did **not** adopt, for two reasons:
 backward-compatible `FSMField` and a django-fsm-shaped `@transition`
 decorator, so if the licensing question is ever settled the port is small.
 The `FSMModelMixin` gap would still need an answer.
+
+## Sample intake (ISO/IEC 17025:2017 7.4)
+
+Booking an item in is where the standard is most specific and where a LIMS
+is easiest to get quietly wrong. Three things happen at the counter, and
+each is enforced somewhere different.
+
+### Identity is allocated, never supplied
+
+`Sample.unique_sample_code` used to be a writable string. A unique index
+stopped two rows sharing a code; nothing stopped one row *changing* the
+code already printed on a bottle in a fridge — which is the case 7.4.2
+actually legislates for, since it asks for identification "retained for the
+life of the item in the laboratory".
+
+So codes come from `apps/samples/identity.py` and nowhere else, in the
+shape `WE-202609-0001`: service-line prefix, allocation month, counter.
+Short enough for a 50mm label, readable at a bench, sortable by eye. The
+month is part of the key rather than a running total for the life of the
+lab, because a four-digit counter that never resets eventually has to be
+widened — and widening it changes the format of codes already stuck to
+containers.
+
+Allocation takes `SELECT ... FOR UPDATE` on a per-(prefix, month) counter
+row rather than computing `max(code) + 1`. Two clerks booking in the same
+delivery is the ordinary case at a receiving bench, and max+1 under
+concurrency hands both of them the same number.
+
+Immutability is enforced **three** deep, and the outer two are not enough
+on their own:
+
+| Layer | What it stops |
+| --- | --- |
+| `SampleSerializer.read_only_fields` | A client inventing or renumbering a code over the API |
+| `SampleViewSet.perform_create` | The code being anything other than what `identity.py` issued |
+| A `BEFORE UPDATE` trigger (migration 0009) | Everything else — a management command, a data migration, a psql session, a future endpoint written by somebody who never read this |
+
+Same reasoning as the append-only audit ledger below: the ORM is not the
+only thing that issues `UPDATE`s, and `read_only_fields` is invisible to
+all the things that aren't it. The trigger's residual exposure — a
+superuser, or the table's owner dropping it — is the same one that section
+documents, closed by the same deployment change.
+
+### Two clocks on every custody event
+
+`ChainOfCustodyEvent` now carries `occurred_at` alongside `timestamp`, and
+the pair is the point:
+
+- **`timestamp`** is the system's. `auto_now_add`, unwritable, the moment
+  the row was created.
+- **`occurred_at`** is the operator's. When custody actually changed hands.
+
+Before this, a delivery signed for at 17:40 and keyed in at 18:05 the next
+morning was simply unrecordable, because `auto_now_add` cannot be
+overridden — the timeline said the sample arrived when somebody got round
+to typing. ALCOA wants records both contemporaneous *and* accurate, which
+is exactly why neither field alone will do: the timeline now says when
+custody moved, and the audit trail still says when somebody wrote that
+down. `occurred_at` may be backdated and may never be in the future.
+
+The custody list orders by `occurred_at` with `timestamp` breaking ties, so
+a backdated receipt keyed in after a later transfer sorts where it belongs.
+
+`Sample.received_at` is denormalized off the RECEIPT event for the reason
+the field comment gives: 7.8.2.1 l) puts the date of receipt on the report
+wherever it bears on the validity of results, every holding-time
+calculation counts from it, and a report that had to walk a related table
+to find its own receipt date would render differently depending on what was
+prefetched.
+
+### The arrival record, and the one gate it puts on the work
+
+`SampleReceipt` is one row per physical arrival, written by the `receive`
+transition. 7.4.3 is three sentences long and asks for three separate
+things; each is discharged in a different place, deliberately:
+
+**Record deviations from specified conditions.** A condition, a tri-state
+temperature check, five booleans, and free text. Two `CHECK` constraints
+make the omissions unstorable rather than merely discouraged — a
+nonconforming receipt with no written deviation, and a "customer authorised
+it anyway" flag with no recorded consultation behind it, are both rejected
+by Postgres. The API catches both first so they surface as a 400 naming the
+failed check rather than a 500 quoting a constraint.
+
+The temperature check is tri-state on purpose: `null` means no temperature
+requirement applied to this item, which is *not* the same as conforming.
+Defaulting an unmeasured cooler to "conforms" would put an assertion
+nobody made into a regulated record.
+
+**Consult the customer before proceeding, and record the outcome.** This
+one is a workflow gate, not a field. `check_can_begin_work` is called from
+`start_prep`, and a nonconforming item cannot reach an analyst until
+somebody has recorded what the customer said. It is on `start_prep` and
+**not** on `receive`, which is the difference between a control and an
+obstruction: a leaking bottle at 17:40 still has to be booked in, put in a
+fridge and accounted for, and a receiving screen that refused the record
+would leave the lab holding an item with no record of holding it. What
+waits is the testing, never the lab's own paperwork.
+
+Samples already past intake when this shipped have no receipt row, and the
+gate lets them through rather than stranding live work to satisfy a record
+that could not have been made.
+
+**Disclaim affected results.** `report_disclaimer_required` is derived in
+`save()` from the two facts that create the obligation — the item deviated,
+and the customer required testing regardless — and `disclaimer_text` is
+mandatory alongside it, because 7.4.3 wants the report to say *which*
+results may be affected and a disclaimer that names none discharges
+nothing. Stored rather than computed on read so "which reports issued this
+quarter carry a disclaimer" is a filter, and so a change of mind shows up
+in history as a change rather than as a silently different render of the
+same COA.
+
+### Refusing an item is not nonconforming work
+
+`registered | received -> receipt_rejected -> disposed` is a separate
+branch off the intake path, and it deliberately does not route into
+`under_investigation` where the post-review `reject` goes. That path is
+7.10 Nonconforming Work, which asks what the significance of a
+nonconformity is for results already produced. Here nothing was tested, so
+the only remaining question is what happens to the item.
+
+Reachable from `received` as well as `registered`, because those are the
+same physical situation a minute apart — a cooler booked in at the counter
+and opened at the bench — and a clerk who already pressed Receive should
+not have to unwind it to record a leaking bottle. A written reason is
+required and lands on the receipt alongside whatever the counter observed,
+appended rather than replacing it: the original observation is the evidence
+for the decision.
+
+Refusing an item *before* `receive` writes a receipt row anyway. That is
+not a workaround. The lab did take physical delivery, and an intake
+register that silently omitted every refused delivery would be the one
+document an assessor most wants to see.
+
+### What is not here yet
+
+`holding_time` is stored on both `Sample` and `TestMethod`, serialized, and
+still used by nothing: there is no `due_at` on `TestRequest`, no worksheet
+ordered by it, and no breach alarm. Now that `received_at` exists the
+computation is possible, which it was not before. Label and job-order
+printing sits on top of the same data and is likewise not built. Both are
+tracked as the next steps on this work.
 
 ## Authentication
 
