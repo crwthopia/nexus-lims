@@ -28,6 +28,7 @@ import {
 } from "../api/types";
 import type { ReportType, SampleReceipt } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
+import { PrintButton } from "../components/PrintButton";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -44,6 +45,10 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const DESTRUCTIVE_ACTIONS = new Set(["reject", "dispose"]);
+
+const RECEIPT_DEVIATION_MESSAGE =
+  "This item was received with deviations. ISO/IEC 17025:2017 7.4.3 requires the customer to be " +
+  "consulted, and the outcome recorded, before work proceeds.";
 
 const SEGREGATION_OF_DUTIES_MESSAGE =
   "Water/Environmental Testing is a regulated service line: the Approver must be a different " +
@@ -75,6 +80,14 @@ export function SampleDetail() {
   // rather than letting the click fail with a generic 400.
   const reviewedByMe = reviewActions.some((r) => r.reviewer === user?.id);
   const approveBlockedBySegregationOfDuties = sample.service_line === "water_environmental" && reviewedByMe;
+
+  // Mirrors receipt_services.check_can_begin_work: an item received with
+  // deviations cannot start prep until somebody has spoken to the customer
+  // and written down what they said (ISO/IEC 17025:2017 7.4.3). The server
+  // is the real gate — this saves a doomed round trip and, more usefully,
+  // says *why* the button is out, which a 400 after the click does not.
+  const prepBlockedByReceiptDeviation =
+    !!sample.receipt && !sample.receipt.is_conforming && !sample.receipt.consultation_recorded;
 
   function runAction(name: string) {
     const body = name === "review" ? { comments } : undefined;
@@ -312,11 +325,13 @@ export function SampleDetail() {
               const allowedRoles = SAMPLE_ACTION_ROLES[name] ?? [];
               const permitted = hasRole(...allowedRoles);
               const sodBlocked = name === "approve" && approveBlockedBySegregationOfDuties;
-              const disabled = !permitted || sodBlocked || action.isPending;
+              const receiptBlocked = name === "start-prep" && prepBlockedByReceiptDeviation;
+              const disabled = !permitted || sodBlocked || receiptBlocked || action.isPending;
 
               let title: string | undefined;
               if (!permitted) title = `Requires role: ${allowedRoles.join(" or ")}`;
               else if (sodBlocked) title = SEGREGATION_OF_DUTIES_MESSAGE;
+              else if (receiptBlocked) title = RECEIPT_DEVIATION_MESSAGE;
 
               return (
                 <button
@@ -337,6 +352,21 @@ export function SampleDetail() {
               {describeApiError(action.error)}
             </p>
           )}
+
+          {/* Below the transitions and separated from them, because it is a
+              different kind of act: every button above moves the sample
+              through the workflow, this one puts an identity on a physical
+              container. Available from any status -- a label comes off in a
+              fridge at every stage, and the reprint register (7.4.2) is
+              what makes that safe rather than a status gate. */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+            <PrintButton
+              path={`/samples/${sample.id}/labels/`}
+              sampleId={sample.id}
+              label={`Print ${sample.container_count} container label${sample.container_count === 1 ? "" : "s"}`}
+              reprintPrompt="This sample has already been labelled. Why is it being printed again?"
+            />
+          </div>
         </div>
       </div>
     </div>

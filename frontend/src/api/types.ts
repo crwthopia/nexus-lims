@@ -129,6 +129,57 @@ export type ReceiptCondition =
  * getting that subtly wrong in the UI would show a clean receipt for an item
  * the workflow gate considers doubtful.
  */
+export const RECEIPT_CONDITION_LABELS: Record<ReceiptCondition, string> = {
+  intact: "Intact",
+  damaged: "Damaged",
+  leaking: "Leaking",
+  seal_broken: "Seal broken",
+  temperature_excursion: "Temperature excursion",
+  insufficient_quantity: "Insufficient quantity",
+  other: "Other nonconformity",
+};
+
+/**
+ * The five yes/no checks a receiving clerk makes, mirroring RECEIPT_CHECKS
+ * in backend/apps/samples/models.py.
+ *
+ * Phrased as the *conforming* answer, because that is how the form asks
+ * them -- "Seal intact?" unticked is a deviation, which reads the way a
+ * paper checklist does. The failure wording lives server-side and comes
+ * back in `deviation_reasons`, so the two never drift.
+ */
+export const RECEIPT_CHECKS: { field: ReceiptCheckField; label: string }[] = [
+  { field: "seal_intact", label: "Seal intact" },
+  { field: "volume_sufficient", label: "Sufficient quantity" },
+  { field: "container_conforms", label: "Container as specified" },
+  { field: "preservation_conforms", label: "Preservation correct" },
+  { field: "labelling_legible", label: "Labelling legible" },
+];
+
+export type ReceiptCheckField =
+  | "seal_intact"
+  | "volume_sufficient"
+  | "container_conforms"
+  | "preservation_conforms"
+  | "labelling_legible";
+
+/** The body POST /samples/{id}/receive/ accepts. Every field is optional; see the endpoint's docstring. */
+export interface ReceivePayload {
+  received_at?: string;
+  received_from?: string;
+  condition_on_receipt?: ReceiptCondition;
+  receipt_temperature_c?: string | null;
+  temperature_conforms?: boolean | null;
+  storage_location?: string;
+  deviations?: string;
+  location?: string;
+  seal_intact?: boolean;
+  volume_sufficient?: boolean;
+  container_conforms?: boolean;
+  preservation_conforms?: boolean;
+  labelling_legible?: boolean;
+}
+
 export interface SampleReceipt {
   id: number;
   sample: number;

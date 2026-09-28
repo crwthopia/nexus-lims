@@ -11,11 +11,13 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
 from apps.audit.oss import upload_object
+from apps.common.renderers import PdfRenderer
 from apps.common.params import body_dict, int_param
 from apps.equipment.models import Instrument
 from apps.samples import labels as label_services
@@ -170,7 +172,7 @@ class TestRequestViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), roles_required(*roles)()]
         return [IsAuthenticated()]
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], renderer_classes=[PdfRenderer, JSONRenderer])
     def label(self, request, pk=None):
         """
         POST /test-requests/{id}/label/ — a worksheet label for the portion

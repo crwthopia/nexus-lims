@@ -23,6 +23,16 @@ export interface StubRoute {
   status?: number;
   /** JSON body. Omit entirely for a 204. */
   body?: unknown;
+  /**
+   * Answer with this content type instead of application/json, with `body`
+   * sent verbatim rather than JSON-encoded.
+   *
+   * For the label and job-order endpoints, which return a PDF. The client
+   * branches on content type -- `apiPostForPdf` reads a blob on success and
+   * parses JSON on failure -- so a stub that always said JSON would test
+   * the error path twice and the success path never.
+   */
+  contentType?: string;
 }
 
 /**
@@ -62,6 +72,13 @@ export function stubApi(routes: Record<string, StubRoute>) {
     const route = routes[key];
     const status = route.status ?? 200;
     const hasBody = "body" in route;
+
+    if (route.contentType) {
+      return new Response(String(route.body ?? ""), {
+        status,
+        headers: { "content-type": route.contentType },
+      });
+    }
 
     return new Response(hasBody ? JSON.stringify(route.body) : null, {
       status: hasBody ? status : 204,
@@ -163,4 +180,42 @@ export function sampleDetailRoutes(sample: SampleDetail, extra: Record<string, S
     "/investigations/": { body: { count: 0, next: null, previous: null, results: [] } },
     ...extra,
   };
+}
+
+
+/**
+ * Capture what printPdfBlob sends to the printer.
+ *
+ * jsdom supplies `URL.createObjectURL`, so the object URL only needs
+ * spying on to see the blob go past. What it does *not* supply is a
+ * working `print()` on an iframe, or a reliable `load` event for a
+ * `blob:` src -- so the frame's own onload is invoked as it is appended,
+ * and print/focus are stubbed on the window it reaches for. Without that,
+ * the print path throws and every assertion about it asserts on the throw.
+ *
+ * Returns the blobs handed to the printer, in order.
+ */
+export function stubPrinting() {
+  const printed: Blob[] = [];
+
+  vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
+    printed.push(blob as Blob);
+    return "blob:stub";
+  });
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+  const appendChild = document.body.appendChild.bind(document.body);
+  vi.spyOn(document.body, "appendChild").mockImplementation((node: Node) => {
+    const appended = appendChild(node);
+    if (node instanceof HTMLIFrameElement) {
+      if (node.contentWindow) {
+        vi.spyOn(node.contentWindow, "print").mockImplementation(() => {});
+        vi.spyOn(node.contentWindow, "focus").mockImplementation(() => {});
+      }
+      node.onload?.(new Event("load"));
+    }
+    return appended;
+  });
+
+  return { printed };
 }

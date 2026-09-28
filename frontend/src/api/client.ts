@@ -73,6 +73,41 @@ export function apiPatch<T>(path: string, data: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "PATCH", body: JSON.stringify(data) });
 }
 
+/**
+ * POST something that answers with a PDF rather than JSON -- the label and
+ * job-order print endpoints (apps/samples/views.py).
+ *
+ * A POST, not a GET, because printing writes a LabelPrintEvent server-side;
+ * the backend's own docstring explains why a GET that writes is wrong here.
+ * That is also why this cannot be a plain `<a href>`: the request needs the
+ * CSRF header, and the response needs to reach the print dialogue rather
+ * than the downloads folder.
+ *
+ * Errors still arrive as JSON -- a refused reprint, a barcode too wide for
+ * the stock -- so the failure path is parsed and raised as the same
+ * ApiError every other call throws, and describeApiError() renders it
+ * unchanged.
+ */
+export async function apiPostForPdf(path: string, data?: unknown): Promise<Blob> {
+  const headers = new Headers({ Accept: "application/pdf" });
+  if (data !== undefined) headers.set("Content-Type", "application/json");
+  const csrfToken = readCsrfToken();
+  if (csrfToken) headers.set("X-CSRFToken", csrfToken);
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: data !== undefined ? JSON.stringify(data) : undefined,
+  });
+
+  if (!response.ok) {
+    const isJson = response.headers.get("content-type")?.includes("application/json");
+    throw new ApiError(response.status, isJson ? await response.json() : await response.text());
+  }
+  return response.blob();
+}
+
 /** Turns a DRF error response body (field-error dict, {"detail": ...}, or a plain string) into one displayable line. */
 export function describeApiError(error: unknown): string {
   if (!(error instanceof ApiError)) return "Something went wrong.";

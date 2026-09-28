@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Login } from "./pages/Login";
+import { Receiving } from "./pages/Receiving";
 import { SamplesList } from "./pages/SamplesList";
 import { SampleDetail } from "./pages/SampleDetail";
 import { ReviewQueue } from "./pages/ReviewQueue";
@@ -41,6 +42,7 @@ function App() {
             lab doing" before anyone has to pick a worklist. */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/receiving" element={<Receiving />} />
         <Route path="/samples" element={<SamplesList />} />
         <Route path="/samples/:id" element={<SampleDetail />} />
         <Route path="/review-queue" element={<ReviewQueue />} />

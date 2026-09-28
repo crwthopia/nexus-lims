@@ -4,6 +4,7 @@ import { useAddOrderItem, useInvoiceOrder, useOrder, useServiceOfferings } from 
 import { useAuth } from "../auth/context";
 import { describeApiError } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
+import { PrintButton } from "../components/PrintButton";
 import { BILLING_WRITE_ROLES, ORDER_ITEM_WRITE_ROLES, SERVICE_LINE_LABELS } from "../api/types";
 import { formatMoney } from "../money";
 
@@ -68,22 +69,33 @@ export function OrderDetail() {
         title={`Order #${order.id}`}
         meta={<span className="badge badge-neutral">{SERVICE_LINE_LABELS[order.service_line]}</span>}
         actions={
-          canBill && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={unbilled.length === 0 || raiseInvoice.isPending}
-              // Says what it will do rather than "Invoice": billing the
-              // unbilled remainder is the behaviour, and a button that
-              // hides that invites someone to click it twice.
-              title={unbilled.length === 0 ? "Every line on this order has been invoiced." : undefined}
-              onClick={() =>
-                raiseInvoice.mutate(undefined, { onSuccess: (invoice) => navigate(`/invoices/${invoice.id}`) })
-              }
-            >
-              {unbilled.length === 0 ? "Fully invoiced" : `Invoice ${unbilled.length} line${unbilled.length === 1 ? "" : "s"}`}
-            </button>
-          )
+          <>
+            {/* The sheet that travels with the work -- what was ordered,
+                the condition each item arrived in, and somewhere for the
+                courier and the receiving officer to sign. Not role-gated
+                here beyond the server's own check: an unprivileged click
+                comes back as a 403 the button shows, which is cheaper than
+                a second copy of the role list drifting out of step. */}
+            <PrintButton path={`/orders/${order.id}/job-order/`} label="Print job order" />
+            {canBill && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={unbilled.length === 0 || raiseInvoice.isPending}
+                // Says what it will do rather than "Invoice": billing the
+                // unbilled remainder is the behaviour, and a button that
+                // hides that invites someone to click it twice.
+                title={unbilled.length === 0 ? "Every line on this order has been invoiced." : undefined}
+                onClick={() =>
+                  raiseInvoice.mutate(undefined, { onSuccess: (invoice) => navigate(`/invoices/${invoice.id}`) })
+                }
+              >
+                {unbilled.length === 0
+                  ? "Fully invoiced"
+                  : `Invoice ${unbilled.length} line${unbilled.length === 1 ? "" : "s"}`}
+              </button>
+            )}
+          </>
         }
       />
 

@@ -225,6 +225,44 @@ def test_a_code_too_long_for_the_stock_is_refused_not_truncated(login_as_staff):
     assert not LabelPrintEvent.objects.exists()
 
 
+def test_a_client_may_ask_for_a_pdf_by_name(login_as_staff):
+    """
+    DRF negotiates before it dispatches, so an endpoint that produces PDF
+    has to declare it or answer 406 to a client asking for exactly what it
+    returns. A real browser did.
+    """
+    sample = _received_sample(unique_sample_code="WE-202609-0048")
+    client = login_as_staff(_printer())
+
+    response = client.post(
+        f"/api/v1/samples/{sample.id}/labels/", {}, format="json", HTTP_ACCEPT="application/pdf",
+    )
+
+    assert response.status_code == 200, response.content[:400]
+    assert response["Content-Type"] == "application/pdf"
+    assert decode_barcodes(response.content) == ["WE-202609-0048"]
+
+
+def test_an_error_still_comes_back_readable_when_a_pdf_was_asked_for(login_as_staff):
+    """
+    The refusal is raised after negotiation, so it renders through the PDF
+    renderer. A client that asked for a PDF and did not get one still has
+    to be able to read why -- otherwise the console shows "something went
+    wrong" instead of the reason, and the reprint prompt never fires.
+    """
+    sample = _received_sample(unique_sample_code="WE-202609-0049")
+    client = login_as_staff(_printer())
+    assert client.post(f"/api/v1/samples/{sample.id}/labels/", {}, format="json").status_code == 200
+
+    response = client.post(
+        f"/api/v1/samples/{sample.id}/labels/", {}, format="json", HTTP_ACCEPT="application/pdf",
+    )
+
+    assert response.status_code == 400
+    assert response["Content-Type"] == "application/json"
+    assert "7.4.2" in response.content.decode()
+
+
 # --- what the label says -----------------------------------------------------
 
 

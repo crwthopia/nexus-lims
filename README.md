@@ -49,7 +49,7 @@ was invented outside that grounding.
   report-ready notices — deduplicated so a nightly sweep cannot chase the
   same instrument every night, and carrying no result or document into a
   mailbox — see Notifications below.
-- **712-test automated regression suite** (`backend/tests/`, pytest +
+- **717-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -793,12 +793,79 @@ Deliberately untested: how the layout looks. That is QA's to author — the
 templates carry placeholder banners saying so — and a test asserting on
 millimetres would fail the moment somebody improved the artwork.
 
-### What is not here yet
+### The Receiving bench (`/receiving`)
 
-No print buttons. The endpoints exist and are tested, but nothing in the
-Staff Console calls them: a scan-driven Receiving bench screen with the
-checklist and the print actions on it is the next piece of work, along with
-buttons on Sample detail and Order detail.
+The screen the three preceding sections were building towards. Scan a
+container, say what arrived in, print its labels — one screen, because
+those were three screens and an API call, and ISO/IEC 17025:2017 7.4.3
+wants the condition of an item recorded *as it is received*. A checklist
+filled in afterwards from memory is the thing that clause is written
+against, so the form sits next to the scan field and the labels come off
+the same action.
+
+**Scanner-shaped, not mouse-shaped.** A handheld scanner is a keyboard that
+types a code and presses Enter. The code field is autofocused, submits on
+Enter, and clears itself between samples, so a clerk works through a
+delivery without touching the mouse. Lookup is by `?code=`, matched whole
+and case-insensitively — never a prefix, because a partial match would let
+a scan of one code resolve to a different sample, which is the confusion
+7.4.2 is about.
+
+The checklist is pre-ticked, which is usually an ALCOA smell. It is
+acceptable here for a specific reason: the API's own default is the same
+affirmation — a bare POST records a conforming receipt attributed to
+whoever sent it — so the form makes an assertion visible that was
+previously implicit, which is strictly better than the endpoint being
+called with no checklist at all. Temperature conformance is a three-state
+select rather than a checkbox, because blank means *no temperature
+requirement applies*, which is not the same as conforming. The deviations
+box appears the moment any check fails, and the submit button stays out
+until it is filled, because the server refuses a nonconforming receipt
+without one and there is no reason to let somebody discover that after
+pressing the button.
+
+A sample looked up after it was received shows what was recorded, and — if
+a deviation is still unresolved — that testing is on hold pending the
+customer consultation. The clerk who wrote the deviation is the person who
+should be chasing that call, so it is said here rather than only on the
+sample screen. Sample detail pre-empts the same gate: **Start Prep** is
+disabled with 7.4.3 in the tooltip while a receipt deviation has no
+recorded outcome, mirroring how the approve button pre-empts segregation of
+duties. The server is still the real guard in both cases.
+
+### Getting a PDF to a printer
+
+Print buttons sit on Receiving, Sample detail (container labels), Order
+detail (job order sheet) and Test request detail (worksheet label). All
+four go through one component, because they share the thing that is easy to
+get wrong: the server refuses an unexplained second print, and showing that
+refusal as a plain error would leave a clerk holding a bottle with no label
+and no way forward. So the refusal is turned into the question it actually
+is — asked once, answered, sent straight back, and recorded in the
+register. The retry is keyed on the message mentioning 7.4.2 rather than on
+the 400, because a barcode too wide for the stock is a 400 too and asking
+"why are you reprinting?" about it would be nonsense.
+
+The PDF reaches the print dialogue through a **hidden iframe**, not
+`window.open`. A pop-up opened from inside an async mutation callback has
+lost its user-gesture association by the time it runs and is blocked by
+default — silently. The mutation would succeed, the print event would be
+recorded, and no dialogue would ever appear; someone at a bench would
+conclude the printer was broken and print again, which is a duplicate
+identity on a second container.
+
+**One bug here was only findable by running the thing.** `apiPostForPdf`
+politely sent `Accept: application/pdf`, and DRF negotiates content
+*before* it dispatches: no declared renderer claimed that media type, so
+the endpoint answered **406 Not Acceptable** to a client asking for exactly
+what it produces. Every jsdom test passed, because a stubbed fetch ignores
+Accept. `apps/common/renderers.PdfRenderer` now declares it. Its
+interesting half is the error path — a refused reprint is raised *after*
+negotiation, so it renders through that renderer, and a non-bytes payload
+is JSON-encoded with the content type corrected on the way out. Without
+that, an error would arrive labelled as a PDF and the console would show
+"something went wrong" instead of the reason, and the reprint prompt would
+never fire.
 
 ## Authentication
 
@@ -1576,6 +1643,17 @@ samples worklist from Postgres, opened a sample, ran `register` then
 `receive` through the actual FSM actions — status and the chain-of-custody
 timeline updated from real API responses each time — and logged out
 correctly.
+
+**Receiving** (`frontend/src/pages/Receiving.tsx`): the scan-driven
+intake bench — look a container up by the code on its label, record what
+arrived in against the ISO/IEC 17025:2017 7.4.3 checklist, and print its
+labels. See the Receiving bench section above for why the form sits beside
+the scan field and why the checklist is pre-ticked. **Verified live** in a
+browser against the real backend: scanned a code, recorded a leaking
+bottle with a courier and a storage location, received it, and confirmed
+the Sample moved to `received` with a `SampleReceipt` carrying the
+deviation, a RECEIPT chain-of-custody event, and a `LabelPrintEvent` for
+three containers.
 
 **Review Queue** (`frontend/src/pages/ReviewQueue.tsx`): a worklist of
 samples in `under_review`, for Reviewer/Approver/QA Officer/Lab Supervisor,
@@ -2985,7 +3063,7 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 302 tests: 230 in
+frontend (`npm run test:watch` while developing). 326 tests: 254 in
 `frontend/`, 72 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React

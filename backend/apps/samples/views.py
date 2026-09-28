@@ -20,6 +20,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from apps.accounts.authentication import CustomerSessionAuthentication
@@ -30,6 +31,7 @@ from apps.billing import services as billing_services
 from apps.billing.serializers import InvoiceDetailSerializer
 from apps.billing.views import BILLING_WRITE_ROLES
 from apps.catalogue.models import ServiceOffering
+from apps.common.renderers import PdfRenderer
 from apps.common.params import body_dict, bool_param, datetime_param, decimal_param, int_param, str_param
 from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
@@ -198,7 +200,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(OrderItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
-    @action(detail=True, methods=["post"], url_path="job-order")
+    @action(
+        detail=True, methods=["post"], url_path="job-order",
+        renderer_classes=[PdfRenderer, JSONRenderer],
+    )
     def job_order(self, request, pk=None):
         """
         POST /orders/{id}/job-order/ — the A4 sheet that travels with the
@@ -308,10 +313,11 @@ class SampleViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        ?status= (e.g. the Staff Console's Review Queue: ?status=under_review)
-        and ?service_line= -- DRF ignores unrecognized query params rather
-        than erroring, so without this override these silently did nothing
-        server-side even though a client sent them.
+        ?status= (e.g. the Staff Console's Review Queue: ?status=under_review),
+        ?service_line=, and ?code= for the Receiving screen's scan lookup --
+        DRF ignores unrecognized query params rather than erroring, so
+        without this override these silently did nothing server-side even
+        though a client sent them.
         """
         qs = super().get_queryset()
         status_param = self.request.query_params.get("status")
@@ -320,6 +326,20 @@ class SampleViewSet(viewsets.ModelViewSet):
         service_line = self.request.query_params.get("service_line")
         if service_line:
             qs = qs.filter(service_line=service_line)
+        code = str_param(self.request.query_params.get("code"), "code", max_length=64).strip()
+        if code:
+            # Exact, case-insensitively: this is what a barcode scanner
+            # sends when somebody points it at a container, and the
+            # Receiving screen looks a sample up by the only thing the
+            # scanner knows. `iexact` rather than `exact` because the other
+            # caller is a person typing the code off the label when the
+            # scan fails, and a lowercase "we-202609-0042" is the same
+            # bottle.
+            #
+            # Deliberately not `icontains`: a partial match would let a
+            # scan of one code resolve to a different sample, which is the
+            # confusion ISO/IEC 17025:2017 7.4.2 is about.
+            qs = qs.filter(unique_sample_code__iexact=code)
         return qs
 
     # Per-action role requirements (Blueprint Section 7.1 RBAC / Section 5.1 role-aware screens).
@@ -614,7 +634,7 @@ class SampleViewSet(viewsets.ModelViewSet):
 
     # --- FR-C1-02 labelling (ISO/IEC 17025:2017 7.4.2) ---
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], renderer_classes=[PdfRenderer, JSONRenderer])
     def labels(self, request, pk=None):
         """
         POST /samples/{id}/labels/ — container labels for this sample, as a
@@ -644,7 +664,10 @@ class SampleViewSet(viewsets.ModelViewSet):
             sample=sample,
         )
 
-    @action(detail=False, methods=["post"], url_path="print-labels")
+    @action(
+        detail=False, methods=["post"], url_path="print-labels",
+        renderer_classes=[PdfRenderer, JSONRenderer],
+    )
     def print_labels(self, request, pk=None):
         """
         POST /samples/print-labels/ — container labels for several samples
