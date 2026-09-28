@@ -23,10 +23,12 @@ import {
   INVESTIGATION_WRITE_ROLES,
   SAMPLE_ACTIONS_BY_STATUS,
   SAMPLE_ACTION_ROLES,
+  SAMPLE_PRIORITY_LABELS,
   TEST_REQUEST_STATUS_LABELS,
 } from "../api/types";
-import type { ReportType } from "../api/types";
+import type { ReportType, SampleReceipt } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
+import { PrintButton } from "../components/PrintButton";
 
 const ACTION_LABELS: Record<string, string> = {
   register: "Register",
@@ -43,6 +45,10 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const DESTRUCTIVE_ACTIONS = new Set(["reject", "dispose"]);
+
+const RECEIPT_DEVIATION_MESSAGE =
+  "This item was received with deviations. ISO/IEC 17025:2017 7.4.3 requires the customer to be " +
+  "consulted, and the outcome recorded, before work proceeds.";
 
 const SEGREGATION_OF_DUTIES_MESSAGE =
   "Water/Environmental Testing is a regulated service line: the Approver must be a different " +
@@ -74,6 +80,14 @@ export function SampleDetail() {
   // rather than letting the click fail with a generic 400.
   const reviewedByMe = reviewActions.some((r) => r.reviewer === user?.id);
   const approveBlockedBySegregationOfDuties = sample.service_line === "water_environmental" && reviewedByMe;
+
+  // Mirrors receipt_services.check_can_begin_work: an item received with
+  // deviations cannot start prep until somebody has spoken to the customer
+  // and written down what they said (ISO/IEC 17025:2017 7.4.3). The server
+  // is the real gate — this saves a doomed round trip and, more usefully,
+  // says *why* the button is out, which a 400 after the click does not.
+  const prepBlockedByReceiptDeviation =
+    !!sample.receipt && !sample.receipt.is_conforming && !sample.receipt.consultation_recorded;
 
   function runAction(name: string) {
     const body = name === "review" ? { comments } : undefined;
@@ -108,6 +122,9 @@ export function SampleDetail() {
                 label="Order"
                 value={sample.order ? <Link to={`/orders/${sample.order}`}>#{sample.order}</Link> : "—"}
               />
+              {/* Commercial urgency, not the holding-time deadline -- that
+                  is per-analysis and lives on the test request. */}
+              <Field label="Priority" value={SAMPLE_PRIORITY_LABELS[sample.priority]} />
               <Field label="Client reference" value={sample.client_reference || "—"} />
               <Field label="Sampling point" value={sample.sampling_point || "—"} />
               <Field label="Container" value={`${sample.container_count}× ${sample.container_type || "unspecified"}`} />
@@ -116,9 +133,20 @@ export function SampleDetail() {
                 label="Collection date"
                 value={sample.collection_datetime ? new Date(sample.collection_datetime).toLocaleString() : "—"}
               />
+              {/* ISO/IEC 17025:2017 7.8.2.1 l) puts the date of receipt on
+                  the report wherever it bears on the validity of the
+                  results, and every holding-time calculation counts from
+                  it -- so it sits with the other dates, not buried in the
+                  custody timeline it is derived from. */}
+              <Field
+                label="Received"
+                value={sample.received_at ? new Date(sample.received_at).toLocaleString() : "—"}
+              />
               <Field label="Created" value={new Date(sample.created_at).toLocaleString()} />
               <Field label="Last updated" value={new Date(sample.updated_at).toLocaleString()} />
             </dl>
+
+            {sample.receipt && <ReceiptPanel receipt={sample.receipt} />}
 
             <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Chain of custody</h2>
             {sample.chain_of_custody_events.length === 0 ? (
@@ -129,7 +157,10 @@ export function SampleDetail() {
                   <li key={event.id} style={{ padding: "8px 0", borderTop: "1px solid var(--color-border)" }}>
                     <strong style={{ textTransform: "capitalize" }}>{event.event_type}</strong>{" "}
                     <span style={{ color: "var(--color-text-muted)" }}>
-                      {new Date(event.timestamp).toLocaleString()}
+                      {/* occurred_at, not timestamp: the timeline is a claim
+                          about the physical item, and an event keyed in the
+                          morning after belongs where it happened. */}
+                      {new Date(event.occurred_at).toLocaleString()}
                       {event.to_location ? ` — ${event.to_location}` : ""}
                     </span>
                   </li>
@@ -294,11 +325,13 @@ export function SampleDetail() {
               const allowedRoles = SAMPLE_ACTION_ROLES[name] ?? [];
               const permitted = hasRole(...allowedRoles);
               const sodBlocked = name === "approve" && approveBlockedBySegregationOfDuties;
-              const disabled = !permitted || sodBlocked || action.isPending;
+              const receiptBlocked = name === "start-prep" && prepBlockedByReceiptDeviation;
+              const disabled = !permitted || sodBlocked || receiptBlocked || action.isPending;
 
               let title: string | undefined;
               if (!permitted) title = `Requires role: ${allowedRoles.join(" or ")}`;
               else if (sodBlocked) title = SEGREGATION_OF_DUTIES_MESSAGE;
+              else if (receiptBlocked) title = RECEIPT_DEVIATION_MESSAGE;
 
               return (
                 <button
@@ -319,6 +352,21 @@ export function SampleDetail() {
               {describeApiError(action.error)}
             </p>
           )}
+
+          {/* Below the transitions and separated from them, because it is a
+              different kind of act: every button above moves the sample
+              through the workflow, this one puts an identity on a physical
+              container. Available from any status -- a label comes off in a
+              fridge at every stage, and the reprint register (7.4.2) is
+              what makes that safe rather than a status gate. */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+            <PrintButton
+              path={`/samples/${sample.id}/labels/`}
+              sampleId={sample.id}
+              label={`Print ${sample.container_count} container label${sample.container_count === 1 ? "" : "s"}`}
+              reprintPrompt="This sample has already been labelled. Why is it being printed again?"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -418,6 +466,82 @@ function SampleReports({ sampleId }: { sampleId: number }) {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The arrival record (ISO/IEC 17025:2017 7.4.3), read-only.
+ *
+ * Conforming receipts get one line, not a checklist: eleven green ticks on
+ * every routine sample is noise that trains people to stop reading. The
+ * panel only expands where something actually deviated -- which is also
+ * the only case the standard has anything to say about.
+ *
+ * `is_conforming` and `deviation_reasons` come from the server rather than
+ * being re-derived here, so this panel and the start-prep gate can never
+ * disagree about whether an item is doubtful.
+ */
+function ReceiptPanel({ receipt }: { receipt: SampleReceipt }) {
+  const consultationOutstanding = !receipt.is_conforming && !receipt.consultation_recorded;
+
+  return (
+    <>
+      <h2 style={{ fontSize: "1rem", margin: "24px 0 12px" }}>Condition on receipt</h2>
+
+      {receipt.is_conforming ? (
+        <p style={{ fontSize: "0.9rem", margin: 0 }}>
+          Received intact by {receipt.received_by_name} on{" "}
+          {new Date(receipt.received_at).toLocaleString()}.
+        </p>
+      ) : (
+        <div
+          style={{
+            border: "1px solid var(--color-danger)",
+            background: "var(--color-danger-bg)",
+            borderRadius: 6,
+            padding: 12,
+            fontSize: "0.9rem",
+          }}
+        >
+          <strong style={{ color: "var(--color-danger)" }}>Received with deviations</strong>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {receipt.deviation_reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          {receipt.deviations && (
+            <p style={{ margin: "10px 0 0", whiteSpace: "pre-wrap" }}>{receipt.deviations}</p>
+          )}
+        </div>
+      )}
+
+      {consultationOutstanding && (
+        <p style={{ color: "var(--color-warning)", fontSize: "0.85rem", marginTop: 10 }}>
+          Testing is on hold until the customer has been consulted and the outcome recorded
+          (ISO/IEC 17025:2017 7.4.3).
+        </p>
+      )}
+
+      {receipt.consultation_recorded && (
+        <dl className="field-grid" style={{ marginTop: 12 }}>
+          <Field
+            label="Customer consulted"
+            value={
+              receipt.customer_consulted_at
+                ? new Date(receipt.customer_consulted_at).toLocaleString()
+                : "—"
+            }
+          />
+          <Field label="Outcome" value={receipt.consultation_outcome} />
+        </dl>
+      )}
+
+      {receipt.report_disclaimer_required && (
+        <p style={{ fontSize: "0.85rem", marginTop: 10 }}>
+          <strong>Report disclaimer required:</strong> {receipt.disclaimer_text}
+        </p>
+      )}
+    </>
   );
 }
 

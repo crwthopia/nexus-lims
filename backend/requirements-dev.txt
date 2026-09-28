@@ -5,3 +5,13 @@ pytest==8.3.3
 pytest-django==4.9.0
 factory-boy==3.3.1
 pytest-cov==5.0.0
+
+# Proving a printed barcode actually scans (tests/test_labels.py).
+#
+# Every other property of a label is cosmetic; if the bars do not decode
+# back to the sample code the feature is worthless, and no structural
+# assertion about the HTML would catch it. So the test rasterises the real
+# PDF at a label printer's DPI and decodes it the way a handheld scanner
+# would -- which means a PDF renderer and a barcode reader, test-only.
+pypdfium2==5.13.0
+zxing-cpp==3.1.1

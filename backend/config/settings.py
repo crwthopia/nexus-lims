@@ -203,6 +203,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.sweep_calibration_due",
         "schedule": crontab(hour=6, minute=30),
     },
+    # Hourly, unlike every other sweep here, and the odd one out for a
+    # reason: a calibration date or an open failure is still there tomorrow,
+    # but a holding time expires. A daily sweep would find breaches up to 23
+    # hours after the item stopped supporting the measurement, by which point
+    # the message is a post-mortem rather than a warning.
+    #
+    # At minute 20 to keep it off the hour, where the stalled-notification
+    # retry (minute 15) and the five-minute retry sweep already are.
+    "holding-time-sweep-hourly": {
+        "task": "apps.notifications.tasks.sweep_holding_times",
+        "schedule": crontab(minute=20),
+    },
     # Hourly rather than daily: this is the recovery path for a notification
     # that was written but never handed to a worker because the broker was
     # down, and a customer waiting on a verification email should not wait
@@ -419,6 +431,42 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 # an external calibration house, short enough that the message still reads as
 # urgent when it arrives. Instruments already past due are always included.
 CALIBRATION_DUE_WARNING_DAYS = int(os.environ.get("CALIBRATION_DUE_WARNING_DAYS", "14"))
+
+# How far ahead the holding-time sweep looks (apps/notifications/tasks.
+# sweep_holding_times). Hours rather than days because holding times are
+# themselves short: 24 hours is a common one, and a 14-day warning horizon
+# like calibration's would mean every analysis in the building was always
+# "approaching" its deadline.
+#
+# Six is a working shift's notice -- long enough that an analyst can
+# schedule the run, short enough that the message still means something
+# when it arrives.
+HOLDING_TIME_WARNING_HOURS = int(os.environ.get("HOLDING_TIME_WARNING_HOURS", "6"))
+
+# Label stock (apps/samples/labels.py). Settings rather than template
+# constants because this is a property of the roll a laboratory bought, not
+# of the document: swapping to 60x30mm stock should be an environment
+# change, not a QA re-authoring of the layout.
+#
+# The default is 50x25mm, the commonest thermal-transfer laboratory size
+# and wide enough to carry a Code 128 of a NexusLIMS sample code at the
+# 0.25mm bar width GS1 treats as the general-distribution minimum. Narrower
+# stock is allowed and the barcode shrinks to fit, down to a floor below
+# which it refuses to print rather than emitting bars a scanner would
+# misread -- see apps/reporting/barcodes.py.
+LABEL_WIDTH_MM = float(os.environ.get("LABEL_WIDTH_MM", "50"))
+LABEL_HEIGHT_MM = float(os.environ.get("LABEL_HEIGHT_MM", "25"))
+LABEL_MARGIN_MM = float(os.environ.get("LABEL_MARGIN_MM", "1.5"))
+# Bar height, not the rendered height: python-barcode adds about 2mm of
+# padding below the bars, so 6 here draws an 8mm-tall image. On 25mm stock
+# that leaves room for the code, the analyse-by date and the metadata
+# beneath it -- at 8mm the block overflowed onto a second page, which a
+# label printer feeds as a blank label.
+#
+# Bar height affects how easily a scanner can be aimed, not whether the
+# code decodes; 6mm is ordinary for laboratory and pharmacy stock this
+# size. Taller stock can afford more.
+LABEL_BARCODE_HEIGHT_MM = float(os.environ.get("LABEL_BARCODE_HEIGHT_MM", "6"))
 
 # How many months beyond the current one the nightly partition task keeps
 # audit_log_entry partitions for. Three is deliberate headroom rather than a

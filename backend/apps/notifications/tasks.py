@@ -277,6 +277,105 @@ def sweep_calibration_due():
     return {"due": due.count(), "queued": queued}
 
 
+@shared_task(name="apps.notifications.tasks.sweep_holding_times")
+def sweep_holding_times():
+    """
+    Chase analyses running out of holding time (ISO/IEC 17025:2017 7.4.1).
+
+    The clause requires the laboratory to have procedures that protect the
+    integrity of an item while it holds it, and a holding time is the
+    sharpest expression of that: past it, the item no longer supports the
+    measurement, and a result produced anyway is nonconforming work rather
+    than a late result. `TestRequest.due_at` records the deadline
+    (apps/testing/holding_times.py); this is what makes missing one
+    something the laboratory finds out about rather than something an
+    assessor does.
+
+    Two messages per analysis at most, and they are different messages: a
+    *warning* while there is still time to act, and a *breach* once there
+    is not. The dedupe key carries which one it is plus the due date, so
+    the breach still lands after the warning was already sent, and a
+    deadline that moves -- a corrected collection time -- is a new
+    notification rather than one suppressed by the old row.
+
+    Told to the assigned analyst, falling back to every Analyst and the Lab
+    Supervisor where a request has nobody on it. An unassigned analysis
+    about to expire is more in need of a message, not less -- the same
+    reasoning as the calibration sweep above. A breach additionally goes to
+    QA, because what it opens is a 7.10 evaluation and that is not the
+    analyst's call.
+
+    **This is an hourly sweep, so it cannot serve holding times shorter
+    than an hour.** pH, dissolved oxygen and residual chlorine are
+    specified in minutes and are field or bench determinations -- they are
+    run on arrival, not scheduled -- so a sweep was never going to be the
+    control for them. What this covers is the 24-hour to 28-day range,
+    where the failure mode is genuinely that something sat in a fridge and
+    nobody looked.
+    """
+    from apps.accounts.models import Role
+    from apps.testing.holding_times import OUTSTANDING_STATUSES
+    from apps.testing.models import TestRequest
+
+    now = timezone.now()
+    horizon = now + timezone.timedelta(hours=settings.HOLDING_TIME_WARNING_HOURS)
+    at_risk = (
+        TestRequest.objects.filter(status__in=OUTSTANDING_STATUSES, due_at__lte=horizon)
+        .exclude(due_at__isnull=True)
+        .select_related("sample", "test_method", "assigned_analyst")
+        .order_by("due_at")
+    )
+
+    fallback = staff_emails_for_roles(Role.RoleName.ANALYST, Role.RoleName.LAB_SUPERVISOR)
+    queued = 0
+    breaches = 0
+
+    for test_request in at_risk:
+        breached = test_request.due_at < now
+        breaches += breached
+
+        recipients = (
+            [test_request.assigned_analyst.email]
+            if test_request.assigned_analyst and test_request.assigned_analyst.is_active
+            else list(fallback)
+        )
+        if breached:
+            # Deciding what a breach means for the result is QA's job, not
+            # the analyst's -- so they are told as well as, never instead of.
+            recipients = list(dict.fromkeys(recipients + staff_emails_for_roles(Role.RoleName.QA_OFFICER)))
+
+        if not recipients:
+            logger.warning(
+                "holding-time sweep: test request #%s is due %s but there is nobody to tell",
+                test_request.id, test_request.due_at,
+            )
+            continue
+
+        queued += len(
+            notify_each(
+                NotificationRecord.Kind.HOLDING_TIME_DUE,
+                recipients,
+                subject=(
+                    f"NexusLIMS: {test_request.sample.unique_sample_code} "
+                    f"{test_request.test_method.name} holding time "
+                    f"{'EXPIRED' if breached else 'expires'} {test_request.due_at:%Y-%m-%d %H:%M}"
+                ),
+                dedupe_key=(
+                    f"holding-time:{test_request.id}:"
+                    f"{test_request.due_at:%Y%m%dT%H%M}:{'breached' if breached else 'warning'}"
+                ),
+                entity=test_request,
+                context={"breached": breached},
+            )
+        )
+
+    logger.info(
+        "holding-time sweep: %d at risk (%d already breached), %d notification(s) queued",
+        len(at_risk), breaches, queued,
+    )
+    return {"at_risk": len(at_risk), "breached": breaches, "queued": queued}
+
+
 @shared_task(name="apps.notifications.tasks.send_open_failure_digest")
 def send_open_failure_digest():
     """

@@ -118,6 +118,35 @@ def _calibration_due(record):
     )
 
 
+def _holding_time_due(record):
+    from apps.testing.models import TestRequest
+
+    test_request = _entity(record, TestRequest)
+    # As it was when the row was queued, not as it is now: a sweep can queue
+    # a warning and the analysis can breach before a worker picks it up, and
+    # the body has to match the subject it was sent under.
+    breached = record.context.get("breached", test_request.is_overdue)
+    basis = test_request.get_due_at_basis_display() if test_request.due_at_basis else "not established"
+
+    return (
+        f"An analysis {'has passed' if breached else 'is approaching'} its holding time.\n\n"
+        f"Sample:      {test_request.sample.unique_sample_code}\n"
+        f"Method:      {test_request.test_method.name} ({test_request.test_method.method_reference})\n"
+        f"Due:         {test_request.due_at:%Y-%m-%d %H:%M} ({basis})\n"
+        f"Status:      {test_request.get_status_display()}\n"
+        f"Analyst:     {test_request.assigned_analyst.display_name if test_request.assigned_analyst else 'Unassigned'}\n\n"
+        + (
+            "A result produced outside its holding time is not supported by the method "
+            "and is nonconforming work: it needs an investigation and, on the report, a "
+            "statement of what was affected (ISO/IEC 17025:2017 7.4.1, 7.10).\n\n"
+            if breached
+            else "Analysing after the holding time expires would make the result unreportable, "
+            "so this needs to be run or re-scheduled before then.\n\n"
+        )
+        + f"{_staff_console_url(f'/test-requests/{test_request.id}')}\n"
+    )
+
+
 def _investigation_opened(record):
     from apps.investigations.models import Investigation
 
@@ -277,6 +306,7 @@ BODY_BUILDERS = {
     Kind.SYSTEM_FAILURE: _system_failure,
     Kind.OPEN_FAILURE_DIGEST: _open_failure_digest,
     Kind.CALIBRATION_DUE: _calibration_due,
+    Kind.HOLDING_TIME_DUE: _holding_time_due,
     Kind.INVESTIGATION_OPENED: _investigation_opened,
     Kind.RESULT_OUT_OF_SPEC: _result_out_of_spec,
     Kind.SAMPLE_PROGRESS: _sample_progress,

@@ -53,10 +53,36 @@ class TestRequest(FSMModelMixin, models.Model):
         RETEST_PENDING = "retest_pending", "Retest Pending"
         COMPLETED = "completed", "Completed"
 
+    class DueBasis(models.TextChoices):
+        """
+        What `due_at` was counted from. Stored rather than derived, so a
+        later correction to `collection_datetime` cannot leave a worksheet
+        showing a deadline computed one way and labelled the other.
+        """
+
+        COLLECTION = "collection", "Time of collection"
+        RECEIPT = "receipt", "Time of receipt (collection time not supplied)"
+
     id = models.BigAutoField(primary_key=True)
     sample = models.ForeignKey("samples.Sample", on_delete=models.CASCADE, related_name="test_requests")
     test_method = models.ForeignKey(TestMethod, on_delete=models.PROTECT, related_name="test_requests")
     status = FSMField(max_length=32, choices=Status.choices, default=Status.ASSIGNED, protected=True)
+    # When this analysis has to be finished by, and from what. Both are
+    # written by apps/testing/holding_times.py and by nothing else -- see
+    # that module for why the clock starts at collection rather than
+    # receipt, and why a retest does not restart it.
+    #
+    # Null is a real answer: an analysis whose method carries no holding
+    # time has no deadline, and a sample that has neither been collected at
+    # a recorded time nor received has no clock to count from yet.
+    due_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Holding-time deadline. Null when the method has no holding time, or the sample has no anchor yet.",
+    )
+    due_at_basis = models.CharField(
+        max_length=16, choices=DueBasis.choices, blank=True, default="",
+        help_text="Which anchor due_at was computed from. Blank when due_at is null.",
+    )
     assigned_analyst = models.ForeignKey(
         "accounts.StaffUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_test_requests",
     )
@@ -69,11 +95,36 @@ class TestRequest(FSMModelMixin, models.Model):
 
     class Meta:
         db_table = "test_request"
-        indexes = [models.Index(fields=["status"])]
+        # (status, due_at) together rather than due_at alone: every read
+        # that cares about a deadline -- the sweep, the queue, the overdue
+        # count -- filters on outstanding statuses first and then orders by
+        # due date, and an index on the pair serves that without a sort.
+        indexes = [models.Index(fields=["status"]), models.Index(fields=["status", "due_at"])]
         ordering = ["-created_at"]
 
     def __str__(self):
         return f"TestRequest #{self.id} ({self.test_method.name})"
+
+    @property
+    def is_overdue(self):
+        """
+        Past its holding time with work still outstanding.
+
+        False for a completed test, however late it was finished: this
+        answers "is something being lost right now", which is the question
+        a queue and a sweep both ask. What happened historically is in the
+        history table, and a test finished outside its holding time is a
+        7.10 matter that an investigation should already be carrying.
+        """
+        from django.utils import timezone
+
+        from apps.testing.holding_times import OUTSTANDING_STATUSES
+
+        return (
+            self.due_at is not None
+            and self.status in OUTSTANDING_STATUSES
+            and self.due_at < timezone.now()
+        )
 
     @transition(field=status, source=Status.ASSIGNED, target=Status.IN_PROGRESS)
     def start(self):

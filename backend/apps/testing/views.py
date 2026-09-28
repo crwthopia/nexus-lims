@@ -3,19 +3,27 @@ TestMethod/TestRequest/TestResult endpoints (Blueprint Section 6: Test
 Requests / Results resource group).
 """
 
+from django.db.models import Case, F, IntegerField, Value, When
+from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import roles_required
 from apps.audit.oss import upload_object
+from apps.common.renderers import PdfRenderer
 from apps.common.params import body_dict, int_param
 from apps.equipment.models import Instrument
+from apps.samples import labels as label_services
+from apps.samples.models import LabelPrintEvent, Sample
+from apps.samples.views import LABEL_PRINT_ROLES, print_labels_response
+from apps.testing import holding_times
 from apps.testing.ingestion import (
     IngestionError,
     assert_certified,
@@ -90,12 +98,19 @@ class TestRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        ?sample= (Sample detail's Test Requests panel) and ?status= --
+        ?sample= (Sample detail's Test Requests panel), ?status= --
         comma-separated, so the Staff Console's Testing Queue can ask for
-        "needs an analyst" (assigned,in_progress) in one request. Same class
+        "needs an analyst" (assigned,in_progress) in one request -- and
+        ?overdue=true for work already past its holding time. Same class
         of gap as SampleViewSet before it grew this override: DRF ignores
         unrecognized query params rather than erroring, so without this a
         client-sent filter would silently do nothing server-side.
+
+        Results come back in _QUEUE_ORDER (below) rather than the model's
+        newest-first default. A testing queue sorted by creation date is a
+        list of what was booked in; sorted by deadline it is a statement of
+        what to do next, which is the only version worth putting in front
+        of an analyst.
         """
         qs = super().get_queryset()
         sample_id = int_param(self.request.query_params.get("sample"), "sample")
@@ -104,7 +119,39 @@ class TestRequestViewSet(viewsets.ModelViewSet):
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status__in=status_param.split(","))
-        return qs
+        if self.request.query_params.get("overdue") == "true":
+            qs = qs.filter(
+                status__in=holding_times.OUTSTANDING_STATUSES, due_at__lt=timezone.now(),
+            )
+        return qs.order_by(*self._QUEUE_ORDER)
+
+    # Priority is a TextChoices, so ordering by the column sorts it
+    # alphabetically -- emergency, routine, rush -- which puts routine work
+    # ahead of a rush. An explicit rank fixes that without making the API
+    # send integers at clients that have to display words.
+    _PRIORITY_RANK = Case(
+        When(sample__priority=Sample.Priority.EMERGENCY, then=Value(0)),
+        When(sample__priority=Sample.Priority.RUSH, then=Value(1)),
+        default=Value(2),
+        output_field=IntegerField(),
+    )
+
+    # What an analyst should pick up next, in the order the two constraints
+    # actually bind:
+    #
+    #   1. Priority, because it is what the customer was sold.
+    #   2. Holding-time deadline, soonest first -- and this is the half that
+    #      makes the queue a control rather than a list. Nulls last, since a
+    #      method with no holding time has nothing being lost by waiting.
+    #   3. Creation order, so the sort is total and the page is stable
+    #      between reads.
+    #
+    # Priority above due_at is a deliberate choice and not an obvious one.
+    # It is right because a breach is not silent -- the hourly sweep
+    # (apps/notifications/tasks.sweep_holding_times) chases anything about
+    # to expire regardless of where it sits here, so the queue does not have
+    # to be the only thing standing between an analysis and its deadline.
+    _QUEUE_ORDER = (_PRIORITY_RANK, F("due_at").asc(nulls_last=True), "created_at")
 
     _ROLE_MAP = {
         "start": (RoleName.ANALYST,),
@@ -116,6 +163,7 @@ class TestRequestViewSet(viewsets.ModelViewSet):
         # them by hand.
         "ingest": (RoleName.ANALYST,),
         "complete": (RoleName.REVIEWER, RoleName.APPROVER, RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR),
+        "label": LABEL_PRINT_ROLES,
     }
 
     def get_permissions(self):
@@ -123,6 +171,32 @@ class TestRequestViewSet(viewsets.ModelViewSet):
         if roles:
             return [IsAuthenticated(), roles_required(*roles)()]
         return [IsAuthenticated()]
+
+    @action(detail=True, methods=["post"], renderer_classes=[PdfRenderer, JSONRenderer])
+    def label(self, request, pk=None):
+        """
+        POST /test-requests/{id}/label/ — a worksheet label for the portion
+        taken to run this analysis.
+
+        ISO/IEC 17025:2017 7.4.2 requires the identification system to
+        accommodate subdivision of an item, and this is it: the barcode
+        still carries the parent sample code, so scanning a tube on the
+        bench lands on the same record scanning the bottle does, while the
+        suffix and the method name tell the analyst which of the three
+        tubes in front of them is which.
+        """
+        test_request = self.get_object()
+        copies = int_param(body_dict(request).get("copies"), "copies") or 1
+        if copies < 1:
+            raise ValidationError({"copies": "Must be at least 1."})
+
+        return print_labels_response(
+            render=lambda: label_services.render_worksheet_labels(test_request, copies=copies),
+            kind=LabelPrintEvent.Kind.WORKSHEET,
+            request=request,
+            filename=f"worksheet-{test_request.sample.unique_sample_code}-{test_request.id}.pdf",
+            test_request=test_request,
+        )
 
     @action(detail=True, methods=["get", "post"])
     def results(self, request, pk=None):

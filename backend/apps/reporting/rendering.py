@@ -22,12 +22,30 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFo
 
 TEMPLATE_DIR = settings.BASE_DIR / "apps" / "reporting" / "templates" / "reports"
 
+# Labels are authored in the same way and for the same reason -- QA revises
+# what a container label says without a code change -- but in their own
+# directory, because they are not reports and must never be selectable as
+# one. A Report.report_type that resolved to a 50mm label template would
+# produce a "certificate of analysis" the size of a sticker.
+LABEL_TEMPLATE_DIR = settings.BASE_DIR / "apps" / "reporting" / "templates" / "labels"
+
 # StrictUndefined so a template referencing a field the context doesn't supply
 # fails loudly at render time. The alternative silently prints an empty string,
 # which on a regulatory document means shipping a COA with a blank result
 # column and no indication anything went wrong.
 _env = Environment(
     loader=FileSystemLoader(str(TEMPLATE_DIR)),
+    autoescape=True,
+    undefined=StrictUndefined,
+)
+
+# A second environment rather than a shared loader over both directories:
+# `render_report_html` and `render_label_html` each resolve names only
+# within their own set, so neither can reach the other's templates even by
+# name collision. Same settings otherwise, and for the same reasons --
+# see the module docstring on autoescape and StrictUndefined.
+_label_env = Environment(
+    loader=FileSystemLoader(str(LABEL_TEMPLATE_DIR)),
     autoescape=True,
     undefined=StrictUndefined,
 )
@@ -41,7 +59,28 @@ def _format_datetime(value):
     return str(value)
 
 
+def _format_label_datetime(value):
+    """
+    A datetime with the year dropped: "29 Sep 10:03".
+
+    Labels only. On 25mm stock the analyse-by line is the tightest thing on
+    the label and the year is the least informative part of it -- the
+    longest holding time in any of the methods here is 28 days, so a
+    printed deadline can never be ambiguous about which year it means. A
+    report says the year; a sticker on a bottle does not have room to.
+    """
+    if value is None:
+        return "—"
+    if isinstance(value, datetime.datetime):
+        return value.strftime("%d %b %H:%M")
+    if isinstance(value, datetime.date):
+        return value.strftime("%d %b")
+    return str(value)
+
+
 _env.filters["nasat_datetime"] = _format_datetime
+_label_env.filters["nasat_datetime"] = _format_datetime
+_label_env.filters["nasat_label_datetime"] = _format_label_datetime
 
 
 class ReportTemplateMissing(Exception):
@@ -66,5 +105,28 @@ def render_report_html(report, context):
     except TemplateNotFound as exc:
         raise ReportTemplateMissing(
             f"No template '{name}' in {TEMPLATE_DIR} for report_type '{report.report_type}'."
+        ) from exc
+    return template.render(**context)
+
+
+class LabelTemplateMissing(Exception):
+    """Raised when a label kind has no corresponding template file."""
+
+
+def render_label_html(template_name, context):
+    """
+    Renders a label template against `context`.
+
+    Refuses a missing template rather than falling back, for the same reason
+    render_report_html does -- but the consequence here is physical. A label
+    is stuck to a container and outlives the screen that produced it, so a
+    quietly substituted layout is a bottle in a fridge carrying the wrong
+    fields with nothing to say so.
+    """
+    try:
+        template = _label_env.get_template(template_name)
+    except TemplateNotFound as exc:
+        raise LabelTemplateMissing(
+            f"No template '{template_name}' in {LABEL_TEMPLATE_DIR}."
         ) from exc
     return template.render(**context)

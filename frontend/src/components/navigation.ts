@@ -42,6 +42,15 @@ const SECTIONS: NavSection[] = [
   {
     label: "Worklist",
     items: [
+      {
+        // First in the section because it is first in the workflow: an
+        // item is received before it is anything else.
+        to: "/receiving",
+        label: "Receiving",
+        icon: "receiving",
+        roles: ["sample_receiver", "analyst", "lab_supervisor", "system_administrator"],
+        keywords: "scan intake labels barcode print condition on receipt delivery",
+      },
       { to: "/samples", label: "Samples", icon: "samples", keywords: "specimens chain of custody" },
       {
         to: "/testing-queue",

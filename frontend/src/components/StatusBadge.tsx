@@ -12,12 +12,15 @@ import { SAMPLE_STATUS_LABELS } from "../api/types";
  * the same thing to a reviewer share a colour, so the worklist reads as four
  * groups (waiting / in progress / accepted / rejected) rather than eleven
  * unrelated hues. `disposed` is muted rather than red -- it's a terminal
- * bookkeeping state, not a failure.
+ * bookkeeping state, not a failure. `receipt_rejected` *is* red: an item the
+ * lab refused at the door is work that will not happen, and a worklist that
+ * showed it as neutral would let it sit unnoticed.
  */
 const STATUS_TOKENS: Record<SampleStatus, { bg: string; fg: string }> = {
   pre_registered: { bg: "--color-status-neutral-bg", fg: "--color-status-neutral" },
   registered: { bg: "--color-status-info-bg", fg: "--color-status-info" },
   received: { bg: "--color-status-info-bg", fg: "--color-status-info" },
+  receipt_rejected: { bg: "--color-danger-bg", fg: "--color-danger" },
   in_prep: { bg: "--color-warning-bg", fg: "--color-warning" },
   in_testing: { bg: "--color-warning-bg", fg: "--color-warning" },
   under_review: { bg: "--color-status-review-bg", fg: "--color-status-review" },

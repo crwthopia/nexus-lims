@@ -33,8 +33,9 @@ was invented outside that grounding.
   per-customer data isolation at the database level.
 - **Celery worker + beat**, running the two automations the Blueprint
   specifies (Section 7.4a retention sweep, Section 3.6/4.3 training
-  capacity check) plus three the system grew of its own — audit partition
-  creation, the open-failure digest, and quotation expiry — with a real
+  capacity check) plus four the system grew of its own — audit partition
+  creation, the open-failure digest, quotation expiry, and the hourly
+  holding-time sweep — with a real
   S3-compatible object storage client (`boto3` against OSS's S3-compatible
   API — see Object storage below).
 - **System failure register** (ISO/IEC 17025:2017 7.11.3(e)): the failures
@@ -44,10 +45,11 @@ was invented outside that grounding.
   register below.
 - **Email notifications** (`apps/notifications/`): one queue-then-send path
   for every message the lab sends — system failures, calibration due dates,
-  investigations, out-of-spec results, report-ready notices — deduplicated so
-  a nightly sweep cannot chase the same instrument every night, and carrying
-  no result or document into a mailbox — see Notifications below.
-- **623-test automated regression suite** (`backend/tests/`, pytest +
+  holding times about to expire, investigations, out-of-spec results,
+  report-ready notices — deduplicated so a nightly sweep cannot chase the
+  same instrument every night, and carrying no result or document into a
+  mailbox — see Notifications below.
+- **717-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -95,7 +97,7 @@ was invented outside that grounding.
 ```
 nexus-lims/
 ├── README.md                  <- this file
-├── nasat_erd_core.png         <- rendered ERD: core sample-to-report workflow (12 entities)
+├── nasat_erd_core.png         <- rendered ERD: core sample-to-report workflow (13 entities)
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
@@ -200,8 +202,9 @@ The full 26-entity schema was split into two diagrams for readability
 rather than one dense chart:
 
 - **`nasat_erd_core.png`** — the core sample-to-report workflow: accounts
-  (StaffUser/CustomerUser), samples, testing, review, reporting, and
-  investigations. This is the operational heart of the LIMS.
+  (StaffUser/CustomerUser), samples and their arrival records, testing,
+  review, reporting, and investigations. This is the operational heart of
+  the LIMS.
 - **`nasat_erd_support.png`** — the supporting subsystems: RBAC roles,
   e-signatures, documents, equipment/calibration, training/enrollment, and
   billing/audit.
@@ -396,6 +399,473 @@ this project deliberately did **not** adopt, for two reasons:
 backward-compatible `FSMField` and a django-fsm-shaped `@transition`
 decorator, so if the licensing question is ever settled the port is small.
 The `FSMModelMixin` gap would still need an answer.
+
+## Sample intake (ISO/IEC 17025:2017 7.4)
+
+Booking an item in is where the standard is most specific and where a LIMS
+is easiest to get quietly wrong. Three things happen at the counter, and
+each is enforced somewhere different.
+
+### Identity is allocated, never supplied
+
+`Sample.unique_sample_code` used to be a writable string. A unique index
+stopped two rows sharing a code; nothing stopped one row *changing* the
+code already printed on a bottle in a fridge — which is the case 7.4.2
+actually legislates for, since it asks for identification "retained for the
+life of the item in the laboratory".
+
+So codes come from `apps/samples/identity.py` and nowhere else, in the
+shape `WE-202609-0001`: service-line prefix, allocation month, counter.
+Short enough for a 50mm label, readable at a bench, sortable by eye. The
+month is part of the key rather than a running total for the life of the
+lab, because a four-digit counter that never resets eventually has to be
+widened — and widening it changes the format of codes already stuck to
+containers.
+
+Allocation takes `SELECT ... FOR UPDATE` on a per-(prefix, month) counter
+row rather than computing `max(code) + 1`. Two clerks booking in the same
+delivery is the ordinary case at a receiving bench, and max+1 under
+concurrency hands both of them the same number.
+
+Immutability is enforced **three** deep, and the outer two are not enough
+on their own:
+
+| Layer | What it stops |
+| --- | --- |
+| `SampleSerializer.read_only_fields` | A client inventing or renumbering a code over the API |
+| `SampleViewSet.perform_create` | The code being anything other than what `identity.py` issued |
+| A `BEFORE UPDATE` trigger (migration 0009) | Everything else — a management command, a data migration, a psql session, a future endpoint written by somebody who never read this |
+
+Same reasoning as the append-only audit ledger below: the ORM is not the
+only thing that issues `UPDATE`s, and `read_only_fields` is invisible to
+all the things that aren't it. The trigger's residual exposure — a
+superuser, or the table's owner dropping it — is the same one that section
+documents, closed by the same deployment change.
+
+### Two clocks on every custody event
+
+`ChainOfCustodyEvent` now carries `occurred_at` alongside `timestamp`, and
+the pair is the point:
+
+- **`timestamp`** is the system's. `auto_now_add`, unwritable, the moment
+  the row was created.
+- **`occurred_at`** is the operator's. When custody actually changed hands.
+
+Before this, a delivery signed for at 17:40 and keyed in at 18:05 the next
+morning was simply unrecordable, because `auto_now_add` cannot be
+overridden — the timeline said the sample arrived when somebody got round
+to typing. ALCOA wants records both contemporaneous *and* accurate, which
+is exactly why neither field alone will do: the timeline now says when
+custody moved, and the audit trail still says when somebody wrote that
+down. `occurred_at` may be backdated and may never be in the future.
+
+The custody list orders by `occurred_at` with `timestamp` breaking ties, so
+a backdated receipt keyed in after a later transfer sorts where it belongs.
+
+`Sample.received_at` is denormalized off the RECEIPT event for the reason
+the field comment gives: 7.8.2.1 l) puts the date of receipt on the report
+wherever it bears on the validity of results, every holding-time
+calculation counts from it, and a report that had to walk a related table
+to find its own receipt date would render differently depending on what was
+prefetched.
+
+### The arrival record, and the one gate it puts on the work
+
+`SampleReceipt` is one row per physical arrival, written by the `receive`
+transition. 7.4.3 is three sentences long and asks for three separate
+things; each is discharged in a different place, deliberately:
+
+**Record deviations from specified conditions.** A condition, a tri-state
+temperature check, five booleans, and free text. Two `CHECK` constraints
+make the omissions unstorable rather than merely discouraged — a
+nonconforming receipt with no written deviation, and a "customer authorised
+it anyway" flag with no recorded consultation behind it, are both rejected
+by Postgres. The API catches both first so they surface as a 400 naming the
+failed check rather than a 500 quoting a constraint.
+
+The temperature check is tri-state on purpose: `null` means no temperature
+requirement applied to this item, which is *not* the same as conforming.
+Defaulting an unmeasured cooler to "conforms" would put an assertion
+nobody made into a regulated record.
+
+**Consult the customer before proceeding, and record the outcome.** This
+one is a workflow gate, not a field. `check_can_begin_work` is called from
+`start_prep`, and a nonconforming item cannot reach an analyst until
+somebody has recorded what the customer said. It is on `start_prep` and
+**not** on `receive`, which is the difference between a control and an
+obstruction: a leaking bottle at 17:40 still has to be booked in, put in a
+fridge and accounted for, and a receiving screen that refused the record
+would leave the lab holding an item with no record of holding it. What
+waits is the testing, never the lab's own paperwork.
+
+Samples already past intake when this shipped have no receipt row, and the
+gate lets them through rather than stranding live work to satisfy a record
+that could not have been made.
+
+**Disclaim affected results.** `report_disclaimer_required` is derived in
+`save()` from the two facts that create the obligation — the item deviated,
+and the customer required testing regardless — and `disclaimer_text` is
+mandatory alongside it, because 7.4.3 wants the report to say *which*
+results may be affected and a disclaimer that names none discharges
+nothing. Stored rather than computed on read so "which reports issued this
+quarter carry a disclaimer" is a filter, and so a change of mind shows up
+in history as a change rather than as a silently different render of the
+same COA.
+
+### Refusing an item is not nonconforming work
+
+`registered | received -> receipt_rejected -> disposed` is a separate
+branch off the intake path, and it deliberately does not route into
+`under_investigation` where the post-review `reject` goes. That path is
+7.10 Nonconforming Work, which asks what the significance of a
+nonconformity is for results already produced. Here nothing was tested, so
+the only remaining question is what happens to the item.
+
+Reachable from `received` as well as `registered`, because those are the
+same physical situation a minute apart — a cooler booked in at the counter
+and opened at the bench — and a clerk who already pressed Receive should
+not have to unwind it to record a leaking bottle. A written reason is
+required and lands on the receipt alongside whatever the counter observed,
+appended rather than replacing it: the original observation is the evidence
+for the decision.
+
+Refusing an item *before* `receive` writes a receipt row anyway. That is
+not a workaround. The lab did take physical delivery, and an intake
+register that silently omitted every refused delivery would be the one
+document an assessor most wants to see.
+
+## Holding times (ISO/IEC 17025:2017 7.4.1)
+
+7.4.1 makes the laboratory responsible for protecting the integrity of an
+item while it holds one, and a holding time is the sharpest form that takes:
+past it, the item no longer supports the measurement, and a result produced
+anyway is nonconforming work (7.10) rather than a late result.
+
+`holding_time` had been stored on both `TestMethod` and `Sample` since the
+schema was written, serialized, and used by nothing — no deadline, no
+ordering, no alarm. It could not have been used, because until
+`Sample.received_at` existed there was no anchor to count from.
+`apps/testing/holding_times.py` is what turns those two durations into a
+control, and three of its decisions are worth stating because each could
+reasonably have gone the other way and the wrong one is silently
+non-compliant rather than broken.
+
+### The clock starts at collection, not receipt
+
+APHA/EPA holding times run from the time the sample was *taken*. A bottle
+that spent twenty hours in a courier's van has spent twenty hours of its
+holding time, and counting from arrival would hand every analysis a
+deadline later than the method actually allows — which is the direction
+that produces a reportable-looking result the method does not support.
+
+`collection_datetime` is nullable, so where it is absent the deadline is
+counted from `received_at` instead and `due_at_basis` records that it was.
+That fallback is optimistic by exactly the transit time, so it is labelled
+rather than hidden: the Testing Queue prints "from receipt" under the date,
+and an analyst can see which of the two they are looking at.
+
+### The most restrictive duration wins
+
+Where both a method holding time and a sample holding time are set they are
+not alternatives. The method's comes from the analytical procedure; the
+sample's from its container and preservation. The item has to satisfy both,
+so `min()` is the only answer that does not quietly permit exceeding one of
+them.
+
+Null stays null. Plenty of analyses — most of the Failure Analysis line —
+have no holding time at all, and a fabricated default would put every one of
+them on a countdown nobody asked for.
+
+### A retest does not restart the clock
+
+`due_at` is anchored to when the sample was taken, and re-queueing a test
+does not un-take it. Nothing recomputes on `requeue_for_retest` or
+`resume_testing`: a retest that can no longer be run inside the holding time
+is a fact the worksheet should show, not one to paper over by moving the
+deadline.
+
+### Three call sites, because the inputs arrive in three orders
+
+A test request can be booked against a sample that has not turned up yet,
+and a sample can be received before anybody has said what to run on it. So
+`apply_to` is called from all three moments that can move the answer:
+
+| When | Where |
+| --- | --- |
+| A test request is created | `TestRequestSerializer.create` |
+| A sample is received | `SampleViewSet.receive` |
+| A collection time or sample holding time is corrected | `SampleSerializer.update` |
+
+The third is the one that is easy to miss, because nothing about a PATCH to
+a sample looks like it touches the testing queue. Without it, a collection
+time corrected the morning after receipt leaves every analysis on that
+sample carrying a deadline counted from the wrong instant, with nothing to
+show it is stale. It is guarded on the two fields that actually feed the
+calculation, so fixing a typo in a sampling point does not write a history
+row per test request.
+
+Existing work was backfilled (`apps/testing/migrations/0004`). Without that
+the control would only ever have covered samples received after the deploy —
+the failure mode where a feature looks finished and protects nothing. The
+rule is deliberately duplicated in that migration rather than imported: a
+migration is a statement about what the schema did on the day it ran, and an
+imported helper is free to change underneath it.
+
+### The queue is an instruction, not a list
+
+`TestRequestViewSet` returns the queue in `_QUEUE_ORDER` — priority, then
+deadline soonest-first with nulls last, then creation order for stability —
+rather than the model's newest-first default. Sorted by creation date it is
+a list of what was booked in; sorted by deadline it is a statement of what
+to do next.
+
+`Sample.priority` (routine/rush/emergency) lives on the sample rather than
+the order, for the same reason `service_line` does: a walk-in has no order,
+and the bench still has to know what is ahead of the queue. It is ranked by
+a `Case` expression rather than by the column, because a `TextChoices` sorts
+alphabetically — emergency, routine, rush — which puts routine work ahead of
+a rush.
+
+Priority above deadline is deliberate, and not obvious. It is right only
+because a breach is not silent: the sweep below chases anything about to
+expire regardless of where it sits in the queue, so the queue does not have
+to be the only thing standing between an analysis and its holding time.
+
+### The sweep
+
+`sweep_holding_times` runs **hourly** — alone among the scheduled tasks here,
+which are otherwise daily. A calibration date or an open failure is still
+there tomorrow; a holding time expires. A daily sweep would find breaches up
+to 23 hours after the item stopped supporting the measurement, by which
+point the message is a post-mortem.
+
+Two messages at most per analysis, and they say different things: a
+**warning** while there is still time to act (`HOLDING_TIME_WARNING_HOURS`,
+default 6 — a working shift's notice), and a **breach** once there is not.
+The dedupe key carries which one it is plus the due date, so the breach
+still lands after the warning was already sent, and a deadline that moves —
+a corrected collection time — is a new notification rather than one
+suppressed by the old row.
+
+It goes to the assigned analyst, falling back to every Analyst and the Lab
+Supervisor where nothing is assigned; an unassigned analysis about to expire
+is more in need of a message, not less. A breach additionally goes to QA,
+because what it opens is a 7.10 evaluation and that is not the analyst's
+call.
+
+**It cannot serve holding times shorter than an hour, and is not meant to.**
+pH, dissolved oxygen and residual chlorine are specified in minutes and are
+field or bench determinations — run on arrival, not scheduled. What this
+covers is the 24-hour to 28-day range, where the failure mode is genuinely
+that something sat in a fridge and nobody looked.
+
+## Label and job-order printing (ISO/IEC 17025:2017 7.4.2)
+
+7.4.2 asks for identification that is unambiguous, survives for as long as
+the item is in the laboratory, accommodates subdivision, and never lets two
+items be confused. The first three are about what a label says; the last is
+about what happens when one is printed twice.
+
+Three documents, one pipeline — the same Jinja2 → WeasyPrint path the
+reports use, with the templates in their own directory so a label kind can
+never be selected as a `report_type` and produce a certificate of analysis
+the size of a sticker.
+
+| Document | Stock | Carries |
+| --- | --- | --- |
+| **Container label** | 50×25mm, one page per container | Code 128 of the sample code, the code in 9pt, `2 of 3`, the analyse-by date, hazards, client reference, preservation |
+| **Worksheet label** | 50×25mm | The **parent** sample code, an aliquot suffix, the method, its deadline, the analyst |
+| **Job order sheet** | A4, one per order | Every sample, its analyses **in run order**, condition on receipt, the 7.4.3 deviation and disclaimer blocks, and signature lines for the courier and the receiving officer |
+
+### What goes in the barcode
+
+The sample code. Not a URL: that bakes a hostname into a physical object
+that outlives the deployment, and a bottle in a retention fridge can be
+scanned in three years. Not the database id: it is meaningless to a person,
+so when the scan fails there is nothing to type. The code is printed in
+plain text beside the bars for exactly that case.
+
+Code 128 rather than QR, because a linear barcode is what bench and handheld
+scanners read without being aimed. QR earns its place on the A4 sheet, where
+there is room and somebody is deliberately pointing a phone at it.
+
+### Two things the bars have to get right
+
+**Vector, not raster.** WeasyPrint draws the SVG into the PDF as path
+operations, so the bars stay crisp at whatever DPI the label printer runs
+at. A rasterised barcode resampled by a print driver blurs at the edges and
+starts failing scans intermittently — the worst failure this feature has,
+because it presents as a hardware problem.
+
+**Never scaled.** Everything `apps/reporting/barcodes.py` guarantees is a
+statement about the bar width in *millimetres*: 0.25mm, the GS1 general-
+distribution minimum for Code 128. CSS that sets only one axis lets the
+renderer scale the other and silently multiplies that number — `height: 8mm`
+on a 10mm-tall barcode is a 20% reduction, which takes 0.25mm to 0.20mm.
+That is still visibly a barcode, still decodes at 600dpi, and **stops
+decoding at the 300dpi a label printer actually prints at**. Both axes are
+pinned to the barcode's own size, inline per image, because in a batch every
+sample has its own code and so its own width.
+
+Where a code is too long for the stock, the bar width shrinks to fit — down
+to a 0.19mm floor, below which printing is **refused**. A barcode running
+off the edge of a label is not a slightly worse barcode: it can scan as a
+different, shorter code, which is a container carrying somebody else's
+identity. "Use wider stock" is a fixable answer; a truncated barcode is a
+silent one.
+
+### The height budget
+
+A 25mm label with 1.5mm margins has 22mm to spend, and the fields on it are
+variable-length. Overflow does not truncate — WeasyPrint pushes the
+remainder onto another page, which a label printer obediently feeds as a
+**blank label**, and which every test that only reads the barcode passes
+straight over. So each variable field is clipped to one line with an
+ellipsis rather than wrapped, dates on labels drop the year (the longest
+holding time in any method here is 28 days, so a printed deadline cannot be
+ambiguous), and `tests/test_labels.py` asserts one page per container.
+
+Two fields were cut to make it fit, and the reasons are worth recording: the
+receipt time, because the analyse-by date above it is derived from it and is
+the operative one; and the storage location, because it describes a shelf
+rather than the bottle, so a container that moves shelves would carry a
+label that lies. Both are on the sample record, one scan away.
+
+### Printing is a POST, and nothing is stored
+
+Synchronous, unlike report generation. A report is worth a job and a poll; a
+label is printed by somebody standing at a bench with a cooler open in front
+of them, and "create a job, poll, download" is not a workflow that survives
+contact with that — they would write the code on masking tape instead, which
+is what this exists to prevent.
+
+No `Report` row, no object-storage key, no retention. A label is regenerated
+from the sample whenever it is wanted, so a stored copy could only ever be a
+stale one — and a stale label is worse than no label, because it is a
+container confidently asserting something the record no longer says. Routing
+labels through `Report` would also have given each one a version, a
+retention policy, and — because generation notifies the customer — an email
+to the client every time somebody reprinted a sticker.
+
+It is a POST despite reading like a download, because printing writes a
+`LabelPrintEvent`, and a GET that writes is one a browser may repeat,
+prefetch, or serve from cache. Each of those is either a phantom reprint in
+the register or a label that never reaches the printer.
+
+### The reprint register
+
+`LabelPrintEvent` is the trace a label otherwise does not leave. It records
+who printed what, when, how many, and — on a reprint — why. `is_reprint` is
+looked up server-side by finding an earlier event of the same kind for the
+same target, never accepted from the client: a caller that could declare its
+own print a first print could produce unexplained duplicate identities
+indefinitely, which is exactly what 7.4.2 is written to stop. A reprint
+without a reason is refused by the API and, underneath it, by a `CHECK`
+constraint.
+
+A worksheet label is a different `kind` from a container label, so printing
+an aliquot label is not a reprint of the bottle's — they identify different
+things and each gets its own first print.
+
+### Batch printing, in the order asked for
+
+`POST /samples/print-labels/` renders a delivery in one pass, because
+printing twelve labels one at a time is how a receiving bench goes back to a
+marker pen. Two details that are not incidental: the labels come out in the
+order the caller listed them (that list is the order the containers are
+lined up in on the bench — the model's newest-first default is how the third
+bottle gets the second one's identity), and a batch naming a sample that
+does not exist prints **nothing** rather than quietly printing eleven of
+twelve, because the twelfth is a sample that goes into a fridge unlabelled.
+
+### What the test suite actually checks
+
+Every property of a label except one is cosmetic. If the bars do not decode
+back to the sample code the feature is worthless, and no assertion about the
+HTML would notice — so `tests/test_labels.py` renders the real PDF,
+rasterises it at **300dpi**, and decodes it the way a handheld scanner
+would. That is heavier than anything else in this suite, and it is the test
+that caught the scaling bug described above. Page counts are asserted for
+the same reason: a blank label between every real one is invisible to a
+decoder.
+
+Deliberately untested: how the layout looks. That is QA's to author — the
+templates carry placeholder banners saying so — and a test asserting on
+millimetres would fail the moment somebody improved the artwork.
+
+### The Receiving bench (`/receiving`)
+
+The screen the three preceding sections were building towards. Scan a
+container, say what arrived in, print its labels — one screen, because
+those were three screens and an API call, and ISO/IEC 17025:2017 7.4.3
+wants the condition of an item recorded *as it is received*. A checklist
+filled in afterwards from memory is the thing that clause is written
+against, so the form sits next to the scan field and the labels come off
+the same action.
+
+**Scanner-shaped, not mouse-shaped.** A handheld scanner is a keyboard that
+types a code and presses Enter. The code field is autofocused, submits on
+Enter, and clears itself between samples, so a clerk works through a
+delivery without touching the mouse. Lookup is by `?code=`, matched whole
+and case-insensitively — never a prefix, because a partial match would let
+a scan of one code resolve to a different sample, which is the confusion
+7.4.2 is about.
+
+The checklist is pre-ticked, which is usually an ALCOA smell. It is
+acceptable here for a specific reason: the API's own default is the same
+affirmation — a bare POST records a conforming receipt attributed to
+whoever sent it — so the form makes an assertion visible that was
+previously implicit, which is strictly better than the endpoint being
+called with no checklist at all. Temperature conformance is a three-state
+select rather than a checkbox, because blank means *no temperature
+requirement applies*, which is not the same as conforming. The deviations
+box appears the moment any check fails, and the submit button stays out
+until it is filled, because the server refuses a nonconforming receipt
+without one and there is no reason to let somebody discover that after
+pressing the button.
+
+A sample looked up after it was received shows what was recorded, and — if
+a deviation is still unresolved — that testing is on hold pending the
+customer consultation. The clerk who wrote the deviation is the person who
+should be chasing that call, so it is said here rather than only on the
+sample screen. Sample detail pre-empts the same gate: **Start Prep** is
+disabled with 7.4.3 in the tooltip while a receipt deviation has no
+recorded outcome, mirroring how the approve button pre-empts segregation of
+duties. The server is still the real guard in both cases.
+
+### Getting a PDF to a printer
+
+Print buttons sit on Receiving, Sample detail (container labels), Order
+detail (job order sheet) and Test request detail (worksheet label). All
+four go through one component, because they share the thing that is easy to
+get wrong: the server refuses an unexplained second print, and showing that
+refusal as a plain error would leave a clerk holding a bottle with no label
+and no way forward. So the refusal is turned into the question it actually
+is — asked once, answered, sent straight back, and recorded in the
+register. The retry is keyed on the message mentioning 7.4.2 rather than on
+the 400, because a barcode too wide for the stock is a 400 too and asking
+"why are you reprinting?" about it would be nonsense.
+
+The PDF reaches the print dialogue through a **hidden iframe**, not
+`window.open`. A pop-up opened from inside an async mutation callback has
+lost its user-gesture association by the time it runs and is blocked by
+default — silently. The mutation would succeed, the print event would be
+recorded, and no dialogue would ever appear; someone at a bench would
+conclude the printer was broken and print again, which is a duplicate
+identity on a second container.
+
+**One bug here was only findable by running the thing.** `apiPostForPdf`
+politely sent `Accept: application/pdf`, and DRF negotiates content
+*before* it dispatches: no declared renderer claimed that media type, so
+the endpoint answered **406 Not Acceptable** to a client asking for exactly
+what it produces. Every jsdom test passed, because a stubbed fetch ignores
+Accept. `apps/common/renderers.PdfRenderer` now declares it. Its
+interesting half is the error path — a refused reprint is raised *after*
+negotiation, so it renders through that renderer, and a non-bytes payload
+is JSON-encoded with the content type corrected on the way out. Without
+that, an error would arrive labelled as a PDF and the console would show
+"something went wrong" instead of the reason, and the reprint prompt would
+never fire.
 
 ## Authentication
 
@@ -1173,6 +1643,17 @@ samples worklist from Postgres, opened a sample, ran `register` then
 `receive` through the actual FSM actions — status and the chain-of-custody
 timeline updated from real API responses each time — and logged out
 correctly.
+
+**Receiving** (`frontend/src/pages/Receiving.tsx`): the scan-driven
+intake bench — look a container up by the code on its label, record what
+arrived in against the ISO/IEC 17025:2017 7.4.3 checklist, and print its
+labels. See the Receiving bench section above for why the form sits beside
+the scan field and why the checklist is pre-ticked. **Verified live** in a
+browser against the real backend: scanned a code, recorded a leaking
+bottle with a courier and a storage location, received it, and confirmed
+the Sample moved to `received` with a `SampleReceipt` carrying the
+deviation, a RECEIPT chain-of-custody event, and a `LabelPrintEvent` for
+three containers.
 
 **Review Queue** (`frontend/src/pages/ReviewQueue.tsx`): a worklist of
 samples in `under_review`, for Reviewer/Approver/QA Officer/Lab Supervisor,
@@ -2582,7 +3063,7 @@ generation and instrument file-parsing are both built and tested
 ## Frontend test suites
 
 Vitest + React Testing Library + jsdom, run by `npm run test` in either
-frontend (`npm run test:watch` while developing). 302 tests: 230 in
+frontend (`npm run test:watch` while developing). 326 tests: 254 in
 `frontend/`, 72 in `customer-portal/`.
 
 **`fetch` is the only thing stubbed.** Not `AuthContext`, not the React

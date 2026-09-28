@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.equipment.models import StandardReagent
+from apps.testing import holding_times
 from apps.testing.ingestion import IngestionError, assert_certified, compute_out_of_spec
 from apps.accounts.models import Role
 from apps.notifications.models import NotificationRecord
@@ -51,21 +52,53 @@ class TestMethodSerializer(serializers.ModelSerializer):
 
 
 class TestRequestSerializer(serializers.ModelSerializer):
-    """sample_code/test_method_name/assigned_analyst_display_name: read-only convenience fields for list/detail UIs (e.g. the Staff Console's Testing Queue) that would otherwise only see bare FK ids."""
+    """
+    sample_code/test_method_name/assigned_analyst_display_name: read-only
+    convenience fields for list/detail UIs (e.g. the Staff Console's Testing
+    Queue) that would otherwise only see bare FK ids.
+
+    `due_at` and `due_at_basis` are read-only because they are computed
+    from the sample's clock and the method's holding time
+    (apps/testing/holding_times.py), never chosen. A settable deadline is
+    an editable holding time, which is the one thing a holding-time control
+    must not be.
+
+    `is_overdue` is sent down rather than left to the client to derive: it
+    depends on the current time *and* on which statuses still count as
+    outstanding, and a UI that guessed the second half would show a
+    completed test as overdue forever.
+    """
 
     sample_code = serializers.CharField(source="sample.unique_sample_code", read_only=True)
+    sample_priority = serializers.CharField(source="sample.priority", read_only=True)
     test_method_name = serializers.CharField(source="test_method.name", read_only=True)
     assigned_analyst_display_name = serializers.CharField(
         source="assigned_analyst.display_name", read_only=True, default=None
     )
+    is_overdue = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = TestRequest
         fields = [
-            "id", "sample", "sample_code", "test_method", "test_method_name", "status",
+            "id", "sample", "sample_code", "sample_priority", "test_method", "test_method_name", "status",
+            "due_at", "due_at_basis", "is_overdue",
             "assigned_analyst", "assigned_analyst_display_name", "assigned_instrument", "created_at",
         ]
-        read_only_fields = ["id", "status", "created_at"]
+        read_only_fields = ["id", "status", "due_at", "due_at_basis", "created_at"]
+
+    def create(self, validated_data):
+        """
+        Book the request in with its deadline already computed, where the
+        sample has a clock to compute one from.
+
+        A request is routinely created against a sample that has not
+        arrived yet, in which case this correctly sets nothing and the
+        receive transition fills it in later
+        (apps/samples/views.SampleViewSet.receive).
+        """
+        test_request = super().create(validated_data)
+        holding_times.apply_to(test_request)
+        return test_request
 
 
 class TestResultSerializer(serializers.ModelSerializer):
