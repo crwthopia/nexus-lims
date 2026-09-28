@@ -14,22 +14,22 @@ Requirement IDs are read from the source itself, so they cannot drift out of syn
 
 | | Count |
 |---|---:|
-| Requirements referenced in source | 22 |
-| With at least one verifying test | 13 |
+| Requirements referenced in source | 23 |
+| With at least one verifying test | 14 |
 | **With no verifying test** | **9** |
 | With no implementation reference | 0 |
-| Test references recorded | 256 |
+| Test references recorded | 278 |
 
 ### Requirements with no verifying test
 
 Each of these is either a requirement genuinely without a test, or a test that verifies it without citing the ID. Both are worth closing: an assessor cannot tell the two apart, and neither can the next person to change the code.
 
 - **FR-C3-01** — implemented at `backend/apps/samples/models.py:265`, `backend/apps/testing/serializers.py:106`
-- **FR-C3-03** — implemented at `backend/apps/testing/views.py:172`
-- **FR-C3-06** — implemented at `backend/apps/testing/views.py:172`
-- **FR-C4-04** — implemented at `backend/apps/samples/models.py:269`, `backend/apps/samples/views.py:521`, `backend/apps/testing/models.py:135`
+- **FR-C3-03** — implemented at `backend/apps/testing/views.py:201`
+- **FR-C3-06** — implemented at `backend/apps/testing/views.py:201`
+- **FR-C4-04** — implemented at `backend/apps/samples/models.py:269`, `backend/apps/samples/views.py:705`, `backend/apps/testing/models.py:135`
 - **FR-C4-05** — implemented at `backend/apps/testing/models.py:185`, `backend/apps/testing/migrations/0001_initial.py:108`
-- **FR-C5-01** — implemented at `backend/apps/samples/models.py:274`, `backend/apps/samples/views.py:551`
+- **FR-C5-01** — implemented at `backend/apps/samples/models.py:274`, `backend/apps/samples/views.py:735`
 - **FR-C5-04** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:2`
 - **FR-D1-02** — implemented at `backend/apps/documents/views.py:4`, `frontend/src/pages/DocumentsList.tsx:37`
 - **FR-S1-01** — implemented at `backend/apps/accounts/models.py:190`, `backend/apps/accounts/services.py:3`
@@ -38,18 +38,19 @@ Each of these is either a requirement genuinely without a test, or a test that v
 
 | Requirement | Cited clauses | Implementation | Verifying tests |
 |---|---|---|---:|
-| **FR-C1-01** | — | `backend/apps/samples/models.py:230`<br>`backend/apps/samples/serializers.py:163`<br>`backend/apps/samples/views.py:259` | 32 |
-| **FR-C1-09** | — | `backend/apps/samples/models.py:234`<br>`backend/apps/samples/views.py:288` | 32 |
-| **FR-C1-13** | ISO/IEC 17025:2017 7.4.3 | `backend/apps/samples/models.py:261`<br>`backend/apps/samples/views.py:491` | 32 |
+| **FR-C1-01** | — | `backend/apps/samples/models.py:230`<br>`backend/apps/samples/serializers.py:163`<br>`backend/apps/samples/views.py:357` | 32 |
+| **FR-C1-02** | ISO/IEC 17025:2017 7.4.2 | `backend/apps/samples/views.py:615` | 22 |
+| **FR-C1-09** | — | `backend/apps/samples/models.py:234`<br>`backend/apps/samples/views.py:386` | 32 |
+| **FR-C1-13** | ISO/IEC 17025:2017 7.4.3 | `backend/apps/samples/models.py:261`<br>`backend/apps/samples/views.py:589` | 32 |
 | **FR-C3-01** | — | `backend/apps/samples/models.py:265`<br>`backend/apps/testing/serializers.py:106` | **none** |
 | **FR-C3-02** | Blueprint Section 7.1 | `backend/apps/accounts/models.py:90`<br>`backend/apps/accounts/permissions.py:2`<br>`backend/apps/testing/ingestion.py:39`<br>`backend/apps/testing/models.py:191`<br>_+4 more_ | 6 |
-| **FR-C3-03** | — | `backend/apps/testing/views.py:172` | **none** |
+| **FR-C3-03** | — | `backend/apps/testing/views.py:201` | **none** |
 | **FR-C3-05** | — | `backend/apps/testing/models.py:131` | 29 |
-| **FR-C3-06** | — | `backend/apps/testing/views.py:172` | **none** |
+| **FR-C3-06** | — | `backend/apps/testing/views.py:201` | **none** |
 | **FR-C3-08** | ISO/IEC 17025:2017 7.10 | `backend/apps/notifications/messages.py:176`<br>`backend/apps/testing/ingestion.py:54`<br>`backend/apps/testing/models.py:185`<br>`backend/apps/testing/serializers.py:20`<br>_+1 more_ | 9 |
-| **FR-C4-04** | — | `backend/apps/samples/models.py:269`<br>`backend/apps/samples/views.py:521`<br>`backend/apps/testing/models.py:135` | **none** |
+| **FR-C4-04** | — | `backend/apps/samples/models.py:269`<br>`backend/apps/samples/views.py:705`<br>`backend/apps/testing/models.py:135` | **none** |
 | **FR-C4-05** | — | `backend/apps/testing/models.py:185`<br>`backend/apps/testing/migrations/0001_initial.py:108` | **none** |
-| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:274`<br>`backend/apps/samples/views.py:551` | **none** |
+| **FR-C5-01** | ASTM E1578-18 6.6.1<br>Blueprint Section 2.1 | `backend/apps/samples/models.py:274`<br>`backend/apps/samples/views.py:735` | **none** |
 | **FR-C5-04** | Blueprint Section 3.1 | `backend/apps/accounts/models.py:190`<br>`backend/apps/accounts/services.py:2` | **none** |
 | **FR-C6-03** | Blueprint Section 8.3 | `backend/apps/reporting/serializers.py:9`<br>`backend/apps/reporting/views.py:32`<br>`frontend/src/pages/SampleDetail.tsx:350` | 21 |
 | **FR-D1-02** | Blueprint Section 5.1<br>Blueprint Section 6 | `backend/apps/documents/views.py:4`<br>`frontend/src/pages/DocumentsList.tsx:37` | **none** |
@@ -97,6 +98,33 @@ Each of these is either a requirement genuinely without a test, or a test that v
 - `backend/tests/test_sample_receipt.py::test_the_disclaimer_flag_follows_the_customers_instruction`
 - `backend/tests/test_sample_receipt.py::test_the_receive_response_carries_the_saved_receipt`
 - `backend/tests/test_sample_receipt.py::test_the_write_time_is_kept_separately_from_the_event_time`
+
+### FR-C1-02
+
+Cited clauses: ISO/IEC 17025:2017 7.4.2
+
+- `backend/tests/test_labels.py::test_a_batch_naming_an_unknown_sample_prints_nothing`
+- `backend/tests/test_labels.py::test_a_batch_prints_every_sample_asked_for`
+- `backend/tests/test_labels.py::test_a_batch_prints_in_the_order_it_was_asked_for`
+- `backend/tests/test_labels.py::test_a_batch_records_one_event_per_sample`
+- `backend/tests/test_labels.py::test_a_code_too_long_for_the_stock_is_refused_not_truncated`
+- `backend/tests/test_labels.py::test_a_label_with_every_field_populated_still_fits_one_page`
+- `backend/tests/test_labels.py::test_a_repeated_id_in_a_batch_prints_once`
+- `backend/tests/test_labels.py::test_a_reprint_with_a_reason_is_recorded_as_one`
+- `backend/tests/test_labels.py::test_a_sample_with_no_holding_time_still_prints`
+- `backend/tests/test_labels.py::test_a_second_print_without_a_reason_is_refused`
+- `backend/tests/test_labels.py::test_a_worksheet_label_carries_the_parent_sample_code`
+- `backend/tests/test_labels.py::test_a_worksheet_label_is_a_different_kind_from_a_container_label`
+- `backend/tests/test_labels.py::test_an_order_with_no_samples_still_prints`
+- `backend/tests/test_labels.py::test_completed_work_does_not_keep_a_container_flagged`
+- `backend/tests/test_labels.py::test_every_container_gets_exactly_one_page`
+- `backend/tests/test_labels.py::test_printing_is_role_gated`
+- `backend/tests/test_labels.py::test_printing_records_who_printed_what`
+- `backend/tests/test_labels.py::test_the_client_cannot_declare_its_own_print_a_first_print`
+- `backend/tests/test_labels.py::test_the_job_order_is_role_gated`
+- `backend/tests/test_labels.py::test_the_job_order_prints_and_is_recorded`
+- `backend/tests/test_labels.py::test_the_label_carries_the_soonest_holding_time_deadline`
+- `backend/tests/test_labels.py::test_the_printed_barcode_decodes_back_to_the_sample_code`
 
 ### FR-C1-09
 

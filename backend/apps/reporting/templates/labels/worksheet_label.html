@@ -1,0 +1,82 @@
+{#
+  Worksheet / aliquot label -- one page per copy.
+
+  PLACEHOLDER LAYOUT; NASAT QA authors the production artwork.
+
+  Distinct from the container label because it identifies a *portion* taken
+  for one analysis, not the item as received. ISO/IEC 17025:2017 7.4.2
+  requires the identification system to accommodate subdivision, which is
+  exactly this: the parent code still scans, and the suffix plus the method
+  name says which of the three tubes on the bench is which.
+
+  The barcode still encodes the parent sample code, not the aliquot id.
+  Everything downstream -- results, review, the report -- hangs off the
+  sample, so scanning an aliquot has to land on the same record a container
+  scan does. The suffix is for the human holding the tube.
+#}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ sample.unique_sample_code }} · {{ test_method.name }}</title>
+    <style>
+      @page { size: {{ page_size }}; margin: {{ page_margin }}; }
+      * { box-sizing: border-box; }
+      body { font-family: "DejaVu Sans", sans-serif; margin: 0; color: #000; }
+      .label { page-break-after: always; }
+      .label:last-child { page-break-after: auto; }
+      /* Both axes pinned to the barcode's own size, never scaled: changing
+         either one changes the bar width in millimetres, which is the only
+         thing scannability is a statement about (apps/reporting/barcodes.py). */
+      .barcode { display: block; width: {{ barcode_width }}; height: {{ barcode_height }}; }
+      .row { display: flex; justify-content: space-between; align-items: baseline; }
+      .code { font-size: 9pt; font-weight: bold; letter-spacing: 0.04em; }
+      .suffix { font-size: 7.5pt; font-weight: bold; }
+      /* Same reasoning as the container label: fixed height, variable
+         fields, so each is clipped to one line with an ellipsis rather
+         than wrapping and pushing the block onto a second page. */
+      .method {
+        font-size: 6.8pt; font-weight: bold; line-height: 1.1; margin-top: 0.2mm;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .due {
+        font-size: 6pt; font-weight: bold; line-height: 1.1;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .due.expired { text-decoration: underline; }
+      .meta { font-size: 5.2pt; line-height: 1.2; }
+      .meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .meta .k { font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    {% for copy in copies %}
+      <div class="label">
+        <img class="barcode" src="{{ barcode_uri }}" alt="{{ sample.unique_sample_code }}" />
+
+        <div class="row">
+          <span class="code">{{ sample.unique_sample_code }}</span>
+          <span class="suffix">{{ aliquot_suffix }}</span>
+        </div>
+
+        <div class="method">{{ test_method.name | truncate(30, True, "…") }}</div>
+
+        <div class="due {% if expired %}expired{% endif %}">
+          {% if due_at %}
+            Analyse by {{ due_at | nasat_label_datetime }}
+          {% else %}
+            No holding time
+          {% endif %}
+        </div>
+
+        <div class="meta">
+          <div><span class="k">Method</span> {{ test_method.method_reference | truncate(30, True, "…") }}</div>
+          <div>
+            <span class="k">Analyst</span> {{ analyst | truncate(24, True, "…") }}
+            {% if instrument %} · <span class="k">Instr</span> {{ instrument | truncate(16, True, "…") }}{% endif %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </body>
+</html>

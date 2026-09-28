@@ -443,6 +443,31 @@ CALIBRATION_DUE_WARNING_DAYS = int(os.environ.get("CALIBRATION_DUE_WARNING_DAYS"
 # when it arrives.
 HOLDING_TIME_WARNING_HOURS = int(os.environ.get("HOLDING_TIME_WARNING_HOURS", "6"))
 
+# Label stock (apps/samples/labels.py). Settings rather than template
+# constants because this is a property of the roll a laboratory bought, not
+# of the document: swapping to 60x30mm stock should be an environment
+# change, not a QA re-authoring of the layout.
+#
+# The default is 50x25mm, the commonest thermal-transfer laboratory size
+# and wide enough to carry a Code 128 of a NexusLIMS sample code at the
+# 0.25mm bar width GS1 treats as the general-distribution minimum. Narrower
+# stock is allowed and the barcode shrinks to fit, down to a floor below
+# which it refuses to print rather than emitting bars a scanner would
+# misread -- see apps/reporting/barcodes.py.
+LABEL_WIDTH_MM = float(os.environ.get("LABEL_WIDTH_MM", "50"))
+LABEL_HEIGHT_MM = float(os.environ.get("LABEL_HEIGHT_MM", "25"))
+LABEL_MARGIN_MM = float(os.environ.get("LABEL_MARGIN_MM", "1.5"))
+# Bar height, not the rendered height: python-barcode adds about 2mm of
+# padding below the bars, so 6 here draws an 8mm-tall image. On 25mm stock
+# that leaves room for the code, the analyse-by date and the metadata
+# beneath it -- at 8mm the block overflowed onto a second page, which a
+# label printer feeds as a blank label.
+#
+# Bar height affects how easily a scanner can be aimed, not whether the
+# code decodes; 6mm is ordinary for laboratory and pharmacy stock this
+# size. Taller stock can afford more.
+LABEL_BARCODE_HEIGHT_MM = float(os.environ.get("LABEL_BARCODE_HEIGHT_MM", "6"))
+
 # How many months beyond the current one the nightly partition task keeps
 # audit_log_entry partitions for. Three is deliberate headroom rather than a
 # guess: a partition that does not exist when a row arrives sends that row to

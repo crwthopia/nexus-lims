@@ -49,7 +49,7 @@ was invented outside that grounding.
   report-ready notices — deduplicated so a nightly sweep cannot chase the
   same instrument every night, and carrying no result or document into a
   mailbox — see Notifications below.
-- **690-test automated regression suite** (`backend/tests/`, pytest +
+- **712-test automated regression suite** (`backend/tests/`, pytest +
   pytest-django + factory_boy), run against the same live Postgres/Redis/
   MinIO stack rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
@@ -534,10 +534,6 @@ not a workaround. The lab did take physical delivery, and an intake
 register that silently omitted every refused delivery would be the one
 document an assessor most wants to see.
 
-### What is not here yet
-
-Label and job-order printing sits on top of this data and is not built.
-
 ## Holding times (ISO/IEC 17025:2017 7.4.1)
 
 7.4.1 makes the laboratory responsible for protecting the integrity of an
@@ -662,6 +658,147 @@ pH, dissolved oxygen and residual chlorine are specified in minutes and are
 field or bench determinations — run on arrival, not scheduled. What this
 covers is the 24-hour to 28-day range, where the failure mode is genuinely
 that something sat in a fridge and nobody looked.
+
+## Label and job-order printing (ISO/IEC 17025:2017 7.4.2)
+
+7.4.2 asks for identification that is unambiguous, survives for as long as
+the item is in the laboratory, accommodates subdivision, and never lets two
+items be confused. The first three are about what a label says; the last is
+about what happens when one is printed twice.
+
+Three documents, one pipeline — the same Jinja2 → WeasyPrint path the
+reports use, with the templates in their own directory so a label kind can
+never be selected as a `report_type` and produce a certificate of analysis
+the size of a sticker.
+
+| Document | Stock | Carries |
+| --- | --- | --- |
+| **Container label** | 50×25mm, one page per container | Code 128 of the sample code, the code in 9pt, `2 of 3`, the analyse-by date, hazards, client reference, preservation |
+| **Worksheet label** | 50×25mm | The **parent** sample code, an aliquot suffix, the method, its deadline, the analyst |
+| **Job order sheet** | A4, one per order | Every sample, its analyses **in run order**, condition on receipt, the 7.4.3 deviation and disclaimer blocks, and signature lines for the courier and the receiving officer |
+
+### What goes in the barcode
+
+The sample code. Not a URL: that bakes a hostname into a physical object
+that outlives the deployment, and a bottle in a retention fridge can be
+scanned in three years. Not the database id: it is meaningless to a person,
+so when the scan fails there is nothing to type. The code is printed in
+plain text beside the bars for exactly that case.
+
+Code 128 rather than QR, because a linear barcode is what bench and handheld
+scanners read without being aimed. QR earns its place on the A4 sheet, where
+there is room and somebody is deliberately pointing a phone at it.
+
+### Two things the bars have to get right
+
+**Vector, not raster.** WeasyPrint draws the SVG into the PDF as path
+operations, so the bars stay crisp at whatever DPI the label printer runs
+at. A rasterised barcode resampled by a print driver blurs at the edges and
+starts failing scans intermittently — the worst failure this feature has,
+because it presents as a hardware problem.
+
+**Never scaled.** Everything `apps/reporting/barcodes.py` guarantees is a
+statement about the bar width in *millimetres*: 0.25mm, the GS1 general-
+distribution minimum for Code 128. CSS that sets only one axis lets the
+renderer scale the other and silently multiplies that number — `height: 8mm`
+on a 10mm-tall barcode is a 20% reduction, which takes 0.25mm to 0.20mm.
+That is still visibly a barcode, still decodes at 600dpi, and **stops
+decoding at the 300dpi a label printer actually prints at**. Both axes are
+pinned to the barcode's own size, inline per image, because in a batch every
+sample has its own code and so its own width.
+
+Where a code is too long for the stock, the bar width shrinks to fit — down
+to a 0.19mm floor, below which printing is **refused**. A barcode running
+off the edge of a label is not a slightly worse barcode: it can scan as a
+different, shorter code, which is a container carrying somebody else's
+identity. "Use wider stock" is a fixable answer; a truncated barcode is a
+silent one.
+
+### The height budget
+
+A 25mm label with 1.5mm margins has 22mm to spend, and the fields on it are
+variable-length. Overflow does not truncate — WeasyPrint pushes the
+remainder onto another page, which a label printer obediently feeds as a
+**blank label**, and which every test that only reads the barcode passes
+straight over. So each variable field is clipped to one line with an
+ellipsis rather than wrapped, dates on labels drop the year (the longest
+holding time in any method here is 28 days, so a printed deadline cannot be
+ambiguous), and `tests/test_labels.py` asserts one page per container.
+
+Two fields were cut to make it fit, and the reasons are worth recording: the
+receipt time, because the analyse-by date above it is derived from it and is
+the operative one; and the storage location, because it describes a shelf
+rather than the bottle, so a container that moves shelves would carry a
+label that lies. Both are on the sample record, one scan away.
+
+### Printing is a POST, and nothing is stored
+
+Synchronous, unlike report generation. A report is worth a job and a poll; a
+label is printed by somebody standing at a bench with a cooler open in front
+of them, and "create a job, poll, download" is not a workflow that survives
+contact with that — they would write the code on masking tape instead, which
+is what this exists to prevent.
+
+No `Report` row, no object-storage key, no retention. A label is regenerated
+from the sample whenever it is wanted, so a stored copy could only ever be a
+stale one — and a stale label is worse than no label, because it is a
+container confidently asserting something the record no longer says. Routing
+labels through `Report` would also have given each one a version, a
+retention policy, and — because generation notifies the customer — an email
+to the client every time somebody reprinted a sticker.
+
+It is a POST despite reading like a download, because printing writes a
+`LabelPrintEvent`, and a GET that writes is one a browser may repeat,
+prefetch, or serve from cache. Each of those is either a phantom reprint in
+the register or a label that never reaches the printer.
+
+### The reprint register
+
+`LabelPrintEvent` is the trace a label otherwise does not leave. It records
+who printed what, when, how many, and — on a reprint — why. `is_reprint` is
+looked up server-side by finding an earlier event of the same kind for the
+same target, never accepted from the client: a caller that could declare its
+own print a first print could produce unexplained duplicate identities
+indefinitely, which is exactly what 7.4.2 is written to stop. A reprint
+without a reason is refused by the API and, underneath it, by a `CHECK`
+constraint.
+
+A worksheet label is a different `kind` from a container label, so printing
+an aliquot label is not a reprint of the bottle's — they identify different
+things and each gets its own first print.
+
+### Batch printing, in the order asked for
+
+`POST /samples/print-labels/` renders a delivery in one pass, because
+printing twelve labels one at a time is how a receiving bench goes back to a
+marker pen. Two details that are not incidental: the labels come out in the
+order the caller listed them (that list is the order the containers are
+lined up in on the bench — the model's newest-first default is how the third
+bottle gets the second one's identity), and a batch naming a sample that
+does not exist prints **nothing** rather than quietly printing eleven of
+twelve, because the twelfth is a sample that goes into a fridge unlabelled.
+
+### What the test suite actually checks
+
+Every property of a label except one is cosmetic. If the bars do not decode
+back to the sample code the feature is worthless, and no assertion about the
+HTML would notice — so `tests/test_labels.py` renders the real PDF,
+rasterises it at **300dpi**, and decodes it the way a handheld scanner
+would. That is heavier than anything else in this suite, and it is the test
+that caught the scaling bug described above. Page counts are asserted for
+the same reason: a blank label between every real one is invisible to a
+decoder.
+
+Deliberately untested: how the layout looks. That is QA's to author — the
+templates carry placeholder banners saying so — and a test asserting on
+millimetres would fail the moment somebody improved the artwork.
+
+### What is not here yet
+
+No print buttons. The endpoints exist and are tested, but nothing in the
+Staff Console calls them: a scan-driven Receiving bench screen with the
+checklist and the print actions on it is the next piece of work, along with
+buttons on Sample detail and Order detail.
 
 ## Authentication
 

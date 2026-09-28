@@ -13,6 +13,7 @@ can't be bypassed by posting a ReviewAction/ApprovalAction directly.
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 from rest_framework import status, viewsets
@@ -34,10 +35,18 @@ from apps.review.models import ApprovalAction, ReviewAction
 from apps.review.serializers import ApprovalActionSerializer, ReviewActionSerializer
 from apps.review.services import SegregationOfDutiesError, check_can_approve
 from apps.notifications.tasks import notify_sample_progress
-from apps.samples import order_services, receipt_services
-from apps.testing import holding_times
+from apps.reporting.barcodes import BarcodeTooWide
+from apps.samples import labels as label_services, order_services, receipt_services
 from apps.samples.identity import UnknownServiceLine, allocate_sample_code
-from apps.samples.models import RECEIPT_CHECKS, ChainOfCustodyEvent, Order, Sample, SampleReceipt
+from apps.testing import holding_times
+from apps.samples.models import (
+    RECEIPT_CHECKS,
+    ChainOfCustodyEvent,
+    LabelPrintEvent,
+    Order,
+    Sample,
+    SampleReceipt,
+)
 from apps.samples.serializers import (
     ChainOfCustodyEventSerializer,
     CustomerOrderDetailSerializer,
@@ -60,6 +69,63 @@ ORDER_ITEM_WRITE_ROLES = (RoleName.SAMPLE_RECEIVER, RoleName.LAB_SUPERVISOR, Rol
 # viewset. Deliberately not the Analyst: the point of ISO/IEC 17025:2017
 # 7.4.3 is that this is settled before the item reaches a bench.
 RECEIPT_RESOLUTION_ROLES = (RoleName.SAMPLE_RECEIVER, RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR)
+# Printing an identity onto a physical container is intake work, and taking
+# an aliquot to the bench is an analyst's -- both put a label on something,
+# so both roles print. The supervisor is here for the same reason they are
+# on every other list in this file: somebody has to be able to act when the
+# person who normally would is not in.
+LABEL_PRINT_ROLES = (
+    RoleName.SAMPLE_RECEIVER, RoleName.ANALYST, RoleName.LAB_SUPERVISOR, RoleName.SYSTEM_ADMINISTRATOR,
+)
+
+
+def pdf_response(pdf_bytes, filename):
+    """
+    A rendered PDF, inline. Public because apps/testing/views.py prints
+    worksheet labels through the same path -- the same reason
+    BILLING_WRITE_ROLES is imported across apps above.
+
+    `inline` rather than `attachment` so the browser's own print dialogue
+    opens on it -- which is how a label reaches a label printer. An
+    attachment saves a file somebody then has to find and open, and the
+    extra step is where the wrong sample's labels get printed.
+    """
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{filename}"'
+    return response
+
+
+def print_labels_response(*, render, kind, request, filename, **target):
+    """
+    Render, record the print, return the PDF -- the shape every print
+    endpoint shares, here and in apps/testing/views.py.
+
+    Deliberately a POST, despite reading like a download: printing writes a
+    LabelPrintEvent, and a GET that writes is a GET a browser may repeat,
+    prefetch, or serve from cache. On this endpoint each of those is either
+    a phantom reprint in the register or a label that never reaches the
+    printer.
+
+    The event is written *after* a successful render and inside the same
+    transaction, so a barcode that will not fit leaves no trace of a print
+    that never happened.
+    """
+    reason = str_param(body_dict(request).get("reason"), "reason")
+
+    try:
+        with transaction.atomic():
+            pdf_bytes, pages = render()
+            label_services.record_print(
+                kind=kind, printed_by=request.user, copies=pages, reason=reason, **target,
+            )
+    except label_services.ReprintNeedsReason as exc:
+        raise ValidationError({"reason": str(exc)}) from exc
+    except BarcodeTooWide as exc:
+        # A 400 rather than a 500: the request is answerable and the message
+        # says what to do about it -- print this one on wider stock.
+        raise ValidationError({"detail": str(exc)}) from exc
+
+    return pdf_response(pdf_bytes, filename)
 
 
 def _run_transition(sample, method_name):
@@ -130,6 +196,36 @@ class OrderViewSet(viewsets.ModelViewSet):
             raise ValidationError({"discount_pct": "Expected a number."}) from exc
 
         return Response(OrderItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+    @action(detail=True, methods=["post"], url_path="job-order")
+    def job_order(self, request, pk=None):
+        """
+        POST /orders/{id}/job-order/ — the A4 sheet that travels with the
+        work: what was ordered per sample, the analyses in the order they
+        have to be run, the condition each item arrived in, and signature
+        blocks for the courier and the receiving officer.
+
+        Printed rather than only displayed because those two signatures are
+        the point. A custody handover happens at a counter between people,
+        and no laboratory asks a courier to authenticate to a web
+        application to acknowledge one.
+        """
+        order = self.get_object()
+
+        if not (request.user.is_superuser or request.user.roles.filter(name__in=LABEL_PRINT_ROLES).exists()):
+            raise PermissionDenied(
+                "Printing a job order requires the Sample Receiver, Analyst, Lab Supervisor, "
+                "or System Administrator role."
+            )
+
+        return print_labels_response(
+            render=lambda: (label_services.render_job_order(order, printed_by=request.user), 1),
+            kind=LabelPrintEvent.Kind.JOB_ORDER,
+            request=request,
+            filename=f"job-order-{order.id}.pdf",
+            order=order,
+        )
 
     @action(detail=True, methods=["post"], url_path="invoice")
     def invoice(self, request, pk=None):
@@ -238,6 +334,8 @@ class SampleViewSet(viewsets.ModelViewSet):
         "reject": (RoleName.APPROVER,),
         "reject_at_receipt": RECEIPT_RESOLUTION_ROLES,
         "receipt_consultation": RECEIPT_RESOLUTION_ROLES,
+        "labels": LABEL_PRINT_ROLES,
+        "print_labels": LABEL_PRINT_ROLES,
         "authorize_retest": (RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR),
         "dispose": (RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR),
         "requeue_for_retest": (RoleName.ANALYST, RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR),
@@ -512,6 +610,92 @@ class SampleViewSet(viewsets.ModelViewSet):
         sample = self.get_object()
         _run_transition(sample, "submit_for_review")
         return Response(SampleSerializer(sample).data)
+
+
+    # --- FR-C1-02 labelling (ISO/IEC 17025:2017 7.4.2) ---
+
+    @action(detail=True, methods=["post"])
+    def labels(self, request, pk=None):
+        """
+        POST /samples/{id}/labels/ — container labels for this sample, as a
+        PDF, one page per container.
+
+        Rendered on the spot rather than queued. A report is worth a job and
+        a poll; a label is printed by somebody standing at a bench with a
+        cooler open in front of them, and "create a job, poll, download" is
+        not a workflow that survives contact with that. Nothing is stored
+        either -- see apps/samples/labels.py, but briefly: a stale label is
+        worse than no label, because it is a container confidently asserting
+        something the record no longer says.
+
+        `copies` overrides the container count for the case the count does
+        not cover -- a bottle whose label came off in the fridge.
+        """
+        sample = self.get_object()
+        copies = int_param(body_dict(request).get("copies"), "copies")
+        if copies is not None and copies < 1:
+            raise ValidationError({"copies": "Must be at least 1."})
+
+        return print_labels_response(
+            render=lambda: label_services.render_container_labels([sample], copies=copies),
+            kind=LabelPrintEvent.Kind.CONTAINER,
+            request=request,
+            filename=f"labels-{sample.unique_sample_code}.pdf",
+            sample=sample,
+        )
+
+    @action(detail=False, methods=["post"], url_path="print-labels")
+    def print_labels(self, request, pk=None):
+        """
+        POST /samples/print-labels/ — container labels for several samples
+        in one PDF.
+
+        The endpoint that makes the feature usable: booking in a delivery of
+        twelve samples and printing them one at a time is how a receiving
+        bench goes back to a marker pen. One render, one print event per
+        sample, so the register still answers "was this container labelled,
+        and by whom" for each one individually.
+        """
+        ids = body_dict(request).get("samples")
+        if not isinstance(ids, list) or not ids:
+            raise ValidationError({"samples": "Required: a non-empty list of sample ids."})
+
+        requested = [int_param(i, "samples") for i in ids]
+        found = {s.id: s for s in self.get_queryset().filter(pk__in=requested)}
+
+        missing = [i for i in requested if i not in found]
+        if missing:
+            # Named rather than silently skipped: a batch that quietly
+            # prints eleven of the twelve labels asked for is a sample that
+            # goes into a fridge unlabelled.
+            raise ValidationError({"samples": f"No such sample(s): {sorted(set(missing))}."})
+
+        # In the order the caller asked for them, not the model's
+        # newest-first default. The list a receiving clerk sends is the
+        # order the containers are lined up in on the bench, and labels
+        # coming off the printer in some other order is how the third
+        # bottle gets the second one's identity. dict.fromkeys drops a
+        # repeated id rather than printing that sample twice.
+        samples = [found[i] for i in dict.fromkeys(requested)]
+
+        reason = str_param(body_dict(request).get("reason"), "reason")
+        try:
+            with transaction.atomic():
+                pdf_bytes, pages = label_services.render_container_labels(samples)
+                for sample in samples:
+                    label_services.record_print(
+                        kind=LabelPrintEvent.Kind.CONTAINER,
+                        printed_by=request.user,
+                        copies=sample.container_count or 1,
+                        reason=reason,
+                        sample=sample,
+                    )
+        except label_services.ReprintNeedsReason as exc:
+            raise ValidationError({"reason": str(exc)}) from exc
+        except BarcodeTooWide as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+
+        return pdf_response(pdf_bytes, f"labels-{len(samples)}-samples.pdf")
 
     # --- FR-C4/C5 review and approval (Blueprint Section 6 endpoint table) ---
 

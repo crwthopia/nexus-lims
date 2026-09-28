@@ -28,6 +28,18 @@ erDiagram
         datetime received_at
         json safety_flags
     }
+    LABEL_PRINT_EVENT {
+        bigint id PK
+        bigint sample_id FK
+        bigint order_id FK
+        bigint test_request_id FK
+        bigint printed_by_id FK
+        string kind
+        int copies
+        bool is_reprint
+        text reason
+        datetime printed_at
+    }
     SAMPLE_RECEIPT {
         bigint id PK
         bigint sample_id FK
@@ -101,6 +113,10 @@ erDiagram
 
     CUSTOMER_USER ||--o{ ORDER : places
     ORDER ||--o{ SAMPLE : contains
+    SAMPLE ||--o{ LABEL_PRINT_EVENT : "labelled by"
+    ORDER ||--o{ LABEL_PRINT_EVENT : "job order for"
+    TEST_REQUEST ||--o{ LABEL_PRINT_EVENT : "worksheet for"
+    STAFF_USER ||--o{ LABEL_PRINT_EVENT : "printed by"
     SAMPLE ||--o| SAMPLE_RECEIPT : "arrived as"
     STAFF_USER ||--o{ SAMPLE_RECEIPT : "accepted by"
     SAMPLE ||--o{ CHAIN_OF_CUSTODY_EVENT : tracks

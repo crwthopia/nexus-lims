@@ -18,7 +18,9 @@ from apps.accounts.permissions import roles_required
 from apps.audit.oss import upload_object
 from apps.common.params import body_dict, int_param
 from apps.equipment.models import Instrument
-from apps.samples.models import Sample
+from apps.samples import labels as label_services
+from apps.samples.models import LabelPrintEvent, Sample
+from apps.samples.views import LABEL_PRINT_ROLES, print_labels_response
 from apps.testing import holding_times
 from apps.testing.ingestion import (
     IngestionError,
@@ -159,6 +161,7 @@ class TestRequestViewSet(viewsets.ModelViewSet):
         # them by hand.
         "ingest": (RoleName.ANALYST,),
         "complete": (RoleName.REVIEWER, RoleName.APPROVER, RoleName.QA_OFFICER, RoleName.LAB_SUPERVISOR),
+        "label": LABEL_PRINT_ROLES,
     }
 
     def get_permissions(self):
@@ -166,6 +169,32 @@ class TestRequestViewSet(viewsets.ModelViewSet):
         if roles:
             return [IsAuthenticated(), roles_required(*roles)()]
         return [IsAuthenticated()]
+
+    @action(detail=True, methods=["post"])
+    def label(self, request, pk=None):
+        """
+        POST /test-requests/{id}/label/ — a worksheet label for the portion
+        taken to run this analysis.
+
+        ISO/IEC 17025:2017 7.4.2 requires the identification system to
+        accommodate subdivision of an item, and this is it: the barcode
+        still carries the parent sample code, so scanning a tube on the
+        bench lands on the same record scanning the bottle does, while the
+        suffix and the method name tell the analyst which of the three
+        tubes in front of them is which.
+        """
+        test_request = self.get_object()
+        copies = int_param(body_dict(request).get("copies"), "copies") or 1
+        if copies < 1:
+            raise ValidationError({"copies": "Must be at least 1."})
+
+        return print_labels_response(
+            render=lambda: label_services.render_worksheet_labels(test_request, copies=copies),
+            kind=LabelPrintEvent.Kind.WORKSHEET,
+            request=request,
+            filename=f"worksheet-{test_request.sample.unique_sample_code}-{test_request.id}.pdf",
+            test_request=test_request,
+        )
 
     @action(detail=True, methods=["get", "post"])
     def results(self, request, pk=None):

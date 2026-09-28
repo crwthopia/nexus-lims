@@ -1,0 +1,189 @@
+{#
+  Job order sheet -- A4, one per order, and the document that travels with
+  the work.
+
+  PLACEHOLDER LAYOUT carrying the draft banner, unlike the two label
+  templates: this one is signed. A courier signs the custody block and a
+  receiving officer signs the condition block, which makes it a record
+  rather than a sticker, and a record that might be mistaken for a
+  QA-approved form has to say that it is not.
+
+  It answers three questions that are otherwise spread across three
+  screens, which is the whole reason it exists:
+
+    1. What was ordered, per sample, and in what order it has to be run.
+       The analyses are sorted by holding-time deadline, soonest first --
+       the same order the testing queue uses (apps/testing/views.py), so
+       the paper on the bench and the screen beside it agree. An analyst
+       working top-down is working in the only sequence that does not lose
+       a short-hold analysis.
+    2. When each item arrived and what condition it was in -- the ISO/IEC
+       17025:2017 7.4.3 record, printed rather than only stored.
+    3. Who handed it over and who took it, with somewhere to sign.
+
+  The disclaimer block only appears where 7.4.3 actually requires one, and
+  it is deliberately loud: the whole point of that clause is that the
+  caveat travels with the work rather than being discovered at reporting.
+#}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Job Order {{ order_reference }}</title>
+    <style>
+      @page {
+        size: A4; margin: 14mm 13mm 16mm;
+        @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 7pt; color: #55606f; }
+      }
+      body { font-family: "DejaVu Sans", sans-serif; font-size: 9pt; color: #14181f; }
+      .draft-banner {
+        border: 1.5pt solid #b54708; background: #fffaeb; color: #b54708;
+        padding: 5pt 7pt; font-size: 7.5pt; font-weight: bold; margin-bottom: 10pt;
+      }
+      header { border-bottom: 1.5pt solid #14181f; padding-bottom: 7pt; margin-bottom: 10pt; }
+      .head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8pt; }
+      /* The QR is a fixed 20mm block in the same row, so the title side
+         needs a ceiling of its own -- without one a long customer name
+         wraps underneath it. */
+      .head-text { flex: 1; min-width: 0; }
+      h1 { font-size: 15pt; margin: 0 0 2pt; }
+      .sub { color: #55606f; font-size: 8pt; }
+      .qr { width: 20mm; height: 20mm; flex: 0 0 auto; }
+      h2 { font-size: 10pt; margin: 13pt 0 4pt; }
+
+      .sample { border: 0.75pt solid #14181f; padding: 7pt; margin-bottom: 9pt; page-break-inside: avoid; }
+      .sample-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4pt; }
+      .sample-code { font-size: 11pt; font-weight: bold; letter-spacing: 0.03em; }
+      .priority { font-size: 8pt; font-weight: bold; text-transform: uppercase; }
+
+      dl { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 2pt 7pt; margin: 0 0 5pt; }
+      dt { color: #55606f; font-size: 7.5pt; }
+      dd { margin: 0; font-size: 8.5pt; }
+
+      table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+      th { text-align: left; border-bottom: 0.75pt solid #14181f; padding: 3pt 2pt; font-size: 7pt; text-transform: uppercase; }
+      td { padding: 3pt 2pt; border-bottom: 0.5pt solid #d7dce3; }
+      td.done { width: 10mm; }
+      .expired { color: #b42318; font-weight: bold; }
+
+      .deviation { border: 1pt solid #b42318; background: #fef3f2; padding: 5pt 7pt; margin-top: 5pt; font-size: 8pt; }
+      .deviation .title { color: #b42318; font-weight: bold; }
+      .disclaimer { border: 1pt solid #b54708; background: #fffaeb; padding: 5pt 7pt; margin-top: 5pt; font-size: 8pt; }
+      .disclaimer .title { color: #b54708; font-weight: bold; }
+
+      .sigs { margin-top: 16pt; display: grid; grid-template-columns: 1fr 1fr; gap: 20pt; page-break-inside: avoid; }
+      .sig { border-top: 0.75pt solid #14181f; padding-top: 3pt; font-size: 8pt; }
+      .sig .line { height: 13mm; }
+      footer { color: #55606f; font-size: 7pt; margin-top: 12pt; }
+    </style>
+  </head>
+  <body>
+    <div class="draft-banner">
+      DRAFT TEMPLATE — pipeline placeholder, pending the QA-authored layout.
+      Not a controlled form.
+    </div>
+
+    <header>
+      <div class="head-row">
+        <div class="head-text">
+          <h1>Job Order {{ order_reference }}</h1>
+          <div class="sub">
+            {{ customer }} &middot; {{ service_line }} &middot;
+            {{ sample_count }} sample{{ "" if sample_count == 1 else "s" }} &middot;
+            printed {{ printed_at | nasat_datetime }} by {{ printed_by }}
+          </div>
+        </div>
+        {% if qr_uri %}<img class="qr" src="{{ qr_uri }}" alt="Open in the Staff Console" />{% endif %}
+      </div>
+    </header>
+
+    <h2>Samples and analyses</h2>
+    {% for entry in samples %}
+      <div class="sample">
+        <div class="sample-head">
+          <span class="sample-code">{{ entry.sample.unique_sample_code }}</span>
+          {% if entry.sample.priority != "routine" %}
+            <span class="priority">{{ entry.priority_label }}</span>
+          {% endif %}
+        </div>
+
+        <dl>
+          <dt>Client reference</dt><dd>{{ entry.sample.client_reference or "—" }}</dd>
+          <dt>Sampling point</dt><dd>{{ entry.sample.sampling_point or "—" }}</dd>
+          <dt>Collected</dt><dd>{{ entry.sample.collection_datetime | nasat_datetime }}</dd>
+          <dt>Received</dt><dd>{{ entry.sample.received_at | nasat_datetime }}</dd>
+          <dt>Containers</dt><dd>{{ entry.sample.container_count }}× {{ entry.sample.container_type or "unspecified" }}</dd>
+          <dt>Preservation</dt><dd>{{ entry.sample.preservation_method or "—" }}</dd>
+        </dl>
+
+        {% if entry.analyses %}
+          <table>
+            <thead>
+              <tr>
+                <th>Analysis</th>
+                <th>Method ref</th>
+                <th>Analyse by</th>
+                <th>Analyst</th>
+                <th class="done">Done</th>
+              </tr>
+            </thead>
+            <tbody>
+              {# Sorted by deadline upstream -- see the module comment. #}
+              {% for analysis in entry.analyses %}
+                <tr>
+                  <td>{{ analysis.name }}</td>
+                  <td>{{ analysis.method_reference }}</td>
+                  <td class="{% if analysis.expired %}expired{% endif %}">
+                    {% if analysis.due_at %}
+                      {{ analysis.due_at | nasat_datetime }}{% if analysis.expired %} — EXPIRED{% endif %}
+                    {% else %}—{% endif %}
+                  </td>
+                  <td>{{ analysis.analyst }}</td>
+                  <td class="done"></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div style="font-size: 8pt; color: #55606f;">No analyses booked against this sample yet.</div>
+        {% endif %}
+
+        {% if entry.deviations %}
+          <div class="deviation">
+            <span class="title">Received with deviations (ISO/IEC 17025:2017 7.4.3):</span>
+            {{ entry.deviations | join("; ") }}.
+            {% if entry.consultation_outcome %}
+              <br />Customer consulted: {{ entry.consultation_outcome }}
+            {% else %}
+              <br /><strong>Customer not yet consulted — testing is on hold.</strong>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {% if entry.disclaimer_text %}
+          <div class="disclaimer">
+            <span class="title">Report disclaimer required:</span> {{ entry.disclaimer_text }}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+
+    <div class="sigs">
+      <div class="sig">
+        <div class="line"></div>
+        Released by (courier / customer representative)<br />
+        Name, signature, date
+      </div>
+      <div class="sig">
+        <div class="line"></div>
+        Received by (laboratory)<br />
+        Name, signature, date
+      </div>
+    </div>
+
+    <footer>
+      Chain of custody continues in NexusLIMS from the receipt event recorded against each
+      sample above. This sheet is a printed copy; the record of custody is the system.
+    </footer>
+  </body>
+</html>

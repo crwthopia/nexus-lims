@@ -613,3 +613,106 @@ class SampleCodeSequence(models.Model):
 
     def __str__(self):
         return f"{self.prefix}-{self.period}: {self.last_number} issued"
+
+
+class LabelPrintEvent(models.Model):
+    """
+    Who printed what, when, and -- on a reprint -- why.
+
+    ISO/IEC 17025:2017 7.4.2 requires a system of identification that
+    ensures items are never confused, physically or in the records. Printing
+    is where that system meets a roll of adhesive stock, and where the two
+    ways it goes wrong both live: a second label for a sample that already
+    has one (so two containers can carry the same identity), and a label
+    re-printed after the sample's details changed (so the container and the
+    record disagree). Neither is visible anywhere else in the system -- a
+    label leaves no trace in the database unless something writes one.
+
+    So this row is the trace. It is deliberately *not* a Report: a label is
+    a transient artefact, regenerated on demand and never retained, and
+    routing it through Report would give it a version, a retention policy,
+    an OSS object and -- because generation notifies the customer -- an
+    email to the client every time somebody reprinted a sticker. The print
+    event is the record; the PDF is disposable.
+
+    `is_reprint` is decided server-side by looking for an earlier event of
+    the same kind, never taken from the client: a caller that could declare
+    its own print a first print could print unexplained duplicates all day.
+    """
+
+    class Kind(models.TextChoices):
+        CONTAINER = "container", "Container label"
+        WORKSHEET = "worksheet", "Worksheet / aliquot label"
+        JOB_ORDER = "job_order", "Job order sheet"
+
+    id = models.BigAutoField(primary_key=True)
+    # Same two-target shape as Report, and for the same reason: a container
+    # label belongs to a sample, a job order sheet to an order, and the
+    # constraint below insists on exactly one of them being present rather
+    # than trusting callers to pick.
+    sample = models.ForeignKey(
+        Sample, null=True, blank=True, on_delete=models.CASCADE, related_name="label_print_events",
+    )
+    order = models.ForeignKey(
+        Order, null=True, blank=True, on_delete=models.CASCADE, related_name="label_print_events",
+    )
+    test_request = models.ForeignKey(
+        "testing.TestRequest", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="label_print_events",
+        help_text="Set for worksheet labels, which identify a portion taken for one analysis.",
+    )
+
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    copies = models.PositiveIntegerField(
+        default=1, help_text="Pages printed. For container labels this is the container count.",
+    )
+    printed_by = models.ForeignKey(
+        "accounts.StaffUser", on_delete=models.PROTECT, related_name="label_print_events",
+        help_text="PROTECTed: the person who put an identity on a container cannot be deleted out from under the record.",
+    )
+    printed_at = models.DateTimeField(auto_now_add=True)
+
+    is_reprint = models.BooleanField(
+        default=False,
+        help_text="Derived: an earlier print of this kind already exists for this target. Never client-supplied.",
+    )
+    reason = models.TextField(
+        blank=True,
+        help_text="Why a label was printed again. Required on a reprint -- enforced by a CHECK constraint.",
+    )
+
+    history = HistoricalRecords(get_user=get_history_user)
+
+    class Meta:
+        db_table = "label_print_event"
+        ordering = ["-printed_at"]
+        indexes = [
+            models.Index(fields=["sample", "kind"]),
+            models.Index(fields=["printed_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(sample__isnull=False)
+                    | models.Q(order__isnull=False)
+                    | models.Q(test_request__isnull=False)
+                ),
+                name="label_print_event_target_required",
+            ),
+            # The control, in the schema. A duplicate identity on a second
+            # container is the failure 7.4.2 exists to prevent, and "why did
+            # this print twice" is the first question anybody asks about it;
+            # an unexplained reprint should not be storable.
+            models.CheckConstraint(
+                check=models.Q(is_reprint=False) | ~models.Q(reason=""),
+                name="label_print_event_reprint_has_reason",
+            ),
+            models.CheckConstraint(
+                check=models.Q(copies__gt=0),
+                name="label_print_event_copies_positive",
+            ),
+        ]
+
+    def __str__(self):
+        target = self.sample or self.order or self.test_request
+        return f"{self.get_kind_display()} x{self.copies} for {target} by {self.printed_by_id}"

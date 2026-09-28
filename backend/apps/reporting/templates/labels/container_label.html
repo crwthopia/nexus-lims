@@ -1,0 +1,141 @@
+{#
+  Container label -- one page per physical container.
+
+  PLACEHOLDER LAYOUT, like the report templates beside it: the production
+  artwork is NASAT QA's to author. Unlike a report this one carries no
+  draft banner, deliberately. A label is 50x25mm and every millimetre is
+  spoken for; a banner would push out the analyse-by date, which is the one
+  field on here that stops a sample being lost.
+
+  What the layout is built around, in priority order, because a label is
+  read at arm's length in a cold room:
+
+    1. The barcode, and the same code in plain text under it. The text is
+       not decoration -- it is what an analyst types when the scan fails,
+       which on a frosted bottle is often.
+    2. The analyse-by date. This is the field that makes the label worth
+       printing: ISO/IEC 17025:2017 7.4.1 asks the laboratory to protect
+       the item's integrity, and on a container that reduces to "deal with
+       this before the date on the side".
+    3. Everything else, small.
+
+  Page size comes from the context, not from here: label stock is a
+  property of the printer a laboratory bought, not of the document.
+#}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ document_title }}</title>
+    <style>
+      @page { size: {{ page_size }}; margin: {{ page_margin }}; }
+      * { box-sizing: border-box; }
+      body { font-family: "DejaVu Sans", sans-serif; margin: 0; color: #000; }
+
+      /*
+        HEIGHT BUDGET. On the default 50x25mm stock with 1.5mm margins there
+        are 22mm to spend, and every block below is sized against that:
+        hazards ~2.4mm, barcode 8mm, code ~3.2mm, analyse-by ~2.4mm, meta
+        ~4.4mm. Overflow does not truncate -- it pushes the remainder onto a
+        second page, which a label printer obediently feeds as a blank
+        label, and which is invisible in every test that only reads the
+        barcode. tests/test_labels.py asserts one page per container for
+        exactly that reason; if you add a line here, check it still passes.
+      */
+
+      .label { page-break-after: always; }
+      .label:last-child { page-break-after: auto; }
+
+      /* Hazards first and in a box: a corrosive or biohazard sample has to
+         announce itself before anybody picks the container up, which means
+         above the fold on a label this small. */
+      .hazards {
+        border: 0.7pt solid #000; padding: 0.2mm 0.6mm; margin-bottom: 0.4mm;
+        font-size: 5pt; line-height: 1.1; font-weight: bold;
+        text-transform: uppercase; letter-spacing: 0.02em;
+      }
+      /* Sizing is inline on each <img>, not here: in a batch every sample
+         has its own code and so its own barcode width, and the stylesheet
+         is outside the loop. Both axes are always pinned -- scaling either
+         changes the bar width in millimetres, which is the only thing
+         scannability is a statement about (apps/reporting/barcodes.py). */
+      .barcode { display: block; }
+      .code {
+        font-size: 9pt; font-weight: bold; letter-spacing: 0.04em;
+        margin-top: 0.1mm; line-height: 1.0;
+      }
+      .row { display: flex; justify-content: space-between; align-items: baseline; }
+      /* Clipped, never wrapped: this is the line the whole label exists
+         for, and a wrap here costs a line and pushes the metadata onto a
+         second page. Compact date format for the same reason -- see
+         nasat_label_datetime in apps/reporting/rendering.py. */
+      .due {
+        font-size: 6pt; font-weight: bold; line-height: 1.1;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .due .basis { font-weight: normal; }
+      /* An expired container is the one case worth spending ink on: it is
+         not "due", it is no longer usable for the analysis it was taken
+         for, and the label should say so to whoever picks it up. */
+      .due.expired { text-decoration: underline; }
+      /* One line per field, each clipped rather than wrapped. A label has
+         a fixed height and its fields do not have a fixed length, so
+         something has to give; an ellipsis says "there was more" where a
+         wrap silently costs a whole line and pushes the block onto another
+         page. Every truncated value is in full on the sample record, one
+         scan away. */
+      .meta { font-size: 5.2pt; line-height: 1.2; }
+      .meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .meta .k { color: #000; font-weight: bold; }
+      .container-of { font-size: 6.4pt; font-weight: bold; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    {# One entry per physical container, flattened across however many
+       samples were asked for -- so a single sample is just a batch of one
+       and there is no second code path for the bulk case. #}
+    {% for label in labels %}
+      <div class="label">
+        {% if label.sample.safety_flags %}
+          <div class="hazards">⚠ {{ label.sample.safety_flags | join(" · ") }}</div>
+        {% endif %}
+
+        <img class="barcode" src="{{ label.barcode_uri }}"
+             style="width: {{ label.barcode_width }}; height: {{ label.barcode_height }}"
+             alt="{{ label.sample.unique_sample_code }}" />
+
+        <div class="row">
+          <span class="code">{{ label.sample.unique_sample_code }}</span>
+          <span class="container-of">{{ label.index }} of {{ label.total }}</span>
+        </div>
+
+        <div class="due {% if label.expired %}expired{% endif %}">
+          {% if label.due_at %}
+            Analyse by {{ label.due_at | nasat_label_datetime }}{% if label.due_basis_note %}
+              <span class="basis">({{ label.due_basis_note }})</span>
+            {% endif %}
+          {% else %}
+            No holding time
+          {% endif %}
+        </div>
+
+        {#
+          Two fields, and the omissions are deliberate. The receipt time is
+          not here because the analyse-by date above is the operative one
+          and is derived from it; the storage location is not here because
+          it describes a shelf, not the bottle, and a container that moves
+          shelves would be carrying a label that lies. Both are on the
+          sample record.
+        #}
+        <div class="meta">
+          {% if label.sample.client_reference %}
+            <div><span class="k">Ref</span> {{ label.sample.client_reference | truncate(34, True, "…") }}</div>
+          {% endif %}
+          {% if label.preservation %}
+            <div><span class="k">Presv</span> {{ label.preservation | truncate(32, True, "…") }}</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </body>
+</html>
