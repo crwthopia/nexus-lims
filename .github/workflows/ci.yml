@@ -121,11 +121,19 @@ jobs:
       - name: Start MinIO
         # Not a service container: the official image needs a "server /data"
         # argument and the services: block has no way to supply a command.
+        #
+        # Pulled from quay.io, not Docker Hub. `minio/minio` on Docker Hub no
+        # longer serves anonymous pulls -- an unauthenticated manifest request
+        # answers 401 for :latest and for pinned release tags alike, so this
+        # step failed with "pull access denied" before pip install or a single
+        # test ran. quay.io is MinIO's own registry and needs no credential,
+        # which keeps CI free of a Docker Hub secret it would otherwise have
+        # to carry and rotate.
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
+            quay.io/minio/minio:latest server /data
           for _ in $(seq 1 30); do
             if curl -fs http://localhost:9000/minio/health/live > /dev/null; then
               echo "MinIO is healthy"
