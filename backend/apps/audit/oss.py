@@ -3,11 +3,21 @@ Object storage client (Blueprint Section 2.2: Alibaba Cloud OSS,
 S3-API-compatible). Uses boto3 rather than Alibaba's own `oss2` SDK
 specifically because OSS's S3-compatible mode lets identical client code
 run against a real Alibaba OSS bucket in production (OSS_ENDPOINT pointed
-at oss-ap-southeast-6.aliyuncs.com) and a locally-run MinIO instance in dev
-(OSS_ENDPOINT pointed at localhost:9000) -- oss2 uses Alibaba's own
+at oss-ap-southeast-6.aliyuncs.com) and a locally-run S3-compatible server
+in dev (OSS_ENDPOINT pointed at localhost:9000) -- oss2 uses Alibaba's own
 request-signing scheme and can't target a non-Alibaba S3-compatible server
 at all, which would make this whole integration untestable without a real
 Alibaba Cloud account.
+
+Bucket creation sends a LocationConstraint for every region but
+us-east-1, which is what the S3 API requires -- us-east-1 is the one region
+that must *not* carry one. MinIO ignores the distinction and accepts a bare
+CreateBucket for any region, which is why ensure_bucket() went years
+without one and worked; moto, which CI now runs against, enforces it and
+answers IllegalLocationConstraintException. Real AWS and (on its
+S3-compatible surface) Alibaba OSS enforce it too, so the leniency was
+hiding a latent bug rather than papering over a difference that did not
+matter.
 
 Storage class: configurable via settings.OSS_ARCHIVE_STORAGE_CLASS rather
 than hardcoded, because S3-compatible backends disagree on which values
@@ -56,7 +66,13 @@ def ensure_bucket(bucket=None):
     try:
         client.head_bucket(Bucket=bucket)
     except ClientError:
-        client.create_bucket(Bucket=bucket)
+        # us-east-1 is the one region S3 refuses a LocationConstraint for;
+        # every other region requires one. MinIO ignores the distinction,
+        # which is why this went unnoticed.
+        kwargs = {"Bucket": bucket}
+        if settings.OSS_REGION and settings.OSS_REGION != "us-east-1":
+            kwargs["CreateBucketConfiguration"] = {"LocationConstraint": settings.OSS_REGION}
+        client.create_bucket(**kwargs)
         logger.info("oss: created bucket %s", bucket)
 
 

@@ -232,11 +232,12 @@ CELERY_BEAT_SCHEDULE = {
 # SDK, specifically *because* OSS documents an S3-compatible API mode: the
 # same client code works against a real Alibaba OSS bucket in production
 # (OSS_ENDPOINT pointed at oss-ap-southeast-6.aliyuncs.com) and against a
-# locally-run MinIO instance for dev/testing (OSS_ENDPOINT pointed at
-# localhost:9000) -- oss2 uses Alibaba's own request-signing scheme and
-# can't be pointed at a non-Alibaba S3-compatible server at all, which would
-# make this whole integration untestable without a real Alibaba Cloud
-# account. OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET have no default: unlike
+# locally-run S3-compatible server for dev/testing -- MinIO, or moto's
+# standalone server as CI uses, with OSS_ENDPOINT pointed at localhost:9000.
+# oss2 uses Alibaba's own request-signing scheme and can't be pointed at a
+# non-Alibaba S3-compatible server at all, which would make this whole
+# integration untestable without a real Alibaba Cloud account.
+# OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET have no default: unlike
 # the other OSS_* settings, a blank credential shouldn't silently resolve to
 # something that looks configured.
 OSS_BUCKET_NAME = os.environ.get("OSS_BUCKET_NAME", "nasat-lims-dev")
