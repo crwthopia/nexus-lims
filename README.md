@@ -50,15 +50,15 @@ was invented outside that grounding.
   same instrument every night, and carrying no result or document into a
   mailbox — see Notifications below.
 - **717-test automated regression suite** (`backend/tests/`, pytest +
-  pytest-django + factory_boy), run against the same live Postgres/Redis/
-  MinIO stack rather than mocked — see Running the test suite below.
+  pytest-django + factory_boy), run against live Postgres and Redis and a
+  real S3 server rather than mocked — see Running the test suite below.
 - **Deployable**: a two-stage Dockerfile, gunicorn, WhiteNoise for admin
   static files, liveness/readiness probes, structured stdout logging, and a
   clean `manage.py check --deploy` — see Deployment below.
 - **CI on every pull request** (`.github/workflows/ci.yml`): the backend
-  suite against live Postgres/Redis/MinIO service containers, plus lint,
-  tests, typecheck, and production build for both frontends — see
-  Continuous integration below.
+  suite against live Postgres and Redis service containers and a real S3
+  server, plus lint, tests, typecheck, and production build for both
+  frontends — see Continuous integration below.
 - **302-test frontend suite** (Vitest + React Testing Library): 230 in the
   Staff Console and 72 in the Customer Portal — every screen on either side
   with a server-side rule behind it — covering role gating, the route
@@ -101,7 +101,7 @@ nexus-lims/
 ├── nasat_erd_core.mmd         <- Mermaid source for the core-workflow ERD
 ├── nasat_erd_support.png      <- rendered ERD: supporting subsystems (16 entities)
 ├── nasat_erd_support.mmd      <- Mermaid source for the supporting-subsystems ERD
-├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis/MinIO), infra terraform validate, traceability-matrix drift check, both frontends' lint/test/typecheck/build
+├── .github/workflows/ci.yml   <- CI: backend pytest (live Postgres/Redis + an S3 server), infra terraform validate, traceability-matrix drift check, both frontends' lint/test/typecheck/build
 ├── docs/                      <- external-facing specs and validation evidence
 │   ├── instrument-export-csv.md <- the instrument export CSV format, written to hand to a vendor
 │   ├── traceability-matrix.md <- generated: requirement -> implementation -> test (ISO/IEC 17025 7.11.2)
@@ -2907,8 +2907,11 @@ rather than silently losing the archival action.
 - **PostgreSQL** (18 used in dev) — the app database.
 - **Redis** — Celery broker/result backend.
 - **An S3-compatible object store** — a local [MinIO](https://min.io/)
-  server works for dev (`minio.exe server <data-dir> --console-address
-  ":9001"`); real Alibaba Cloud OSS in production.
+  server works for dev if you already have the binary (`minio.exe server
+  <data-dir> --console-address ":9001"`), though its *container* image is no
+  longer publicly pullable (see Running the test suite below). `python -m
+  moto.server -p 9000` is what CI uses and needs nothing but the test
+  dependencies. Real Alibaba Cloud OSS in production.
 - **WeasyPrint's system libraries**, for report PDF generation. WeasyPrint
   links against Pango, cairo and GDK-PixBuf *at import time*, so without
   them `import weasyprint` fails and the whole app won't start. On
@@ -2932,8 +2935,9 @@ python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\python
 pip install -r requirements.txt
 
 cp .env.example .env
-# edit .env: real Postgres credentials, OSS_ACCESS_KEY_ID/SECRET pointed at
-# your MinIO (or real OSS) instance, and the AZURE_AD_* values above
+# edit .env: real Postgres credentials, OSS_ENDPOINT and
+# OSS_ACCESS_KEY_ID/SECRET pointed at your S3-compatible server (or real
+# OSS) instance, and the AZURE_AD_* values above
 
 # create the database (adjust for your Postgres setup):
 createdb nasat_lims
@@ -2978,17 +2982,38 @@ python manage.py shell -c "from apps.audit.tasks import run_retention_sweep; pri
 
 `backend/tests/` (pytest + pytest-django + factory_boy) covers the
 behaviors this README calls "verified live" above, run for real against a
-live Postgres/Redis/MinIO stack (a real `test_nasat_lims` database, created
-and migrated by pytest-django) rather than mocked — consistent with how
-everything else in this project has been verified:
+live Postgres/Redis stack and a real S3 server (a real `test_nasat_lims`
+database, created and migrated by pytest-django) rather than mocked —
+consistent with how everything else in this project has been verified.
+
+The S3 half used to be a MinIO container. MinIO withdrew its community
+image from Docker Hub — the API answers *object not found*, while sibling
+repositories in the same namespace still pull anonymously — and quay.io,
+mirror.gcr.io and public.ecr.aws refuse it too. A registry answers an
+anonymous client 401 rather than 404 for a repository that is not there,
+which made this look like an authentication problem for a while; there is
+nothing to authenticate into, so a Docker Hub credential would not have
+helped either. CI now runs [moto](https://github.com/getmoto/moto)'s
+standalone server, which arrives with the test dependencies pip already
+installs and needs no registry at all.
+
+Moving to a stricter server immediately found a latent bug: `ensure_bucket`
+sent a bare `CreateBucket` for a non-`us-east-1` region, which the S3 API
+does not allow and which MinIO had been quietly accepting. See the
+CreateBucket note in `apps/audit/oss.py`.
+
+To run the suite:
 
 ```bash
 cd backend
 pip install -r requirements-dev.txt
+# the S3 server the two object-storage tests need; .env must point
+# OSS_ENDPOINT at it (http://localhost:9000)
+python -m moto.server -p 9000 &
 pytest
 ```
 
-262 tests, organized by behavior rather than by app:
+717 tests, organized by behavior rather than by app:
 
 | File | Covers |
 |---|---|
@@ -3003,10 +3028,10 @@ pytest
 | `test_investigations.py` | FR-E9-01: `close` is the only path to `closed`, sets `closed_at` atomically, can't double-close; `?status=`/`?related_sample=` filters actually filter |
 | `test_training.py` | Discount computation, `CreditNote.apply` validation, the `check_session_capacity` Celery task (called directly, not via a broker), `TrainingSession` FSM actions reachable over the API, `?session=`/`?status=`/`?course=` filters |
 | `test_billing.py` | A confirmed `Payment` auto-transitions its `Invoice` to `paid`; a pending one doesn't; `?status=` filter and `customer_email` resolution (order- and enrollment-based) |
-| `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, the real boto3-against-MinIO archive path, and that an `anonymize` policy writes `retention_anonymize_no_pii` rather than claiming `retention_anonymized` when nothing was stripped |
+| `test_audit_retention.py` | `run_retention_sweep` idempotency via the `AuditLogEntry` ledger, the real boto3-against-S3 archive path, and that an `anonymize` policy writes `retention_anonymize_no_pii` rather than claiming `retention_anonymized` when nothing was stripped |
 | `test_fsm_refresh_from_db.py` | Regression test for the `FSMModelMixin` fix below |
 | `test_staff_me.py` | `GET /auth/staff/me`, `POST /auth/staff/logout`, and the Entra ID login-complete redirect (Staff Console support endpoints) |
-| `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real MinIO round trip |
+| `test_report_generation.py` | FR-C6-03 creation guard; the Celery render task producing a real PDF; per-version object keys so a correction can't overwrite an issued document; failure recorded on the row *and* re-raised; the download endpoint's 409-with-status; a real object-storage round trip |
 | `test_customer_reports.py` | `GET /my/reports/` isolation asserted twice — through the API, and against the raw DB connection with the ORM bypassed (the RLS policy added for this route); `ready`-only filtering; another customer's report 404s rather than 403s; internal fields absent from the payload |
 | `test_instrument_ingestion.py` | Generic CSV parsing (BOM, case/space-insensitive headers, binary and non-numeric rejection, trailing delimiter tolerated, ragged and over-length rows refused as 400s rather than 500s); OOS computed from the method rather than the file; the competency gate applying to uploads as it does to typed entry; re-uploading an identical file refused with 409; the raw file stored even when the parse fails |
 | `test_celery_beat_schedule.py` | That every `CELERY_BEAT_SCHEDULE` entry resolves to a task a worker would actually answer to. Beat dispatches by dotted name, so a rename or typo produces an unroutable message: beat keeps running, the worker logs and moves on, every other test passes, and the retention sweep silently never runs |
@@ -3319,10 +3344,10 @@ dozen lines of progress.
 `.github/workflows/ci.yml` runs on every pull request, and on pushes to
 `main`, in four jobs:
 
-- **Backend** — the full `pytest` suite against live PostgreSQL 18, Redis,
-  and MinIO service containers, the same stack the suite is written for
-  (see Running the test suite above). Nothing is mocked in CI that isn't
-  mocked locally.
+- **Backend** — the full `pytest` suite against live PostgreSQL 18 and
+  Redis service containers plus a real S3 server, the same stack the suite
+  is written for (see Running the test suite above). Nothing is mocked in
+  CI that isn't mocked locally.
 - **Image** — builds `backend/Dockerfile`, runs `manage.py check --deploy
   --fail-level WARNING` inside the built image, then boots **every process
   role** against live Postgres and Redis: `web` (probes `/healthz`, and a
@@ -3371,9 +3396,12 @@ editing it:
   `django_auth_adfs.urls`, which validates `AUTH_ADFS` at startup
   (see Authentication above), so the suite can't even be *collected*
   without them. No test performs a real SSO handshake.
-- **MinIO runs via `docker run`, not as a service container.** The
-  official image needs a `server /data` command and the `services:` block
-  has no way to supply one.
+- **The S3 server is moto, started as a background process**, not a
+  service container and no longer a MinIO container: MinIO withdrew its
+  community image from the public registries, and moto arrives with the
+  test dependencies anyway (see Running the test suite above). The step
+  therefore has to run *after* `pip install`, unlike the container pull it
+  replaced.
 
 The frontend jobs use `npm ci`, never `npm install`: `npm ci` installs
 exactly what the lockfile pins and never rewrites it, so CI can't drift
@@ -3438,9 +3466,10 @@ Genuinely not built yet, not just undocumented:
   deploys: there is still no release pipeline. Outside of CI this runs from
   a local dev environment only. See `infra/README.md`.
 - **Real Alibaba Cloud OSS is unverified.** The object storage
-  integration is proven against local MinIO; whether Alibaba's actual
-  S3-compatible surface accepts the same storage-class values, auth
-  flow, etc. has not been confirmed against a live account.
+  integration is proven against S3-compatible servers only — a local MinIO
+  binary, and moto in CI; whether Alibaba's actual S3-compatible surface
+  accepts the same storage-class values, auth flow, etc. has not been
+  confirmed against a live account.
 - **Real SMTP is unverified.** `EMAIL_BACKEND` is the console backend;
   verification/MFA emails print to the server log rather than sending.
 - **No Odoo ERP integration** — explicitly out of scope for this phase

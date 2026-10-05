@@ -1,7 +1,8 @@
 """
 Retention sweep (Blueprint Section 7.4a, apps/audit/tasks.run_retention_sweep):
 idempotency via the AuditLogEntry ledger, and the real OSS client path for
-archive_to_cold_storage (requires a locally-running MinIO per README -- the
+archive_to_cold_storage (requires a real S3 server on OSS_ENDPOINT per
+README -- the
 target key here is never actually uploaded, which archive_object treats as
 "nothing to do", a legitimate success per apps/audit/oss.py, so this proves
 the real S3-compatible call path runs without mocking boto3).
@@ -67,7 +68,7 @@ def test_retention_sweep_ignores_records_still_within_the_retention_window():
 
 def test_retention_sweep_archives_expired_raw_instrument_file_via_real_oss_client():
     """
-    Exercises the real boto3-against-MinIO path (apps/audit/oss.py
+    Exercises the real boto3-against-S3 path (apps/audit/oss.py
     archive_object): the raw_file_id key has nothing actually uploaded
     behind it, which is documented as a legitimate "nothing to archive"
     success rather than a failure, so this proves the sweep's OSS call

@@ -15,3 +15,13 @@ pytest-cov==5.0.0
 # would -- which means a PDF renderer and a barcode reader, test-only.
 pypdfium2==5.13.0
 zxing-cpp==3.1.1
+
+# The S3 server the OSS-backed tests run against (CI's "Start the S3 test
+# server" step). It replaced a MinIO container when MinIO withdrew its
+# community image from every public registry -- see that step's comment.
+#
+# A pip dependency rather than a container is the point: it arrives with
+# everything else pip installs, so the suite needs no registry and no second
+# external host to stay reachable. [server] pulls in the standalone HTTP
+# front end; the decorator API this project does not use comes anyway.
+moto[server]==5.2.3
