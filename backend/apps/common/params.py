@@ -23,7 +23,10 @@ that wraps the read, not one that replaces the pattern.
 """
 
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
 
@@ -96,3 +99,69 @@ def body_dict(request):
             {"detail": "Expected a JSON object at the top level of the request body."}
         )
     return data
+
+
+def bool_param(value, name, *, default=None):
+    """
+    A boolean from a JSON body, or `default` when absent.
+
+    Strict about the type rather than falling back to Python truthiness,
+    because truthiness gets this exactly backwards on the wire: the string
+    `"false"` -- which is what a form-encoded POST sends, and what a
+    hand-written client sends when it forgets to serialise JSON -- is
+    truthy. On a receipt checklist that turns "the seal was broken" into
+    "the seal was intact", silently, in a regulated record.
+    """
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValidationError({name: "Expected true or false."})
+    return value
+
+
+def decimal_param(value, name):
+    """
+    A Decimal from client input, or None when absent.
+
+    Accepts a JSON number or a numeric string; refuses anything else. Note
+    that a float arriving over JSON is converted via `str()` first, so
+    `0.1` stores as Decimal("0.1") rather than the binary-float expansion
+    Decimal(0.1) would give -- a distinction that matters on a column
+    holding a measured temperature.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str, Decimal)):
+        raise ValidationError({name: f"Expected a number, got {value!r}."})
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        raise ValidationError({name: f"Expected a number, got {value!r}."}) from None
+
+
+def datetime_param(value, name, *, not_future=False):
+    """
+    An aware datetime from an ISO-8601 string, or None when absent.
+
+    Naive input is interpreted in the current timezone rather than
+    rejected: a receiving clerk typing `2026-09-10T17:40` means the wall
+    clock in front of them, and `USE_TZ` is on, so storing that naive would
+    raise a RuntimeWarning and land as UTC -- eight hours out in Manila.
+
+    `not_future` is the guard that matters for anything ALCOA calls
+    *contemporaneous*: an operator-supplied event time may be backdated to
+    when the courier actually arrived, but a receipt cannot be recorded as
+    having happened after now.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValidationError({name: "Expected an ISO-8601 datetime string."})
+    parsed = parse_datetime(value)
+    if parsed is None:
+        raise ValidationError({name: f"Expected an ISO-8601 datetime, got {value!r}."})
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    if not_future and parsed > timezone.now():
+        raise ValidationError({name: "Cannot be in the future."})
+    return parsed

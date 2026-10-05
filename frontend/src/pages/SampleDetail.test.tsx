@@ -18,11 +18,23 @@
  * suite, which is why these live here.
  */
 
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SampleDetail } from "./SampleDetail";
-import { renderWithProviders, role, sampleDetail, sampleDetailRoutes, staffUser, stubApi } from "../test/helpers";
+import {
+  renderWithProviders,
+  role,
+  sampleDetail,
+  sampleDetailRoutes,
+  staffUser,
+  stubApi,
+  stubPrinting,
+} from "../test/helpers";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 import type { SampleDetail as SampleDetailType, StaffMe } from "../api/types";
 
 function renderSample(sample: SampleDetailType, user: StaffMe, extra = {}) {
@@ -232,5 +244,103 @@ describe("running an action", () => {
     expect(
       await screen.findByText("Approver must differ from the Reviewer for this service line."),
     ).toBeInTheDocument();
+  });
+});
+
+
+describe("the 7.4.3 prep gate", () => {
+  const deviatedReceipt = {
+    id: 1,
+    sample: 1,
+    received_at: "2026-09-10T02:00:00Z",
+    received_by: 1,
+    received_by_name: "R. Santos",
+    received_from: "",
+    condition_on_receipt: "leaking" as const,
+    receipt_temperature_c: null,
+    temperature_conforms: null,
+    seal_intact: false,
+    volume_sufficient: true,
+    container_conforms: true,
+    preservation_conforms: true,
+    labelling_legible: true,
+    storage_location: "",
+    deviations: "Bottle leaked in transit.",
+    customer_consulted_at: null,
+    consultation_outcome: "",
+    customer_authorised_despite_deviation: false,
+    report_disclaimer_required: false,
+    disclaimer_text: "",
+    deviation_reasons: ["the seal was not intact"],
+    is_conforming: false,
+    consultation_recorded: false,
+    created_at: "2026-09-10T02:00:00Z",
+    updated_at: "2026-09-10T02:00:00Z",
+  };
+
+  it("holds Start Prep, and says why, while a deviation is unresolved", async () => {
+    stubApi({
+      ...sampleDetailRoutes(sampleDetail({ status: "received", receipt: deviatedReceipt })),
+      // The analyst role, or the role check disables the button first and
+      // this would pass for the wrong reason.
+      "/auth/staff/me": { body: staffUser({ roles: [role("analyst")] }) },
+    });
+    renderWithProviders(<SampleDetail />, { route: "/samples/1", path: "/samples/:id" });
+
+    const button = await screen.findByRole("button", { name: "Start Prep" });
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", expect.stringContaining("7.4.3"));
+  });
+
+  it("releases it once the consultation has been recorded", async () => {
+    stubApi({
+      ...sampleDetailRoutes(
+        sampleDetail({
+          status: "received",
+          receipt: { ...deviatedReceipt, consultation_recorded: true, consultation_outcome: "Proceed." },
+        }),
+      ),
+      "/auth/staff/me": { body: staffUser({ roles: [role("analyst")] }) },
+    });
+    renderWithProviders(<SampleDetail />, { route: "/samples/1", path: "/samples/:id" });
+
+    expect(await screen.findByRole("button", { name: "Start Prep" })).toBeEnabled();
+  });
+
+  it("never gates a conforming receipt", async () => {
+    stubApi({
+      ...sampleDetailRoutes(sampleDetail({ status: "received", receipt: null })),
+      "/auth/staff/me": { body: staffUser({ roles: [role("analyst")] }) },
+    });
+    renderWithProviders(<SampleDetail />, { route: "/samples/1", path: "/samples/:id" });
+
+    expect(await screen.findByRole("button", { name: "Start Prep" })).toBeEnabled();
+  });
+});
+
+describe("container labels (ISO/IEC 17025:2017 7.4.2)", () => {
+  it("offers a label per container and prints them", async () => {
+    const printing = stubPrinting();
+    stubApi(
+      sampleDetailRoutes(sampleDetail({ container_count: 3, status: "received" }), {
+        "POST /samples/1/labels/": { body: "%PDF-1.7 stub", contentType: "application/pdf" },
+      }),
+    );
+    renderWithProviders(<SampleDetail />, { route: "/samples/1", path: "/samples/:id" });
+
+    const button = await screen.findByRole("button", { name: /Print 3 container labels/ });
+    await userEvent.setup().click(button);
+
+    await waitFor(() => expect(printing.printed).toHaveLength(1));
+  });
+
+  it("stays available after the sample has moved on", async () => {
+    // A label comes off in a fridge at every stage, so printing is not
+    // gated on status -- the reprint register is what makes that safe.
+    stubApi(sampleDetailRoutes(sampleDetail({ status: "approved", container_count: 1 })));
+    renderWithProviders(<SampleDetail />, { route: "/samples/1", path: "/samples/:id" });
+
+    expect(await screen.findByRole("button", { name: /Print 1 container label/ })).toBeEnabled();
   });
 });

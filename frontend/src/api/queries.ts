@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPatch, apiPost } from "./client";
+import { apiGet, apiPatch, apiPost, apiPostForPdf } from "./client";
+import { printPdfBlob } from "../printing";
 import type {
   ApprovalAction,
   CalibrationRecord,
@@ -94,6 +95,57 @@ export function useSampleAction(sampleId: number) {
       queryClient.invalidateQueries({ queryKey: ["review-actions", sampleId] });
       queryClient.invalidateQueries({ queryKey: ["approval-actions", sampleId] });
       queryClient.invalidateQueries({ queryKey: ["test-requests", "for-sample", sampleId] });
+    },
+  });
+}
+
+
+/**
+ * Look a sample up by the code on its label -- what the Receiving screen
+ * has after a scan, since a scanner knows the code and not the row id.
+ *
+ * `enabled` on a non-empty code so the query does not fire on every
+ * keystroke of somebody typing one by hand; the screen submits
+ * deliberately. Backed by ?code= (apps/samples/views.py), which matches
+ * the whole code case-insensitively and never a prefix.
+ */
+export function useSampleByCode(code: string) {
+  const trimmed = code.trim();
+
+  return useQuery({
+    queryKey: ["samples", "by-code", trimmed],
+    queryFn: () => apiGet<Paginated<Sample>>(`/samples/?code=${encodeURIComponent(trimmed)}`),
+    enabled: trimmed.length > 0,
+    select: (page) => page.results[0] ?? null,
+  });
+}
+
+/**
+ * Print, then hand the PDF to the browser's print dialogue.
+ *
+ * One hook for every print endpoint, because they share a shape (POST, a
+ * PDF back, an optional `reason` for a reprint) and a consequence: each
+ * writes a LabelPrintEvent, so the sample's own queries are invalidated to
+ * keep a print register on screen honest.
+ *
+ * The printing happens in `mutationFn` rather than `onSuccess` so that a
+ * caller awaiting the mutation knows the dialogue has been opened, and so
+ * a component unmounting mid-flight cannot skip it.
+ */
+export function usePrintLabels(sampleId?: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ path, body }: { path: string; body?: Record<string, unknown> }) => {
+      const blob = await apiPostForPdf(path, body);
+      printPdfBlob(blob);
+      return blob;
+    },
+    onSuccess: () => {
+      if (sampleId !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["samples", sampleId] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["label-print-events"] });
     },
   });
 }

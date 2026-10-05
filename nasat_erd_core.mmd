@@ -24,14 +24,41 @@ erDiagram
         string service_line
         string unique_sample_code
         string status
+        string priority
+        datetime received_at
         json safety_flags
+    }
+    LABEL_PRINT_EVENT {
+        bigint id PK
+        bigint sample_id FK
+        bigint order_id FK
+        bigint test_request_id FK
+        bigint printed_by_id FK
+        string kind
+        int copies
+        bool is_reprint
+        text reason
+        datetime printed_at
+    }
+    SAMPLE_RECEIPT {
+        bigint id PK
+        bigint sample_id FK
+        bigint received_by_id FK
+        datetime received_at
+        string condition_on_receipt
+        decimal receipt_temperature_c
+        text deviations
+        datetime customer_consulted_at
+        bool report_disclaimer_required
     }
     CHAIN_OF_CUSTODY_EVENT {
         bigint id PK
         bigint sample_id FK
         bigint from_holder_id FK
         bigint to_holder_id FK
-        datetime transferred_at
+        string event_type
+        datetime occurred_at
+        datetime timestamp
     }
     TEST_METHOD {
         bigint id PK
@@ -45,6 +72,8 @@ erDiagram
         bigint assigned_analyst_id FK
         bigint assigned_instrument_id FK
         string status
+        datetime due_at
+        string due_at_basis
     }
     TEST_RESULT {
         bigint id PK
@@ -84,6 +113,12 @@ erDiagram
 
     CUSTOMER_USER ||--o{ ORDER : places
     ORDER ||--o{ SAMPLE : contains
+    SAMPLE ||--o{ LABEL_PRINT_EVENT : "labelled by"
+    ORDER ||--o{ LABEL_PRINT_EVENT : "job order for"
+    TEST_REQUEST ||--o{ LABEL_PRINT_EVENT : "worksheet for"
+    STAFF_USER ||--o{ LABEL_PRINT_EVENT : "printed by"
+    SAMPLE ||--o| SAMPLE_RECEIPT : "arrived as"
+    STAFF_USER ||--o{ SAMPLE_RECEIPT : "accepted by"
     SAMPLE ||--o{ CHAIN_OF_CUSTODY_EVENT : tracks
     STAFF_USER ||--o{ CHAIN_OF_CUSTODY_EVENT : "holds custody"
 

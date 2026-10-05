@@ -14,6 +14,7 @@
 
 export type IconName =
   | "dashboard"
+  | "receiving"
   | "samples"
   | "documents"
   | "investigations"
@@ -38,6 +39,9 @@ const PATHS: Record<IconName, string[]> = {
   // Four panes: the overview.
   dashboard: ["M4 4h7v7H4z", "M13 4h7v4.5h-7z", "M13 10.5h7V20h-7z", "M4 13h7v7H4z"],
   // Flask: the sample worklist.
+  // An open box with an arrow going in: taking delivery, as distinct
+  // from `samples`, which is the flask the item becomes once it is in.
+  receiving: ["M3 12h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M12 3v6", "m9 6.5 3 2.5 3-2.5"],
   samples: ["M9 3h6", "M10 3v6.5L4.7 18a2 2 0 0 0 1.7 3h11.2a2 2 0 0 0 1.7-3L14 9.5V3", "M7.2 14h9.6"],
   documents: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h4"],
   // Magnifier over a fault line: an investigation into something that went wrong.

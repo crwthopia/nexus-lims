@@ -22,6 +22,7 @@ import {
 } from "../api/types";
 import type { TestResult, TestResultDataType } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
+import { PrintButton } from "../components/PrintButton";
 
 const ACTION_LABELS: Record<string, string> = {
   start: "Start Testing",
@@ -263,6 +264,19 @@ export function TestRequestDetail() {
               {describeApiError(requestAction.error)}
             </p>
           )}
+
+          {/* The label for the portion taken to run this analysis. It
+              carries the parent sample's barcode, so a tube on the bench
+              scans onto the same record the bottle does (ISO/IEC
+              17025:2017 7.4.2 on subdivision). */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+            <PrintButton
+              path={`/test-requests/${testRequest.id}/label/`}
+              sampleId={testRequest.sample}
+              label="Print worksheet label"
+              reprintPrompt="A worksheet label for this analysis has already been printed. Why is it being printed again?"
+            />
+          </div>
         </div>
       </div>
     </div>

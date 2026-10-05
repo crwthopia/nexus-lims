@@ -34,6 +34,7 @@ class NotificationRecord(models.Model):
         SYSTEM_FAILURE = "system_failure", "System failure recorded"
         OPEN_FAILURE_DIGEST = "open_failure_digest", "Daily open system-failure digest"
         CALIBRATION_DUE = "calibration_due", "Instrument calibration due"
+        HOLDING_TIME_DUE = "holding_time_due", "Analysis approaching or past its holding time"
         INVESTIGATION_OPENED = "investigation_opened", "Investigation opened"
         RESULT_OUT_OF_SPEC = "result_out_of_spec", "Test result flagged out of specification"
         # Customer-facing
