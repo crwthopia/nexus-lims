@@ -5,3 +5,13 @@ pytest==8.3.3
 pytest-django==4.9.0
 factory-boy==3.3.1
 pytest-cov==5.0.0
+
+# The S3 server the OSS-backed tests run against (CI's "Start the S3 test
+# server" step). It replaced a MinIO container when MinIO withdrew its
+# community image from every public registry -- see that step's comment.
+#
+# A pip dependency rather than a container is the point: it arrives with
+# everything else pip installs, so the suite needs no registry and no second
+# external host to stay reachable. [server] pulls in the standalone HTTP
+# front end; the decorator API this project does not use comes anyway.
+moto[server]==5.2.3

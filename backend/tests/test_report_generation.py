@@ -7,8 +7,8 @@ The rendering half is tested against real WeasyPrint -- these assertions read
 bytes out of an actual PDF -- because the failure this pipeline is most
 likely to have is a template rendering to something malformed, and a mocked
 renderer cannot see that. Object storage is stubbed in the tests that aren't
-about object storage; the one that *is* talks to MinIO, in the same style as
-test_audit_retention.py.
+about object storage; the one that *is* talks to a real S3 server, in the
+same style as test_audit_retention.py.
 """
 
 import pytest
@@ -355,8 +355,8 @@ def test_status_filter_actually_filters(login_as_staff):
 
 
 # --- Real object storage ---------------------------------------------------
-# Needs a running MinIO, like test_audit_retention.py's OSS test. CI provides
-# one; see the README's Running the test suite section.
+# Needs a real S3 server on OSS_ENDPOINT, like test_audit_retention.py's OSS
+# test. CI starts moto's; see the README's Running the test suite section.
 
 def test_the_pipeline_uploads_a_retrievable_pdf():
     from django.conf import settings

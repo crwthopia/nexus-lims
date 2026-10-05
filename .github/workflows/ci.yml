@@ -79,12 +79,18 @@ jobs:
 
       OSS_BUCKET_NAME: nasat-lims-dev
       OSS_ENDPOINT: http://localhost:9000
-      OSS_ACCESS_KEY_ID: minioadmin
-      OSS_ACCESS_KEY_SECRET: minioadmin
+      # Any non-empty pair: the S3 test server below accepts whatever
+      # boto3 signs with. Not a credential for anything real.
+      OSS_ACCESS_KEY_ID: ci-test-access-key
+      OSS_ACCESS_KEY_SECRET: ci-test-secret-key
       OSS_REGION: ap-southeast-6
-      # MinIO's default config only recognises STANDARD/REDUCED_REDUNDANCY;
-      # the AWS-standard enum values raise InvalidStorageClass. See the
-      # module docstring in apps/audit/oss.py.
+      # Originally chosen because MinIO's default config only recognises
+      # STANDARD/REDUCED_REDUNDANCY and rejects the AWS-standard enum values.
+      # Kept now that CI runs against moto: the archive path only needs a
+      # value the backend accepts, and holding it still keeps this job
+      # testing the same thing it tested before. Which value real Alibaba
+      # OSS wants is still unconfirmed -- see the module docstring in
+      # apps/audit/oss.py.
       OSS_ARCHIVE_STORAGE_CLASS: REDUCED_REDUNDANCY
 
     steps:
@@ -118,33 +124,6 @@ jobs:
           psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
             -c "CREATE DATABASE nasat_lims OWNER nasat_lims;"
 
-      - name: Start MinIO
-        # Not a service container: the official image needs a "server /data"
-        # argument and the services: block has no way to supply a command.
-        #
-        # Pulled from quay.io, not Docker Hub. `minio/minio` on Docker Hub no
-        # longer serves anonymous pulls -- an unauthenticated manifest request
-        # answers 401 for :latest and for pinned release tags alike, so this
-        # step failed with "pull access denied" before pip install or a single
-        # test ran. quay.io is MinIO's own registry and needs no credential,
-        # which keeps CI free of a Docker Hub secret it would otherwise have
-        # to carry and rotate.
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
-          for _ in $(seq 1 30); do
-            if curl -fs http://localhost:9000/minio/health/live > /dev/null; then
-              echo "MinIO is healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "MinIO did not become healthy in time"
-          docker logs minio
-          exit 1
-
       - name: Install WeasyPrint's system libraries
         # WeasyPrint links against Pango/cairo/GDK-PixBuf at import time, so
         # without these the backend job fails on `import weasyprint` rather
@@ -161,6 +140,40 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+
+      - name: Start the S3 test server
+        # moto's standalone server, not a MinIO container.
+        #
+        # MinIO withdrew its community image: `minio/minio` is gone from
+        # Docker Hub (the API answers "object not found", while sibling
+        # repositories in the same namespace still pull anonymously), and
+        # quay.io, mirror.gcr.io and public.ecr.aws all refuse it too. A
+        # registry answers an anonymous client 401 rather than 404 for a
+        # repository that is not there, which is why this first looked like
+        # an auth problem -- but there is nothing to authenticate *into*, so
+        # a Docker Hub credential would not have helped.
+        #
+        # moto arrives with the test dependencies pip has just installed, so
+        # this needs no registry, no credential, and no second external host
+        # that has to stay reachable for CI to run. It is also stricter than
+        # MinIO about the S3 API, which is a feature here: see the
+        # CreateBucket note in apps/audit/oss.py.
+        #
+        # Must run after "Install dependencies" for that reason -- it used to
+        # sit above, when it was a container pull with nothing to install.
+        working-directory: backend
+        run: |
+          python -m moto.server -p 9000 -H 0.0.0.0 > "$RUNNER_TEMP/moto.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fs http://localhost:9000/ > /dev/null; then
+              echo "S3 test server is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "S3 test server did not come up in time"
+          cat "$RUNNER_TEMP/moto.log"
+          exit 1
 
       - name: Create the object storage bucket
         # test_audit_retention.py's real-OSS test calls head_object against
